@@ -116,9 +116,11 @@ public static class PathParser
             var parsed = ReleaseNameParser.Parse(Path.GetFileNameWithoutExtension(sibling));
             if (parsed.LeadingNumber is not null && parsed.Year is null && parsed.Episodes.Count == 0
                 && SameTitle(Tidy(parsed.Title), fileTitle))
-                matching++;
+            {
+                if (++matching >= MinSiblingsForBareNumber) return true;
+            }
         }
-        return matching >= MinSiblingsForBareNumber;
+        return false;
     }
 
     private static FolderInfo ParseFolder(string folder)

@@ -226,6 +226,95 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task BareNumberEpisodes_ArrivingOneByOne_BecomeEpisodes()
+    {
+        _lib.File(@"Show\Show_01_[1080p].mp4");
+        await Scan();
+        Assert.Equal(MediaKind.Movie, Row(@"Show\Show_01_[1080p].mp4").Parsed.Kind);
+
+        _lib.File(@"Show\Show_02_[1080p].mp4");
+        _lib.File(@"Show\Show_03_[1080p].mp4");
+        var result = await Scan();
+
+        Assert.Equal(2, result.Added);
+        Assert.Equal(1, result.Changed);
+        var rows = _files.ByFolder(_folder.Id);
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, r =>
+        {
+            Assert.Equal(MediaKind.Episode, r.Parsed.Kind);
+            Assert.Equal("pending", r.Status);
+        });
+        Assert.Equal([1, 2, 3], rows.Select(r => r.Parsed.Episodes.Single()).Order());
+    }
+
+    [Fact]
+    public async Task DirectoryChange_KeepsStatusOfUserMatchedFile()
+    {
+        _lib.File(@"Show\Show_01_[1080p].mp4");
+        await Scan();
+        var id = Row(@"Show\Show_01_[1080p].mp4").Id;
+        using (var conn = _db.Open())
+        {
+            conn.Execute("INSERT INTO titles(kind, name) VALUES ('movie', 'Show')");
+            conn.Execute(
+                "INSERT INTO file_titles(file_id, title_id, confidence, source) VALUES (@id, last_insert_rowid(), 1, 'user')",
+                new { id });
+        }
+        SetStatus(id, "matched");
+
+        _lib.File(@"Show\Show_02_[1080p].mp4");
+        _lib.File(@"Show\Show_03_[1080p].mp4");
+        await Scan();
+
+        var matched = Row(@"Show\Show_01_[1080p].mp4");
+        Assert.Equal(MediaKind.Episode, matched.Parsed.Kind);
+        Assert.Equal("matched", matched.Status);
+        Assert.Equal("pending", Row(@"Show\Show_02_[1080p].mp4").Status);
+    }
+
+    [Fact]
+    public async Task UnchangedDirectories_AreNotReparsed()
+    {
+        _lib.File(@"Show\Show_01_[1080p].mp4");
+        _lib.File(@"Other\Heat.1995.mkv");
+        await Scan();
+        var id = Row(@"Other\Heat.1995.mkv").Id;
+        SetStatus(id, "matched");
+        using (var conn = _db.Open())
+            conn.Execute("UPDATE files SET parsed_json = '{}' WHERE id = @id", new { id });
+
+        _lib.File(@"Show\Show_02_[1080p].mp4");
+        await Scan();
+
+        // Only the Show directory changed; the stale row in Other is left alone.
+        using var check = _db.Open();
+        Assert.Equal("{}", check.ExecuteScalar<string>("SELECT parsed_json FROM files WHERE id = @id", new { id }));
+        Assert.Equal("matched", Row(@"Other\Heat.1995.mkv").Status);
+    }
+
+    [Fact]
+    public async Task LargeBareNumberDirectory_ScansQuickly()
+    {
+        for (var i = 1; i <= 300; i++) _lib.File($@"Show\Show_{i:000}_.mp4");
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var first = await Scan();
+        var firstTime = watch.Elapsed;
+        Assert.Equal(300, first.Added);
+
+        _lib.File(@"Show\Show_301_.mp4");
+        watch.Restart();
+        var second = await Scan();
+        var secondTime = watch.Elapsed;
+
+        Assert.Equal(1, second.Added);
+        Assert.True(firstTime < TimeSpan.FromSeconds(2), $"first scan took {firstTime}");
+        Assert.True(secondTime < TimeSpan.FromSeconds(2), $"rescan took {secondTime}");
+        Assert.All(_files.ByFolder(_folder.Id), r => Assert.Equal(MediaKind.Episode, r.Parsed.Kind));
+    }
+
+    [Fact]
     public async Task NonMediaFolder_IsReportedIgnored()
     {
         _lib.File(@"Movies\Heat.1995.mkv");

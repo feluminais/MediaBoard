@@ -110,6 +110,8 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
         var seen = new HashSet<long>();
         var added = new List<DiskFile>();
         var locked = new List<string>();
+        var lockedNew = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fresh = new HashSet<long>();
         int changed = 0, restored = 0, markedMissing = 0, relinked = 0;
 
         using var transaction = connection.BeginTransaction();
@@ -130,6 +132,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
                 {
                     var json = ParsedJson.Serialize(Parse(file));
                     UpdateFile(connection, transaction, row.Id, file.RelPath, file, json, json != row.ParsedJson);
+                    fresh.Add(row.Id);
                     changed++;
                     if (row.Missing != 0) restored++;
                 }
@@ -142,6 +145,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
             else if (IsLocked(file.FullPath))
             {
                 locked.Add(file.RelPath);
+                lockedNew.Add(file.RelPath);
             }
             else
             {
@@ -197,8 +201,66 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
             markedMissing++;
         }
 
+        changed += ReparseChangedDirectories(connection, transaction, videos, rows, byPath, lockedNew, fresh, Parse);
+
         transaction.Commit();
         return new ScanResult(inserts.Count, changed, markedMissing, restored, relinked, listing.IgnoredFolders, locked, false);
+    }
+
+    /// <summary>
+    /// A file's parse depends on its siblings (a bare "Show_01" is an episode only when other numbered files sit
+    /// next to it), so when a directory's set of video names changed, every file in it is parsed again.
+    /// Only a different result is written. The status goes back to pending unless the user matched the file.
+    /// </summary>
+    private static int ReparseChangedDirectories(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        List<DiskFile> videos,
+        List<ExistingRow> rows,
+        Dictionary<string, ExistingRow> byPath,
+        HashSet<string> lockedNew,
+        HashSet<long> fresh,
+        Func<DiskFile, ParsedMedia> parse)
+    {
+        static string Dir(string relPath) => Path.GetDirectoryName(relPath) ?? "";
+        static Dictionary<string, HashSet<string>> NameSets(IEnumerable<(string RelPath, string Name)> files) =>
+            files.GroupBy(f => Dir(f.RelPath), StringComparer.OrdinalIgnoreCase).ToDictionary(
+                g => g.Key,
+                g => g.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+
+        var stored = NameSets(rows.Where(r => r.Missing == 0).Select(r => (r.RelPath, Path.GetFileName(r.RelPath))));
+        var current = NameSets(videos.Where(v => !lockedNew.Contains(v.RelPath)).Select(v => (v.RelPath, v.Name)));
+        var changedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (dir, names) in current)
+            if (!stored.TryGetValue(dir, out var before) || !before.SetEquals(names)) changedDirs.Add(dir);
+        foreach (var dir in stored.Keys)
+            if (!current.ContainsKey(dir)) changedDirs.Add(dir);
+        if (changedDirs.Count == 0) return 0;
+
+        var updated = 0;
+        foreach (var file in videos)
+        {
+            if (!changedDirs.Contains(Dir(file.RelPath))
+                || !byPath.TryGetValue(file.RelPath, out var row)
+                || fresh.Contains(row.Id))
+                continue;
+
+            var json = ParsedJson.Serialize(parse(file));
+            if (json == row.ParsedJson) continue;
+
+            Execute(connection, transaction,
+                """
+                UPDATE files SET parsed_json = @json,
+                                 status = CASE WHEN EXISTS (SELECT 1 FROM file_titles WHERE file_id = files.id AND source = 'user')
+                                               THEN status ELSE 'pending' END
+                WHERE id = @id
+                """,
+                new { id = row.Id, json });
+            updated++;
+        }
+
+        return updated;
     }
 
     private ScanResult MarkUnavailable(LibraryFolder folder, string name)
