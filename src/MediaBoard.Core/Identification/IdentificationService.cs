@@ -1,4 +1,5 @@
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Probing;
@@ -25,6 +26,7 @@ public sealed class IdentificationService : IDisposable
     private readonly FileStore _files;
     private readonly TitleStore _titles;
     private readonly MatchStore _matches;
+    private readonly OverrideStore _overrides;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _gate = new();
     private Task? _current;
@@ -51,6 +53,7 @@ public sealed class IdentificationService : IDisposable
         _files = new FileStore(db);
         _titles = new TitleStore(db, timeProvider);
         _matches = new MatchStore(db);
+        _overrides = new OverrideStore(db);
     }
 
     /// <summary>Starts reacting to the connection coming back and to a new TMDB key, and runs once.</summary>
@@ -200,6 +203,7 @@ public sealed class IdentificationService : IDisposable
 
     private async Task ProcessAsync(CancellationToken ct)
     {
+        var renamed = RenamedPlaceholders();
         // Disabled folders wait until they are switched on again; removed ones have no files left.
         var work = _files.ByStatusInEnabledFolders("pending").Concat(_files.ByStatusInEnabledFolders("offline"))
             .Where(f => !f.Missing)
@@ -255,7 +259,39 @@ public sealed class IdentificationService : IDisposable
         }
         finally
         {
+            CarryPlaceholderNames(renamed);
             _titles.DeleteOrphanProvisional();
+        }
+    }
+
+    private sealed record RenamedPlaceholder(int TitleId, ProvisionalKey Key, string Name);
+
+    /// <summary>Placeholder titles the user renamed, with the key that says which files are theirs.</summary>
+    private List<RenamedPlaceholder> RenamedPlaceholders()
+    {
+        var names = _overrides.All()
+            .Where(o => o is { Kind: TargetKind.Title, DisplayName: not null })
+            .ToDictionary(o => o.TargetId, o => o.DisplayName!);
+        if (names.Count == 0) return [];
+
+        return _titles.ProvisionalLinks()
+            .Where(l => names.ContainsKey(l.TitleId))
+            .DistinctBy(l => l.TitleId)
+            .Select(l => new RenamedPlaceholder(l.TitleId, KeyOf(l.Parsed.Title, l.Kind, l.FolderId, l.Parsed.ShowFolder), names[l.TitleId]))
+            .ToList();
+    }
+
+    /// <summary>A renamed placeholder whose files all went to one title hands that title its name (when it has none).</summary>
+    private void CarryPlaceholderNames(List<RenamedPlaceholder> renamed)
+    {
+        foreach (var placeholder in renamed)
+        {
+            var files = _files.ByFolder(placeholder.Key.FolderId)
+                .Where(f => KeyOf(f.Parsed.Title, f.Parsed.Kind == MediaKind.Episode ? TitleKind.Show : TitleKind.Movie,
+                    f.FolderId, f.Parsed.ShowFolder) == placeholder.Key)
+                .Select(f => f.Id)
+                .ToList();
+            _matches.CarryPlaceholderName(placeholder.TitleId, files, placeholder.Name);
         }
     }
 

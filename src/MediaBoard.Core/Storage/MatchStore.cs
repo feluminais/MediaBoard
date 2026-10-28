@@ -87,8 +87,10 @@ public sealed class MatchStore(LibraryDatabase db)
         SqliteConnection connection, SqliteTransaction transaction, int fileId, int titleId,
         IReadOnlyList<int> episodeIds, double confidence, string source)
     {
+        var placeholder = PlaceholderOf(connection, transaction, fileId);
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, titleId, confidence, source);
+        KeepHidden(connection, transaction, fileId, placeholder, titleId);
         foreach (var episodeId in episodeIds)
         {
             connection.Execute(
@@ -116,8 +118,10 @@ public sealed class MatchStore(LibraryDatabase db)
         using var transaction = BeginWrite(connection);
         if (UserDecided(connection, transaction, fileId)) return false;
 
+        var placeholder = PlaceholderOf(connection, transaction, fileId);
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, provisionalTitleId, 0, "auto");
+        KeepHidden(connection, transaction, fileId, placeholder, provisionalTitleId);
         SetStatus(connection, transaction, fileId, "offline");
         transaction.Commit();
         return true;
@@ -135,8 +139,10 @@ public sealed class MatchStore(LibraryDatabase db)
         using var transaction = BeginWrite(connection);
         if (UserDecided(connection, transaction, fileId)) return false;
 
+        var placeholder = PlaceholderOf(connection, transaction, fileId);
         ClearLinks(connection, transaction, fileId);
         if (provisionalTitleId is { } titleId) LinkTitle(connection, transaction, fileId, titleId, 0, "auto");
+        KeepHidden(connection, transaction, fileId, placeholder, provisionalTitleId);
 
         var rank = 0;
         foreach (var c in candidates.Take(ReviewCandidateCount))
@@ -206,6 +212,68 @@ public sealed class MatchStore(LibraryDatabase db)
             "SELECT title_id FROM match_rules WHERE folder_id = @folderId AND show_folder = @showFolder AND parsed_title = @key",
             new { folderId, showFolder, key = TitleNormalizer.Normalize(parsedTitle) });
         return id is { } found ? (int)found : null;
+    }
+
+    /// <summary>
+    /// A placeholder (provisional) title the user renamed is about to go: its files were identified. When every one
+    /// of <paramref name="formerFileIds"/> now belongs to one title, and that title has no name of the user's own,
+    /// it takes <paramref name="name"/>. Nothing happens while a file is still on the placeholder.
+    /// </summary>
+    /// <returns>True when the name was carried over.</returns>
+    public bool CarryPlaceholderName(int placeholderId, IReadOnlyCollection<int> formerFileIds, string name)
+    {
+        if (formerFileIds.Count == 0) return false;
+
+        using var connection = db.Open();
+        using var transaction = BeginWrite(connection);
+        if (connection.ExecuteScalar<int>(
+                "SELECT EXISTS (SELECT 1 FROM file_titles WHERE title_id = @placeholderId)", new { placeholderId }, transaction) != 0)
+        {
+            return false;
+        }
+
+        var titles = connection.Query<long>(
+            "SELECT DISTINCT title_id FROM file_titles WHERE file_id IN @formerFileIds", new { formerFileIds }, transaction).ToList();
+        var linked = connection.ExecuteScalar<int>(
+            "SELECT COUNT(DISTINCT file_id) FROM file_titles WHERE file_id IN @formerFileIds", new { formerFileIds }, transaction);
+        if (titles.Count != 1 || linked != formerFileIds.Count) return false;
+
+        var carried = connection.Execute(
+            """
+            INSERT INTO overrides(target_kind, target_id, display_name, hidden) VALUES ('title', @titleId, @name, 0)
+            ON CONFLICT(target_kind, target_id) DO UPDATE SET display_name = excluded.display_name
+            WHERE overrides.display_name IS NULL
+            """,
+            new { titleId = titles[0], name }, transaction);
+        transaction.Commit();
+        return carried > 0;
+    }
+
+    /// <summary>The provisional title the file is on, if any.</summary>
+    private static int? PlaceholderOf(SqliteConnection connection, SqliteTransaction transaction, int fileId) =>
+        (int?)connection.ExecuteScalar<long?>(
+            """
+            SELECT ft.title_id FROM file_titles ft JOIN titles t ON t.id = ft.title_id
+            WHERE ft.file_id = @fileId AND t.tmdb_id IS NULL LIMIT 1
+            """,
+            new { fileId }, transaction);
+
+    /// <summary>
+    /// A file leaving a placeholder title the user hid stays hidden: the title-level flag becomes a file-level one,
+    /// since the placeholder goes once it has no files.
+    /// </summary>
+    private static void KeepHidden(SqliteConnection connection, SqliteTransaction transaction, int fileId, int? placeholder, int? newTitleId)
+    {
+        if (placeholder is not { } from || from == newTitleId) return;
+
+        connection.Execute(
+            """
+            INSERT INTO overrides(target_kind, target_id, display_name, hidden)
+            SELECT 'file', @fileId, NULL, 1
+            WHERE EXISTS (SELECT 1 FROM overrides WHERE target_kind = 'title' AND target_id = @from AND hidden = 1)
+            ON CONFLICT(target_kind, target_id) DO UPDATE SET hidden = 1
+            """,
+            new { fileId, from }, transaction);
     }
 
     /// <summary>Takes the write lock up front, so the user-link check and the write cannot be split by another writer.</summary>

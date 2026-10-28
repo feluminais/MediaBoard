@@ -1,6 +1,7 @@
 using Dapper;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Identification;
+using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Probing;
 using MediaBoard.Core.Scanning;
@@ -606,6 +607,69 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.DoesNotContain(_hub.Recent, e => e.Level == ActivityLevel.Error);
         Assert.Empty(_files.ByStatus("pending"));
         Assert.Equal(0, _hub.Current.PendingIdentification);
+    }
+
+    [Fact]
+    public async Task HiddenPlaceholder_ItsFileStaysHidden_OnceIdentified()
+    {
+        _lib.File("Heat (1995).mkv");
+        var placeholder = await OfflineFirst();
+        new OverrideStore(_db).SetHidden(TargetKind.Title, placeholder, true);
+        var id = Row("Heat (1995).mkv").Id;
+
+        await OnlineAgain(KnowHeat);
+
+        Assert.Equal("matched", Row("Heat (1995).mkv").Status);
+        Assert.Contains(new OverrideStore(_db).All(), o => o is { Kind: TargetKind.File, Hidden: true } && o.TargetId == id);
+    }
+
+    [Fact]
+    public async Task RenamedPlaceholder_NameMovesToTheTitle_WhenAllItsFilesGoThere()
+    {
+        _lib.File(@"Lost\Season 1\Lost.S01E01.mkv");
+        _lib.File(@"Lost\Season 1\Lost.S01E02.mkv");
+        var placeholder = await OfflineFirst();
+        new OverrideStore(_db).SetDisplayName(TargetKind.Title, placeholder, "Lost (my copy)");
+
+        await OnlineAgain(KnowLost);
+
+        var show = _titles.ByTmdb(4607, TitleKind.Show)!;
+        Assert.Contains(new OverrideStore(_db).All(),
+            o => o.Kind == TargetKind.Title && o.TargetId == show.Id && o.DisplayName == "Lost (my copy)");
+    }
+
+    [Fact]
+    public async Task RenamedPlaceholder_DoesNotReplaceTheTitlesOwnName()
+    {
+        _lib.File("Heat (1995).mkv");
+        var placeholder = await OfflineFirst();
+        new OverrideStore(_db).SetDisplayName(TargetKind.Title, placeholder, "Heat (placeholder)");
+        var heat = _titles.Upsert(FilmTitle(949, "Heat", 1995));
+        new OverrideStore(_db).SetDisplayName(TargetKind.Title, heat, "Heat (director's cut)");
+
+        await OnlineAgain(KnowHeat);
+
+        Assert.Contains(new OverrideStore(_db).All(),
+            o => o.Kind == TargetKind.Title && o.TargetId == heat && o.DisplayName == "Heat (director's cut)");
+    }
+
+    /// <summary>Scans and runs offline, so every file lands on one placeholder title; returns its id.</summary>
+    private async Task<int> OfflineFirst()
+    {
+        _tmdb.Unavailable = UnavailableReason.Offline;
+        _networkUp = false;
+        await Scan();
+        await Run();
+        return Scalar<int>("SELECT id FROM titles WHERE tmdb_id IS NULL");
+    }
+
+    private async Task OnlineAgain(Action know)
+    {
+        _tmdb.Unavailable = null;
+        _networkUp = true;
+        know();
+        await WaitUntil(() => _connectivity.IsOnline);
+        await Run();
     }
 
     /// <summary>Runs <c>onFirstCall</c> once, before the first search reaches the inner provider.</summary>
