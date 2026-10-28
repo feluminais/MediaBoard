@@ -1,6 +1,8 @@
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Playback;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Storage;
 using MediaBoard.Desktop.ViewModels;
@@ -80,6 +82,35 @@ public sealed class AppHostTests : IDisposable
             Assert.Contains(database, home.LibraryError);
             Assert.True(vm.IsActivityOpen);
             Assert.Contains(vm.Activity.Entries, e => e.IsError && e.Message.StartsWith("Can't open the library", StringComparison.Ordinal));
+            return Task.CompletedTask;
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task SavedProgress_TellsThePagesToReload()
+    {
+        var database = Path.Combine(_dir, "library.db");
+        var library = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(library, "Movie.2020.mkv"), new byte[4096]);
+        var services = Build(database);
+        services.GetRequiredService<FolderStore>().Add(library);
+
+        await RunAsync(services, _ =>
+        {
+            int fileId;
+            using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT id FROM files";
+                fileId = Convert.ToInt32(command.ExecuteScalar());
+            }
+
+            var changes = 0;
+            services.GetRequiredService<ILibrary>().Changed += () => Interlocked.Increment(ref changes);
+
+            services.GetRequiredService<IPlaybackService>().AnswerFinished(fileId, finished: true);
+
+            Assert.Equal(1, changes);
             return Task.CompletedTask;
         });
     }

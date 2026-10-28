@@ -48,6 +48,7 @@ public sealed class AppHost(
         settings.Changed += OnSettingsChanged;
         hub.StatusChanged += OnStatusChanged;
         watcher.Rescanned += OnRescanned;
+        playback.ProgressChanged += OnProgressChanged;
 
         _startup = Task.Run(() => RunStartupAsync(_stopping.Token));
     }
@@ -62,6 +63,7 @@ public sealed class AppHost(
         settings.Changed -= OnSettingsChanged;
         hub.StatusChanged -= OnStatusChanged;
         watcher.Rescanned -= OnRescanned;
+        playback.ProgressChanged -= OnProgressChanged;
         await _stopping.CancelAsync().ConfigureAwait(false);
 
         await playback.DisposeAsync().ConfigureAwait(false);
@@ -204,6 +206,9 @@ public sealed class AppHost(
         library.NotifyChanged();
         _ = IdentifyAsync(_stopping.Token);
     }
+
+    // Watched marks and resume positions show on Home, the grids and the title page.
+    private void OnProgressChanged() => library.NotifyChanged();
 
     // Identification also runs by itself when the connection returns or the key changes. When its queue empties,
     // the library has new matches to show.

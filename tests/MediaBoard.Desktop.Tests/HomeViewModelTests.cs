@@ -44,6 +44,20 @@ public class HomeViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task Home_ReloadsWhenOpened()
+    {
+        var (shell, home) = await LoadedHome();
+        Assert.Empty(home.ContinueWatching);
+        shell.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus")); // progress saved while Home was away, without a library change
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.HomePage);
+
+        await Ui.WaitUntil(() => home.ContinueWatching.Count == 1);
+        Assert.Equal("Klaus", home.ContinueWatching[0].Name);
+    }
+
+    [AvaloniaFact]
     public async Task Home_TwoRows_ContinueAndRecent()
     {
         _library.Continue.Add(FakeLibrary.Resume(1, "Klaus", poster: "/k.jpg"));

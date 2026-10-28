@@ -126,6 +126,12 @@ public sealed partial class HomeViewModel : PageViewModel
 
     private void SyncKey() => HasNoKey = _hub.Current.KeyState == KeyState.Missing;
 
+    // Before the first load the database may not be open yet; that load comes with the first library change.
+    public override void Opened()
+    {
+        if (IsLoaded) _ = RefreshAsync();
+    }
+
     public override Task RefreshAsync()
     {
         var known = _known;
