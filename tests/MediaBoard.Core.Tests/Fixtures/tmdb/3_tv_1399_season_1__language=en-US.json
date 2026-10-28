@@ -1,0 +1,29 @@
+{
+  "id": "52571d2a760ee3695800b4b7",
+  "air_date": "2011-04-17",
+  "name": "Season 1",
+  "season_number": 1,
+  "episodes": [
+    {
+      "air_date": "2011-04-17",
+      "episode_number": 1,
+      "name": "Winter Is Coming",
+      "runtime": 62,
+      "season_number": 1
+    },
+    {
+      "air_date": "2011-04-24",
+      "episode_number": 2,
+      "name": "The Kingsroad",
+      "runtime": 56,
+      "season_number": 1
+    },
+    {
+      "air_date": null,
+      "episode_number": 3,
+      "name": "Lord Snow",
+      "runtime": null,
+      "season_number": 1
+    }
+  ]
+}

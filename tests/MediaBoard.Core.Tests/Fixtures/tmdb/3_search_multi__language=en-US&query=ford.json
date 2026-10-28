@@ -1,0 +1,39 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "id": 3,
+      "media_type": "person",
+      "name": "Harrison Ford",
+      "original_name": "Harrison Ford",
+      "popularity": 40.2,
+      "profile_path": "/5M7oN3sznp99hWYQ9sX0xheswWX.jpg"
+    },
+    {
+      "id": 603,
+      "media_type": "movie",
+      "title": "Ford v Ferrari",
+      "original_title": "Le Mans '66",
+      "overview": "Carroll Shelby and Ken Miles build a car to beat Ferrari.",
+      "popularity": 55.0,
+      "poster_path": "/dR1Ju50iudrOh3YgfwkAU1g2HZe.jpg",
+      "release_date": "2019-11-13",
+      "vote_average": 8.0,
+      "vote_count": 7000
+    },
+    {
+      "id": 1399,
+      "media_type": "tv",
+      "name": "Fordland",
+      "original_name": "Fordland",
+      "overview": "A made-up show for the fixture.",
+      "popularity": 12.0,
+      "poster_path": null,
+      "first_air_date": "2011-04-17",
+      "vote_average": 6.5,
+      "vote_count": 12
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

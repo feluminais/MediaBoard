@@ -1,0 +1,17 @@
+{
+  "id": 95396,
+  "name": "Severance",
+  "original_name": "Severance",
+  "overview": "Mark leads a team of office workers whose memories have been surgically divided.",
+  "poster_path": "/lFf6LLrQjYldcZItzOkGmMMigP7.jpg",
+  "first_air_date": "2022-02-17",
+  "last_air_date": "2025-03-21",
+  "status": "Returning Series",
+  "episode_run_time": [],
+  "vote_average": 0,
+  "vote_count": 0,
+  "seasons": [
+    { "id": 1, "season_number": 1, "name": "Season 1", "episode_count": 9 },
+    { "id": 2, "season_number": 2, "name": "Season 2", "episode_count": 10 }
+  ]
+}
