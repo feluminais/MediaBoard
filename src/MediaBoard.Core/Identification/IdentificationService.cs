@@ -338,7 +338,14 @@ public sealed class IdentificationService : IDisposable
     /// <summary>Identifies one file. Returns why the run must stop, or None.</summary>
     private async Task<Stop> IdentifyAsync(MediaFileRow file, Run run, CancellationToken ct)
     {
-        if (_files.TryFullPath(file) is not { } fullPath) return Stop.None; // its folder was just removed
+        if (_files.TryFullPath(file) is not { } fullPath)
+        {
+            // Its folder was just removed: the file is done with, so it stops counting as waiting.
+            run.Waiting--;
+            _hub.SetPendingIdentification(run.Waiting);
+            return Stop.None;
+        }
+
         var duration = file.DurationS;
         if (duration is null)
         {

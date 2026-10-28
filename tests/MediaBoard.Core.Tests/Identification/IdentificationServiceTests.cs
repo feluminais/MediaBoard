@@ -610,6 +610,32 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FileWhosePathCannotBeResolvedMidPass_StillBringsThePendingCountToZero()
+    {
+        KnowHeat();
+        _lib.File("Heat (1995).mkv");
+        _lib.File("Heat 2 (1996).mkv");
+        await Scan();
+        using var other = new TempLibrary();
+        var otherFolder = new FolderStore(_db, _clock).Add(other.Root);
+        // The second file now belongs to another folder, but the pass still holds the row it read with the old
+        // folder id, and that folder is gone: the file is active, yet its path can't be resolved.
+        using var service = new IdentificationService(
+            _db,
+            new HookedProvider(_tmdb, () =>
+            {
+                using (var conn = _db.Open())
+                    conn.Execute("UPDATE files SET folder_id = @other WHERE rel_path = 'Heat 2 (1996).mkv'", new { other = otherFolder.Id });
+                new FolderStore(_db, _clock).Remove(_folder.Id);
+            }),
+            _probe, _connectivity, _settings, _hub, _clock);
+
+        await service.RunPendingAsync(Ct);
+
+        Assert.Equal(0, _hub.Current.PendingIdentification);
+    }
+
+    [Fact]
     public async Task HiddenPlaceholder_ItsFileStaysHidden_OnceIdentified()
     {
         _lib.File("Heat (1995).mkv");
