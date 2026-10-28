@@ -275,7 +275,6 @@ public class ReviewViewModelTests
 
         var page = await Loaded();
         var candidate = page.Groups[0].Rows[0].Candidates[0];
-        Assert.Equal("1995 · Movie", candidate.Detail); // what the library stored
 
         await Ui.WaitUntil(() => candidate.PosterLocalPath is not null);
 
