@@ -246,6 +246,43 @@ public class MpcHcSessionTests
     }
 
     [Fact]
+    public async Task Handler_ThrowingOnPosition_StillGetsFinalEvent()
+    {
+        await using var session = await StartConnectedAsync();
+        session.Event += e =>
+        {
+            if (e is not PlaybackEvent.Position) return;
+            // The process exits while this thread is still delivering, so the exit's Closed is queued behind us.
+            _process.Exit();
+            Thread.Sleep(200);
+            throw new InvalidOperationException("handler bug");
+        };
+
+        try
+        {
+            _transport.Receive(MpcApi.CMD_CURRENTPOSITION, "12.000");
+        }
+        catch (InvalidOperationException)
+        {
+            // Before the fix the handler's exception escaped here; either way the final event must arrive.
+        }
+
+        await _events.WaitFor<PlaybackEvent.Closed>(Timeout);
+        Assert.Equal([new PlaybackEvent.Position(TimeSpan.FromSeconds(12)), new PlaybackEvent.Closed()], _events.All);
+    }
+
+    [Fact]
+    public async Task Handler_ThrowingOnFailed_StartAsyncDoesNotThrow()
+    {
+        await using var session = Create(start: _ => throw new Win32Exception(2, "The system cannot find the file specified."));
+        session.Event += e => throw new InvalidOperationException($"handler bug on {e}");
+
+        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
+
+        Assert.IsType<PlaybackEvent.Failed>(Assert.Single(_events.All));
+    }
+
+    [Fact]
     public async Task Handler_BlockingUntilDispose_DoesNotDeadlock()
     {
         await using var session = await StartConnectedAsync();

@@ -10,7 +10,7 @@ public interface IPlayerSession : IAsyncDisposable
     /// Raised on a background thread (for MPC-HC, its message-window thread), one event at a time and in order.
     /// Handlers must return quickly and must not block on the session. Marshal to the UI thread with
     /// <c>InvokeAsync</c>/<c>Post</c>, never a synchronous <c>Invoke</c>: the UI thread may be busy disposing the
-    /// session.
+    /// session. An event already in flight may still arrive while, or just after, the session is disposed.
     /// </summary>
     event Action<PlaybackEvent>? Event;
 

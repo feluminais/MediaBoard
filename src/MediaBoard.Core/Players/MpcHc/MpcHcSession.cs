@@ -14,7 +14,9 @@ namespace MediaBoard.Core.Players.MpcHc;
 /// thread (when the process exits or start fails), one at a time and in order, with no lock held. Handlers must
 /// return quickly, must not block on this session, and must marshal to the UI thread with <c>InvokeAsync</c>/<c>Post</c>,
 /// never a synchronous <c>Invoke</c>. <see cref="PlaybackEvent.Closed"/> and <see cref="PlaybackEvent.Failed"/> are
-/// final: nothing is raised after them, nor after disposal.
+/// final: nothing is raised after them. Disposal stops new events, but one already being delivered may still
+/// arrive while, or just after, the session is disposed. A handler that throws is traced and does not stop
+/// delivery of the events after it.
 /// <para>
 /// The session covers the launched file only. When MPC-HC closes it or moves on to another file (next in
 /// folder, a file dropped onto the window), the session raises <see cref="PlaybackEvent.Closed"/> and stops
@@ -515,6 +517,8 @@ public sealed class MpcHcSession : IPlayerSession
     /// <summary>
     /// One thread at a time delivers queued events in queue order. A thread that finds delivery in progress
     /// leaves its event to that thread; a handler that raises again (through a reply) does not recurse.
+    /// A handler that throws is traced and delivery carries on, so the event it was handed to deliver (often the
+    /// final Closed or Failed) is never stranded, and no handler exception escapes <see cref="StartAsync"/>.
     /// </summary>
     private void Deliver()
     {
@@ -530,12 +534,21 @@ public sealed class MpcHcSession : IPlayerSession
                         break;
                     }
 
-                    Event?.Invoke(e);
+                    try
+                    {
+                        Event?.Invoke(e);
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.TraceError($"MPC-HC session: a {e.GetType().Name} handler failed: {ex}");
+                    }
                 }
             }
             finally
             {
-                Volatile.Write(ref _delivering, 0);
+                // A full fence, so the IsEmpty check that follows cannot be reordered before the release: an event
+                // queued by a thread whose CompareExchange saw 1 is then always picked up here.
+                Interlocked.Exchange(ref _delivering, 0);
             }
         }
     }
