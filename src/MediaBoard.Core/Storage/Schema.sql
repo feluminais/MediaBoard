@@ -1,15 +1,16 @@
 -- Schema v1. Applied once by LibraryDatabase when PRAGMA user_version < 1.
 -- Timestamps are ISO 8601 text; booleans are 0/1 integers.
+-- Tables an overrides row can point at use AUTOINCREMENT so a deleted id is never reused (overrides has no foreign key).
 
 CREATE TABLE folders (
-    id       INTEGER PRIMARY KEY,
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
     path     TEXT    NOT NULL UNIQUE,
     enabled  INTEGER NOT NULL DEFAULT 1,
     added_at TEXT    NOT NULL
 );
 
 CREATE TABLE files (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     folder_id   INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
     rel_path    TEXT    NOT NULL,
     size        INTEGER NOT NULL,
@@ -25,7 +26,7 @@ CREATE TABLE files (
 CREATE INDEX ix_files_status ON files(status);
 
 CREATE TABLE titles (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     tmdb_id     INTEGER,
     kind        TEXT    NOT NULL,
     name        TEXT    NOT NULL,
@@ -39,7 +40,7 @@ CREATE TABLE titles (
 CREATE UNIQUE INDEX ux_titles_tmdb ON titles(kind, tmdb_id) WHERE tmdb_id IS NOT NULL;
 
 CREATE TABLE episodes (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title_id    INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
     season      INTEGER NOT NULL,
     number      INTEGER NOT NULL,

@@ -97,6 +97,30 @@ public sealed class LibraryDatabaseTests : IDisposable
         Assert.Equal(relPath, conn.ExecuteScalar<string>("SELECT rel_path FROM files"));
     }
 
+    // overrides(target_kind, target_id) has no foreign key, so a reused id would inherit a stale override.
+    [Theory]
+    [InlineData("folders", "INSERT INTO folders(path, enabled, added_at) VALUES (@n, 1, '2026-01-01')")]
+    [InlineData("titles", "INSERT INTO titles(kind, name) VALUES ('movie', @n)")]
+    [InlineData("files", "INSERT INTO files(folder_id, rel_path, size, mtime, first_seen, missing, parsed_json, status) " +
+        "VALUES ((SELECT id FROM folders LIMIT 1), @n, 1, 1, '2026-01-01', 0, '{}', 'pending')")]
+    [InlineData("episodes", "INSERT INTO episodes(title_id, season, number) " +
+        "VALUES ((SELECT id FROM titles LIMIT 1), 1, CAST(@n AS INTEGER))")]
+    public void Ids_AreNeverReused(string table, string insert)
+    {
+        using var conn = new LibraryDatabase(DbPath).Open();
+        // Parents that the child tables need; they stay in place for the whole test.
+        if (table == "files") conn.Execute(InsertFolder);
+        if (table == "episodes") conn.Execute("INSERT INTO titles(kind, name) VALUES ('show', 'Parent')");
+
+        conn.Execute(insert, new { n = "1" });
+        var first = conn.ExecuteScalar<long>($"SELECT MAX(id) FROM {table}");
+        conn.Execute($"DELETE FROM {table} WHERE id = @first", new { first });
+        conn.Execute(insert, new { n = "2" });
+        var second = conn.ExecuteScalar<long>($"SELECT MAX(id) FROM {table}");
+
+        Assert.True(second > first, $"{table}: new id {second} reuses or precedes deleted id {first}");
+    }
+
     [Fact]
     public void Files_RejectsUnknownStatus()
     {
