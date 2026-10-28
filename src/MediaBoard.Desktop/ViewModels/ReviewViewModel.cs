@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -136,14 +137,21 @@ public sealed partial class ReviewRowViewModel : ObservableObject
 }
 
 /// <summary>The files of one show folder (one decision for all of them), or the files that sit on their own.</summary>
-public sealed class ReviewGroup(string? header, IReadOnlyList<ReviewRowViewModel> rows)
+public sealed class ReviewGroup : ObservableObject
 {
+    internal ReviewGroup(string? header)
+    {
+        Header = header;
+        Rows.CollectionChanged += (_, _) => OnPropertyChanged(nameof(CountText));
+    }
+
     /// <summary>The show folder; null for files that belong to no show folder.</summary>
-    public string? Header { get; } = header;
+    public string? Header { get; }
 
     public bool HasHeader => Header is not null;
 
-    public IReadOnlyList<ReviewRowViewModel> Rows { get; } = rows;
+    /// <summary>Kept across refreshes: a refresh adds and removes rows, it does not rebuild them.</summary>
+    public ObservableCollection<ReviewRowViewModel> Rows { get; } = [];
 
     public string CountText => Plural.Of(Rows.Count, "file");
 }
@@ -156,11 +164,18 @@ public sealed class ReviewGroup(string? header, IReadOnlyList<ReviewRowViewModel
 /// </summary>
 public sealed partial class ReviewViewModel : PageViewModel
 {
+    /// <summary>How many of the first rows get a rating and poster from TMDB.</summary>
+    public const int EnrichRowLimit = 30;
+
     private readonly TitleServices _s;
     private readonly BackgroundQuery _query;
+    private readonly BackgroundQuery _details;
     private readonly Dictionary<(int TmdbId, TitleKind Kind), OnlineInfo> _online = [];
     private readonly HashSet<(int TmdbId, TitleKind Kind)> _unanswered = [];
+    private readonly Dictionary<string, ReviewGroup> _groups = new(StringComparer.OrdinalIgnoreCase);
+    private ReviewGroup? _loose;
     private IReadOnlyDictionary<int, ReviewRowViewModel> _rows = new Dictionary<int, ReviewRowViewModel>();
+    private CancellationTokenSource _lifetime = new();
     private bool _enriching;
 
     public ReviewViewModel(TitleServices services)
@@ -168,13 +183,18 @@ public sealed partial class ReviewViewModel : PageViewModel
     {
         _s = services;
         _query = new BackgroundQuery(services.Hub, "Needs review");
+        _details = new BackgroundQuery(services.Hub, "TMDB details");
     }
 
     public string EmptyText => "Nothing to review";
 
+    /// <summary>The groups in order, each with its rows. The objects stay the same across refreshes.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty))]
     public partial IReadOnlyList<ReviewGroup> Groups { get; private set; } = [];
+
+    /// <summary>What the list shows, flat so it can be virtualized: a <see cref="ReviewGroup"/> for each header, then its rows.</summary>
+    public ObservableCollection<object> Items { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty))]
@@ -198,7 +218,14 @@ public sealed partial class ReviewViewModel : PageViewModel
     // The page is costly to load on a big library and the sidebar badge counts on its own, so it loads when opened.
     public override bool RefreshesWhileHidden => false;
 
-    public override void Opened() => _ = RefreshAsync();
+    public override void Opened()
+    {
+        if (_lifetime.IsCancellationRequested) _lifetime = new CancellationTokenSource();
+        _unanswered.Clear(); // reopening is the retry for titles TMDB could not answer
+        _ = RefreshAsync();
+    }
+
+    public override void Closed() => _lifetime.Cancel();
 
     public override Task RefreshAsync() =>
         _query.RunAsync(_s.Library.NeedsReview, items =>
@@ -210,7 +237,8 @@ public sealed partial class ReviewViewModel : PageViewModel
     private void Apply(IReadOnlyList<ReviewItem> items)
     {
         var rows = new Dictionary<int, ReviewRowViewModel>();
-        var kept = new List<ReviewRowViewModel>();
+        var wanted = new Dictionary<ReviewGroup, List<ReviewRowViewModel>>();
+        var order = new List<ReviewGroup>();
         foreach (var item in items)
         {
             _rows.TryGetValue(item.FileId, out var old);
@@ -222,29 +250,75 @@ public sealed partial class ReviewViewModel : PageViewModel
             }
 
             rows[item.FileId] = row;
-            kept.Add(row);
+            var group = GroupFor(item.ShowFolder);
+            if (!wanted.TryGetValue(group, out var list))
+            {
+                wanted[group] = list = [];
+                order.Add(group);
+            }
+
+            list.Add(row);
         }
 
         _rows = rows;
-        var groups = GroupsOf(kept);
-        if (!SameGroups(Groups, groups)) Groups = groups;
+
+        // Everything below keeps the objects it can: a removal takes one row out of the collections, and the list
+        // control only drops that one item instead of rebuilding.
+        order = order.Where(g => g.HasHeader).Concat(order.Where(g => !g.HasHeader)).ToList(); // files without a show folder last
+        foreach (var group in _groups.Values.Concat(_loose is null ? [] : [_loose]).ToList())
+        {
+            if (wanted.ContainsKey(group)) continue;
+
+            group.Rows.Clear();
+            if (group.HasHeader) _groups.Remove(group.Header!);
+            else _loose = null;
+        }
+
+        foreach (var (group, list) in wanted) Sync(group.Rows, list);
+        if (!Groups.SequenceEqual(order, ReferenceEqualityComparer.Instance)) Groups = order;
+
+        var flat = new List<object>();
+        foreach (var group in order)
+        {
+            if (group.HasHeader) flat.Add(group);
+            flat.AddRange(group.Rows);
+        }
+
+        Sync(Items, flat);
         StartEnrichment();
     }
 
-    // Episodes of one show folder together, by folder; everything else last, ungrouped. Rows keep the library's order.
-    private static List<ReviewGroup> GroupsOf(List<ReviewRowViewModel> rows)
+    private ReviewGroup GroupFor(string? showFolder)
     {
-        var groups = new List<ReviewGroup>();
-        foreach (var folder in rows.Where(r => r.Item.ShowFolder is not null).GroupBy(r => r.Item.ShowFolder!, StringComparer.OrdinalIgnoreCase))
-            groups.Add(new ReviewGroup(folder.Key, folder.ToList()));
-
-        var loose = rows.Where(r => r.Item.ShowFolder is null).ToList();
-        if (loose.Count > 0) groups.Add(new ReviewGroup(null, loose));
-        return groups;
+        if (showFolder is null) return _loose ??= new ReviewGroup(null);
+        if (!_groups.TryGetValue(showFolder, out var group)) _groups[showFolder] = group = new ReviewGroup(showFolder);
+        return group;
     }
 
-    private static bool SameGroups(IReadOnlyList<ReviewGroup> a, IReadOnlyList<ReviewGroup> b) =>
-        a.Count == b.Count && a.Zip(b).All(p => p.First.Header == p.Second.Header && p.First.Rows.SequenceEqual(p.Second.Rows));
+    // Makes <target> hold the same items as <wanted>, in order, with the fewest removals, inserts and moves.
+    private static void Sync<T>(ObservableCollection<T> target, IReadOnlyList<T> wanted)
+        where T : class
+    {
+        var keep = new HashSet<T>(wanted, ReferenceEqualityComparer.Instance as IEqualityComparer<T>);
+        for (var i = target.Count - 1; i >= 0; i--)
+        {
+            if (!keep.Contains(target[i])) target.RemoveAt(i);
+        }
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            if (i < target.Count && ReferenceEquals(target[i], wanted[i])) continue;
+
+            var at = -1;
+            for (var j = i + 1; j < target.Count && at < 0; j++)
+            {
+                if (ReferenceEquals(target[j], wanted[i])) at = j;
+            }
+
+            if (at >= 0) target.Move(at, i);
+            else target.Insert(i, wanted[i]);
+        }
+    }
 
     // ---- Search ----
 
@@ -340,7 +414,10 @@ public sealed partial class ReviewViewModel : PageViewModel
     // ---- Ratings and posters ----
 
     // The library stores only name, year and kind of a guess. TMDB gives the rating and poster, one title at a time
-    // (the client paces its requests); a title that several files guessed is asked about once.
+    // (the client paces its requests). To keep the volume small: only the first rows are looked up, a title several
+    // files guessed is asked about once, nothing is asked while TMDB can't answer (offline, no key, rejected key), the
+    // run stops at the first sign of that, a title that failed is not asked again until the page is reopened, and
+    // leaving the page stops the run.
     private void StartEnrichment()
     {
         foreach (var candidate in Candidates())
@@ -352,13 +429,14 @@ public sealed partial class ReviewViewModel : PageViewModel
             }
         }
 
-        if (_enriching) return;
+        if (_enriching || _lifetime.IsCancellationRequested || MatchProblems.Of(_s.Hub.Current) is not null) return;
 
         _enriching = true;
-        Enrichment = EnrichAsync();
+        Enrichment = EnrichAsync(_lifetime.Token);
     }
 
-    private IEnumerable<ReviewCandidateViewModel> Candidates() => _rows.Values.SelectMany(r => r.Candidates);
+    private IEnumerable<ReviewCandidateViewModel> Candidates() =>
+        Items.OfType<ReviewRowViewModel>().Take(EnrichRowLimit).SelectMany(r => r.Candidates);
 
     private (int TmdbId, TitleKind Kind)? NextUnasked()
     {
@@ -370,20 +448,22 @@ public sealed partial class ReviewViewModel : PageViewModel
         return null;
     }
 
-    private async Task EnrichAsync()
+    private async Task EnrichAsync(CancellationToken ct)
     {
         try
         {
-            while (NextUnasked() is { } key)
+            while (!ct.IsCancellationRequested && NextUnasked() is { } key)
             {
                 OnlineInfo? found = null;
-                await new BackgroundQuery(_s.Hub, "TMDB details").RunAsync(
-                    () => _s.Search.GetOnlineDetailsAsync(key.TmdbId, key.Kind, CancellationToken.None).GetAwaiter().GetResult(),
+                await _details.RunAsync(
+                    () => _s.Search.GetOnlineDetailsAsync(key.TmdbId, key.Kind, ct).GetAwaiter().GetResult(),
                     details => found = details is null ? null : new OnlineInfo(details.Rating, details.PosterPath));
+                if (ct.IsCancellationRequested) break;
 
                 if (found is null)
                 {
-                    _unanswered.Add(key); // asked again after the next fix or reopen, not in a loop
+                    if (MatchProblems.Of(_s.Hub.Current) is not null) break; // TMDB can't answer right now: not this title's fault
+                    _unanswered.Add(key);
                     continue;
                 }
 
@@ -398,7 +478,6 @@ public sealed partial class ReviewViewModel : PageViewModel
         finally
         {
             _enriching = false;
-            _unanswered.Clear();
         }
     }
 

@@ -15,65 +15,62 @@
             <TextBlock Classes="muted" Text="{Binding EmptyText}" IsVisible="{Binding ShowEmpty}"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-            <ScrollViewer>
-                <ItemsControl ItemsSource="{Binding Groups}" MaxWidth="980" Margin="0,0,16,0">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ReviewGroup">
-                            <StackPanel Spacing="8" Margin="0,0,0,24">
-                                <DockPanel IsVisible="{Binding HasHeader}">
-                                    <TextBlock DockPanel.Dock="Right" Classes="muted" Text="{Binding CountText}" VerticalAlignment="Center" />
-                                    <TextBlock Classes="rowTitle" Text="{Binding Header}" TextTrimming="CharacterEllipsis" />
+            <!-- One flat list (a header, then its rows) so only the rows on screen are built. -->
+            <ItemsControl x:Name="List" ItemsSource="{Binding Items}" MaxWidth="980" Margin="0,0,16,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="vm:ReviewGroup">
+                        <DockPanel Margin="0,16,0,8">
+                            <TextBlock DockPanel.Dock="Right" Classes="muted" Text="{Binding CountText}" VerticalAlignment="Center" />
+                            <TextBlock Classes="rowTitle" Text="{Binding Header}" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:ReviewRowViewModel">
+                        <Border Padding="12" Margin="0,0,0,8" CornerRadius="6" Background="{DynamicResource PanelBrush}"
+                                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+                            <StackPanel Spacing="10">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                                        <Button Content="Search" Classes="small" Command="{Binding SearchCommand}" />
+                                        <Button Content="Not a movie or show" Classes="small" Command="{Binding NotMediaCommand}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Classes="muted" FontSize="12" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
                                 </DockPanel>
 
-                                <ItemsControl ItemsSource="{Binding Rows}">
+                                <ItemsControl ItemsSource="{Binding Candidates}" IsVisible="{Binding HasCandidates}">
                                     <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:ReviewRowViewModel">
-                                            <Border Padding="12" Margin="0,0,0,8" CornerRadius="6" Background="{DynamicResource PanelBrush}"
-                                                    BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
-                                                <StackPanel Spacing="10">
-                                                    <DockPanel>
-                                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
-                                                            <Button Content="Search" Classes="small" Command="{Binding SearchCommand}" />
-                                                            <Button Content="Not a movie or show" Classes="small" Command="{Binding NotMediaCommand}" />
-                                                        </StackPanel>
-                                                        <StackPanel Margin="0,0,12,0">
-                                                            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Classes="muted" FontSize="12" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
-                                                        </StackPanel>
-                                                    </DockPanel>
-
-                                                    <ItemsControl ItemsSource="{Binding Candidates}" IsVisible="{Binding HasCandidates}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate x:DataType="vm:ReviewCandidateViewModel">
-                                                                <DockPanel Margin="0,0,0,6">
-                                                                    <Button DockPanel.Dock="Right" Content="Pick" Classes="small" VerticalAlignment="Center"
-                                                                            Command="{Binding PickCommand}" />
-                                                                    <Border DockPanel.Dock="Left" Width="40" Height="60" CornerRadius="4" ClipToBounds="True" Margin="0,0,12,0">
-                                                                        <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="80" />
-                                                                    </Border>
-                                                                    <StackPanel VerticalAlignment="Center">
-                                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                                        <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" />
-                                                                    </StackPanel>
-                                                                </DockPanel>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-
-                                                    <TextBlock Classes="muted" Text="{Binding Notice}" IsVisible="{Binding HasNotice}" />
-                                                    <Panel IsVisible="{Binding HasPicker}">
-                                                        <views:FixMatchPickerView DataContext="{Binding Picker}" />
-                                                    </Panel>
+                                        <DataTemplate x:DataType="vm:ReviewCandidateViewModel">
+                                            <DockPanel Margin="0,0,0,6">
+                                                <Button DockPanel.Dock="Right" Content="Pick" Classes="small" VerticalAlignment="Center"
+                                                        Command="{Binding PickCommand}" />
+                                                <Border DockPanel.Dock="Left" Width="40" Height="60" CornerRadius="4" ClipToBounds="True" Margin="0,0,12,0">
+                                                    <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="80" />
+                                                </Border>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" />
                                                 </StackPanel>
-                                            </Border>
+                                            </DockPanel>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+
+                                <TextBlock Classes="muted" Text="{Binding Notice}" IsVisible="{Binding HasNotice}" />
+                                <Panel IsVisible="{Binding HasPicker}">
+                                    <views:FixMatchPickerView DataContext="{Binding Picker}" />
+                                </Panel>
                             </StackPanel>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
+            </ItemsControl>
         </Panel>
     </DockPanel>
 </UserControl>

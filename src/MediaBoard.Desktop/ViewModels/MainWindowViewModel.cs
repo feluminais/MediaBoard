@@ -211,6 +211,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void ToggleActivity() => IsActivityOpen = !IsActivityOpen;
 
+    partial void OnCurrentPageChanged(ObservableObject oldValue, ObservableObject newValue)
+    {
+        if (oldValue is PageViewModel closed && !ReferenceEquals(oldValue, newValue)) closed.Closed();
+    }
+
     partial void OnReviewCountChanged(int value) => _reviewItem.Badge = value;
 
     private void OnLibraryChanged()

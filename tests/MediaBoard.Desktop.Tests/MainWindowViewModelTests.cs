@@ -16,14 +16,14 @@ public class MainWindowViewModelTests
 
     private readonly string _settingsPath = Path.Combine(Path.GetTempPath(), $"mediaboard-shell-{Guid.NewGuid():N}.json");
 
-    private MainWindowViewModel Create() =>
+    private MainWindowViewModel Create(Titles? titles = null) =>
         new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub,
             new FoldersViewModel(_library, new IdleFolderActions(), _hub, () => Task.FromResult<string?>(null), _ => Task.FromResult(true)),
             new SettingsViewModel(
                 new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
                 new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
                 _hub, () => Task.FromResult<string?>(null), _ => { }),
-            Posters.None(), new Titles(_library, _hub).Services());
+            Posters.None(), (titles ?? new Titles(_library, _hub)).Services());
 
     private static void Flush() => Dispatcher.UIThread.RunJobs();
 
@@ -87,6 +87,34 @@ public class MainWindowViewModelTests
         Flush();
 
         await WaitUntil(() => page.Groups.SelectMany(g => g.Rows).Count() == 2);
+    }
+
+    [AvaloniaFact]
+    public async Task LeavingNeedsReview_StopsItsTmdbLookups()
+    {
+        _hub.SetOnline(true);
+        _hub.SetKeyState(MediaBoard.Core.Activity.KeyState.Ok);
+        using var gate = new ManualResetEventSlim();
+        var titles = new Titles(_library, _hub);
+        titles.Search.OnDetails = (_, _) =>
+        {
+            gate.Wait(TimeSpan.FromSeconds(10));
+            return null;
+        };
+        foreach (var id in new[] { 1, 2 })
+            _library.Review.Add(new MediaBoard.Core.Library.ReviewItem(
+                id, $"{id}.mkv", $"{id}.mkv", "T", null, MediaBoard.Core.Parsing.MediaKind.Movie, null, [], false,
+                [new MediaBoard.Core.Library.ReviewCandidate(id, MediaBoard.Core.Metadata.TitleKind.Movie, "T", 2000)]));
+        var vm = Create(titles);
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.ReviewPage);
+        await WaitUntil(() => titles.Search.DetailRequests.Count == 1); // the first lookup is in flight
+        vm.NavigateCommand.Execute(MainWindowViewModel.HomePage);
+        gate.Set();
+        await Task.Delay(200);
+        Flush();
+
+        Assert.Single(titles.Search.DetailRequests);
     }
 
     [AvaloniaFact]

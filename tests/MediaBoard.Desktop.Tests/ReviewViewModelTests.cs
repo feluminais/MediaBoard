@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -328,6 +329,198 @@ public class ReviewViewModelTests
         Ui.Flush();
 
         Assert.Contains(view.GetVisualDescendants().OfType<TextBlock>(), t => t.IsEffectivelyVisible && t.Text == "Nothing to review");
+        window.Close();
+    }
+
+    // ---- Enrichment stays small and quiet ----
+
+    private static TitleDetails Details(int tmdbId) => new(tmdbId, TitleKind.Movie, "T" + tmdbId, 2000, null, null, 7.0, $"/{tmdbId}.jpg", null, []);
+
+    [AvaloniaFact]
+    public async Task Enrichment_WithARejectedKey_AsksNothing_AndLogsNothing()
+    {
+        _hub.SetKeyState(KeyState.Rejected);
+        var logged = _hub.Recent.Count;
+        _library.Review.Add(MovieFile(1, "Heat.1995.mkv", "Heat", 1995, Movie(949, "Heat", 1995)));
+
+        var page = await Loaded();
+        await page.Enrichment;
+
+        Assert.Empty(_t.Search.DetailRequests);
+        Assert.Equal(logged, _hub.Recent.Count);
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_StopsAtTheFirstOfflineFailure_AndAsksAgainOnceBackOnline()
+    {
+        _t.Search.OnDetails = (_, _) =>
+        {
+            _hub.SetOnline(false); // what the real client does when TMDB is unreachable
+            return null;
+        };
+        _library.Review.Add(MovieFile(1, "A.mkv", "A", null, Movie(1, "A", 2000)));
+        _library.Review.Add(MovieFile(2, "B.mkv", "B", null, Movie(2, "B", 2000)));
+        var page = await Loaded();
+        await page.Enrichment;
+
+        Assert.Single(_t.Search.DetailRequests);
+
+        _t.Search.OnDetails = (id, _) => Details(id);
+        _hub.SetOnline(true);
+        await page.RefreshAsync();
+        await page.Enrichment;
+
+        Assert.Equal(3, _t.Search.DetailRequests.Count); // the failed title was not blamed for the connection
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_DoesNotAskAgainForATitleThatFailed_UntilThePageIsReopened()
+    {
+        _t.Search.Details = null; // TMDB answers, but not for this id (a removed title)
+        _library.Review.Add(MovieFile(1, "A.mkv", "A", null, Movie(1, "A", 2000)));
+        var page = await Loaded();
+        await page.Enrichment;
+        Assert.Single(_t.Search.DetailRequests);
+
+        await page.RefreshAsync(); // a library change
+        await page.Enrichment;
+        Assert.Single(_t.Search.DetailRequests);
+
+        page.Opened();
+        await Ui.WaitUntil(() => _t.Search.DetailRequests.Count == 2);
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_AsksOncePerDistinctTitle()
+    {
+        _t.Search.OnDetails = (id, _) => Details(id);
+        for (var i = 1; i <= 4; i++)
+            _library.Review.Add(MovieFile(i, $"F{i}.mkv", $"F{i}", null, Movie(1, "Same", 2000), Movie(2 + i % 2, "Other", 2001)));
+
+        var page = await Loaded();
+        await page.Enrichment;
+        await page.RefreshAsync();
+        await page.Enrichment;
+
+        Assert.Equal(3, _t.Search.DetailRequests.Count);
+        Assert.Equal(3, _t.Search.DetailRequests.Distinct().Count());
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_OnlyLooksAtTheFirstRows()
+    {
+        _t.Search.OnDetails = (id, _) => Details(id);
+        for (var i = 1; i <= 100; i++) _library.Review.Add(MovieFile(i, $"F{i:000}.mkv", $"F{i}", null, Movie(i, "T", 2000)));
+
+        var page = await Loaded();
+        await page.Enrichment;
+
+        Assert.Equal(ReviewViewModel.EnrichRowLimit, _t.Search.DetailRequests.Count);
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_StopsWhenThePageIsLeft()
+    {
+        using var gate = new ManualResetEventSlim();
+        _t.Search.OnDetails = (id, _) =>
+        {
+            gate.Wait(TimeSpan.FromSeconds(10));
+            return Details(id);
+        };
+        _library.Review.Add(MovieFile(1, "A.mkv", "A", null, Movie(1, "A", 2000)));
+        _library.Review.Add(MovieFile(2, "B.mkv", "B", null, Movie(2, "B", 2000)));
+        var page = new ReviewViewModel(_t.Services());
+        _ = page.RefreshAsync();
+        await Ui.WaitUntil(() => _t.Search.DetailRequests.Count == 1); // the first request is in flight
+
+        page.Closed();
+        gate.Set();
+        await page.Enrichment;
+
+        Assert.Single(_t.Search.DetailRequests);
+    }
+
+    // ---- Refreshes keep what they can ----
+
+    [AvaloniaFact]
+    public async Task Removing_OneRow_KeepsTheOtherRowsAndGroups()
+    {
+        _library.Review.Add(EpisodeFile(1, @"Mystery\Mystery.S01E01.mkv", "Mystery", 1, 1, "Mystery"));
+        _library.Review.Add(EpisodeFile(2, @"Mystery\Mystery.S01E02.mkv", "Mystery", 1, 2, "Mystery"));
+        _library.Review.Add(EpisodeFile(3, @"Other\Other.S01E01.mkv", "Other", 1, 1, "Other"));
+        _library.Review.Add(MovieFile(4, "Zebra.mkv", "Zebra", null));
+        var page = await Loaded();
+        var groups = page.Groups.ToList();
+        var rows = groups.SelectMany(g => g.Rows).ToList();
+        var items = page.Items.ToList();
+        var changes = new List<NotifyCollectionChangedEventArgs>();
+        page.Items.CollectionChanged += (_, e) => changes.Add(e);
+
+        _library.Review.RemoveAll(r => r.FileId == 1);
+        await page.RefreshAsync();
+
+        Assert.True(groups.SequenceEqual(page.Groups, ReferenceEqualityComparer.Instance as IEqualityComparer<ReviewGroup>));
+        Assert.True(rows.Where(r => r.FileId != 1).SequenceEqual(page.Groups.SelectMany(g => g.Rows), ReferenceEqualityComparer.Instance as IEqualityComparer<ReviewRowViewModel>));
+        Assert.True(items.Where(i => i is not ReviewRowViewModel { FileId: 1 }).SequenceEqual(page.Items, ReferenceEqualityComparer.Instance as IEqualityComparer<object>));
+        var change = Assert.Single(changes); // one removal, nothing rebuilt
+        Assert.Equal(NotifyCollectionChangedAction.Remove, change.Action);
+        Assert.Equal("1 file", groups[0].CountText);
+    }
+
+    [AvaloniaFact]
+    public async Task Removing_TheLastRowOfAGroup_DropsItsHeader()
+    {
+        _library.Review.Add(EpisodeFile(1, @"Mystery\Mystery.S01E01.mkv", "Mystery", 1, 1, "Mystery"));
+        _library.Review.Add(EpisodeFile(2, @"Other\Other.S01E01.mkv", "Other", 1, 1, "Other"));
+        var page = await Loaded();
+        var other = page.Groups[1];
+
+        _library.Review.RemoveAll(r => r.FileId == 1);
+        await page.RefreshAsync();
+
+        Assert.Same(other, Assert.Single(page.Groups));
+        Assert.Equal(2, page.Items.Count);
+        Assert.Same(other, page.Items[0]);
+        Assert.Same(other.Rows[0], page.Items[1]);
+    }
+
+    [AvaloniaFact]
+    public async Task ARowThatNoLongerMatches_IsReplaced_KeepingItsOpenSearch()
+    {
+        _library.Review.Add(MovieFile(1, "Heat.mkv", "Heat", null, Movie(1, "Old", 2000)));
+        var page = await Loaded();
+        var first = page.Groups[0].Rows[0];
+        first.SearchCommand.Execute(null);
+        var picker = first.Picker;
+
+        _library.Review.Clear();
+        _library.Review.Add(MovieFile(1, "Heat.mkv", "Heat", null, Movie(2, "New", 2001)));
+        await page.RefreshAsync();
+
+        var second = Assert.Single(page.Groups[0].Rows);
+        Assert.NotSame(first, second);
+        Assert.Same(picker, second.Picker);
+        Assert.Same(second, Assert.Single(page.Items));
+    }
+
+    [AvaloniaFact]
+    public async Task TheList_BuildsOnlyTheRowsOnScreen()
+    {
+        for (var i = 1; i <= 1000; i++) _library.Review.Add(MovieFile(i, $"F{i:0000}.mkv", $"F{i}", null, Movie(i, "T", 2000)));
+        var page = await Loaded();
+        var view = new ReviewView { DataContext = page };
+        var window = new Window { Width = 1000, Height = 800, Content = view };
+        window.Show();
+        Ui.Flush();
+        window.UpdateLayout();
+        Ui.Flush();
+
+        var panel = view.GetVisualDescendants().OfType<VirtualizingStackPanel>().First();
+        var rowViews = view.GetVisualDescendants().OfType<Button>().Count(b => (string?)b.Content == "Not a movie or show");
+
+        Assert.Equal(1000, page.Items.Count);
+        Assert.InRange(panel.Children.Count, 1, 60);
+        Assert.InRange(rowViews, 1, 60);
         window.Close();
     }
 

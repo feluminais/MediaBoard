@@ -22,6 +22,11 @@ public abstract class PageViewModel(string title) : ObservableObject
     {
     }
 
+    /// <summary>Another page replaced this one (it may come back through <see cref="Opened"/> or a refresh). Stop work only this page needs.</summary>
+    public virtual void Closed()
+    {
+    }
+
     /// <summary>
     /// Whether a library change reloads the page while another page is open. A page that reloads in <see cref="Opened"/>
     /// anyway and is costly to load (a grid of thousands) says no.

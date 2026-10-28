@@ -93,7 +93,17 @@ internal sealed class FakeSearch : ISearchService
         return Task.FromResult(new SearchResults([], online, State));
     }
 
-    public Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct) => Task.FromResult(Details);
+    /// <summary>Every GetOnlineDetailsAsync call, in order.</summary>
+    public List<(int TmdbId, TitleKind Kind)> DetailRequests { get; } = [];
+
+    /// <summary>Answers GetOnlineDetailsAsync (on the calling thread) instead of <see cref="Details"/>; a test can block or flip the hub offline.</summary>
+    public Func<int, TitleKind, TitleDetails?>? OnDetails { get; set; }
+
+    public Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct)
+    {
+        lock (DetailRequests) DetailRequests.Add((tmdbId, kind));
+        return Task.FromResult(OnDetails is null ? Details : OnDetails(tmdbId, kind));
+    }
 
     public IReadOnlyList<PaletteCommand> Commands(string filter) => [];
 }
