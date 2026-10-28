@@ -1,6 +1,12 @@
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
 namespace MediaBoard.Core.Tests.Support;
 
-/// <summary>A throwaway library folder. Files are sparse, so a "400 MB" video costs nothing on disk.</summary>
+/// <summary>
+/// A throwaway library folder. Files are sparse (marked so explicitly: NTFS reserves the space of a plain
+/// SetLength), so a "400 MB" video costs nothing on disk.
+/// </summary>
 public sealed class TempLibrary : IDisposable
 {
     // Above the 300 MB sample limit so ordinary names are never mistaken for sample clips.
@@ -28,13 +34,29 @@ public sealed class TempLibrary : IDisposable
         var path = PathOf(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        MarkSparse(stream.SafeFileHandle);
         stream.SetLength(size);
         return path;
     }
 
+    private const uint FsctlSetSparse = 0x000900C4;
+
+    // Best effort: on a file system without sparse files the call fails and the file is simply allocated.
+    private static void MarkSparse(SafeFileHandle handle)
+    {
+        if (OperatingSystem.IsWindows())
+            DeviceIoControl(handle, FsctlSetSparse, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle handle, uint code, IntPtr inBuffer, uint inSize, IntPtr outBuffer, uint outSize,
+        out uint bytesReturned, IntPtr overlapped);
+
     public void Resize(string relativePath, long size)
     {
         using var stream = new FileStream(PathOf(relativePath), FileMode.Open, FileAccess.Write, FileShare.None);
+        MarkSparse(stream.SafeFileHandle);
         stream.SetLength(size);
     }
 
