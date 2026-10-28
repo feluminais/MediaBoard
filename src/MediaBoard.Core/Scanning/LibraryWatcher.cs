@@ -16,6 +16,14 @@ public sealed class LibraryWatcher : IDisposable
     private const int BufferSize = 64 * 1024;
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(30);
 
+    // Extensions of files that are never videos or folders. A path that is already gone can't be checked, so
+    // one with any other extension might have been a folder ("Heat.1995.1080p.x264-GRP", "Mr. Robot").
+    private static readonly HashSet<string> NonVideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".nfo", ".md", ".jpg", ".jpeg", ".png", ".srt", ".ass", ".sub", ".idx", ".sfv", ".md5",
+        ".exe", ".bin", ".ini", ".bat", ".url", ".torrent",
+    };
+
     private readonly LibraryScanner _scanner;
     private readonly FolderStore _folders;
     private readonly ActivityHub _hub;
@@ -171,15 +179,17 @@ public sealed class LibraryWatcher : IDisposable
 
     /// <summary>
     /// Whether a change to <paramref name="fullPath"/> can change what a scan finds: a video outside hidden folders
-    /// and not a partial download, or a folder (it may hold videos). A deleted path can't be checked, so one with no
-    /// extension counts as a folder.
+    /// and not a partial download, or a folder (it may hold videos). A path that is already gone can't be checked,
+    /// so it counts unless it has a known non-video file extension.
     /// </summary>
     private static bool Matters(string folderPath, string fullPath)
     {
         // The size is unknown here, so the small-sample rule is left to the scan.
         if (MediaFileRules.IsIgnored(Path.GetRelativePath(folderPath, fullPath), long.MaxValue)) return false;
         if (MediaFileRules.IsVideo(fullPath)) return true;
-        return Directory.Exists(fullPath) || Path.GetExtension(fullPath).Length == 0;
+        if (Directory.Exists(fullPath)) return true;
+        if (File.Exists(fullPath)) return false;
+        return !NonVideoExtensions.Contains(Path.GetExtension(fullPath));
     }
 
     /// <summary>Restarts the folder's quiet-period timer.</summary>

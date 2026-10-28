@@ -117,6 +117,61 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task DeletedFilesInHiddenFoldersPartialDownloadsAndTextFiles_DoNotTriggerRescans()
+    {
+        _folders.Add(_lib.Root);
+        _lib.File(@"Movies\Heat.1995.mkv.!qB", 4096);
+        _lib.File(@"Movies\Alien.1979.mkv.parts", 4096);
+        _lib.File(@".sync\Heat.1995.mkv", 4096);
+        _lib.File(@"Movies\readme.txt", 10);
+        _watcher.Start();
+
+        _lib.Delete(@"Movies\Heat.1995.mkv.!qB");
+        _lib.Delete(@"Movies\Alien.1979.mkv.parts");
+        _lib.Delete(@".sync\Heat.1995.mkv");
+        _lib.Delete(@"Movies\readme.txt");
+        await Task.Delay(Debounce * 3, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, RescanCount());
+    }
+
+    [Fact]
+    public async Task DottedFolderMovedOutOfTheLibrary_TriggersRescan_AndItsRowsGoMissing()
+    {
+        const string name = "Heat.1995.1080p.BluRay.x264-GRP";
+        var folder = _folders.Add(_lib.Root);
+        _lib.File($@"{name}\Heat.1995.1080p.mkv");
+        await new LibraryScanner(_db, _hub).ScanAsync(folder, TestContext.Current.CancellationToken);
+        _watcher.Start();
+        var rescan = NextRescan();
+
+        // One Deleted event for the folder itself, named like a file with a ".x264-GRP" extension.
+        var elsewhere = Path.Combine(Path.GetDirectoryName(_lib.Root)!, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+        Directory.Move(_lib.PathOf(name), Path.Combine(elsewhere, name));
+
+        Assert.Equal(folder.Id, await Within(rescan, Deadline));
+        Assert.True(_files.ByFolder(folder.Id).Single().Missing);
+    }
+
+    [Fact]
+    public async Task DottedFolderRenamedToAHiddenOne_TriggersRescan_AndItsRowsGoMissing()
+    {
+        const string name = "Mr. Robot";
+        var folder = _folders.Add(_lib.Root);
+        _lib.File($@"{name}\Mr.Robot.S01E01.mkv");
+        await new LibraryScanner(_db, _hub).ScanAsync(folder, TestContext.Current.CancellationToken);
+        _watcher.Start();
+        var rescan = NextRescan();
+
+        // The new path is hidden, so only the old one can tell the watcher something changed.
+        Directory.Move(_lib.PathOf(name), _lib.PathOf(".old"));
+
+        Assert.Equal(folder.Id, await Within(rescan, Deadline));
+        Assert.True(_files.ByFolder(folder.Id).Single().Missing);
+    }
+
+    [Fact]
     public async Task FinishedDownload_TriggersRescan_WhenRenamedToItsVideoName()
     {
         var folder = _folders.Add(_lib.Root);
