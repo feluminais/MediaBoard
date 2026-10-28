@@ -22,7 +22,7 @@
                     <DockPanel IsVisible="{Binding IsEditing}">
                         <Button DockPanel.Dock="Right" Content="Cancel" Classes="small" Margin="6,0,0,0" Command="{Binding CancelRenameCommand}" />
                         <Button DockPanel.Dock="Right" Content="Save" Classes="small accent" Margin="6,0,0,0" Command="{Binding CommitRenameCommand}" />
-                        <controls:RenameBox Text="{Binding EditText}" PlaceholderText="Leave empty to reset">
+                        <controls:RenameBox Text="{Binding EditText}" ResumeEdit="{Binding ResumedEdit}" PlaceholderText="Leave empty to reset">
                             <controls:RenameBox.KeyBindings>
                                 <KeyBinding Gesture="Enter" Command="{Binding CommitRenameCommand}" />
                                 <KeyBinding Gesture="Escape" Command="{Binding CancelRenameCommand}" />
@@ -78,7 +78,7 @@
                         <DockPanel IsVisible="{Binding Header.IsEditing}">
                             <Button DockPanel.Dock="Right" Content="Cancel" Margin="8,0,0,0" Command="{Binding Header.CancelRenameCommand}" />
                             <Button DockPanel.Dock="Right" Content="Save" Classes="accent" Margin="8,0,0,0" Command="{Binding Header.CommitRenameCommand}" />
-                            <controls:RenameBox Text="{Binding Header.EditText}" PlaceholderText="Leave empty to reset">
+                            <controls:RenameBox Text="{Binding Header.EditText}" ResumeEdit="{Binding Header.ResumedEdit}" PlaceholderText="Leave empty to reset">
                                 <controls:RenameBox.KeyBindings>
                                     <KeyBinding Gesture="Enter" Command="{Binding Header.CommitRenameCommand}" />
                                     <KeyBinding Gesture="Escape" Command="{Binding Header.CancelRenameCommand}" />
@@ -116,6 +116,7 @@
                             <Button Content="{Binding WatchedText}" Command="{Binding ToggleWatchedCommand}" Margin="0,0,8,8"
                                     IsEnabled="{Binding CanMarkWatched}" />
                             <Button Content="Fix match" Command="{Binding FixMatchCommand}" Margin="0,0,8,8" />
+                            <Button Content="Not a movie or show" Command="{Binding NotMediaCommand}" Margin="0,0,8,8" />
                             <Button Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8"
                                     Foreground="{DynamicResource ErrorTextBrush}" />
                         </WrapPanel>
@@ -195,7 +196,7 @@
                                 <DockPanel IsVisible="{Binding IsEditing}" Margin="0,0,12,0">
                                     <Button DockPanel.Dock="Right" Content="Cancel" Classes="small" Margin="6,0,0,0" Command="{Binding CancelRenameCommand}" />
                                     <Button DockPanel.Dock="Right" Content="Save" Classes="small accent" Margin="6,0,0,0" Command="{Binding CommitRenameCommand}" />
-                                    <controls:RenameBox Text="{Binding EditText}" PlaceholderText="Leave empty to reset">
+                                    <controls:RenameBox Text="{Binding EditText}" ResumeEdit="{Binding ResumedEdit}" PlaceholderText="Leave empty to reset">
                                         <controls:RenameBox.KeyBindings>
                                             <KeyBinding Gesture="Enter" Command="{Binding CommitRenameCommand}" />
                                             <KeyBinding Gesture="Escape" Command="{Binding CancelRenameCommand}" />

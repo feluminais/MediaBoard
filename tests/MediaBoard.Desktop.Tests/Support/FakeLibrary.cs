@@ -82,8 +82,8 @@ internal sealed class FakeLibrary : ILibrary
 
     public DeleteResult DeleteResult { get; set; } = new([], []);
 
-    /// <summary>Runs inside <see cref="FixMatchAsync"/> before it records the call: a test can throw.</summary>
-    public Action? OnFixMatch { get; set; }
+    /// <summary>Runs inside <see cref="FixMatchAsync"/> with the file id, before it moves the file: a test can throw.</summary>
+    public Action<int>? OnFixMatch { get; set; }
 
     public TitleDetailsView? Title(int titleId)
     {
@@ -128,9 +128,11 @@ internal sealed class FakeLibrary : ILibrary
         return FolderRows.ToList();
     }
 
-    public Func<string, IReadOnlyList<TitleCard>> LocalSearch { get; set; } = _ => [];
+    /// <summary>What <see cref="SearchLocal"/> answers; by default every title page the fake holds.</summary>
+    public Func<string, IReadOnlyList<TitleCard>>? LocalSearch { get; set; }
 
-    public IReadOnlyList<TitleCard> SearchLocal(string query, int limit) => LocalSearch(query);
+    public IReadOnlyList<TitleCard> SearchLocal(string query, int limit) =>
+        LocalSearch?.Invoke(query) ?? Details.Values.Select(d => Card(d.TitleId, d.Name, d.Kind)).ToList();
 
     public int? NextEpisodeFileId(int titleId) => Next.GetValueOrDefault(titleId);
 
@@ -173,14 +175,47 @@ internal sealed class FakeLibrary : ILibrary
         Files = d.Files.Select(f => f.FileId == fileId ? f with { Watched = watched, PositionS = watched ? f.PositionS : 0 } : f).ToList(),
     });
 
+    /// <summary>The id of the title a fix match moves files to, for a TMDB id.</summary>
+    public static int MatchedTitleId(int tmdbId) => 1000 + tmdbId;
+
+    /// <summary>Moves the file to the title for <paramref name="tmdbId"/> (made on first use); a title left with no file goes away.</summary>
     public Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct)
     {
-        OnFixMatch?.Invoke();
+        OnFixMatch?.Invoke(fileId);
         lock (Edits) Edits.Add($"fix:{fileId}:{tmdbId}:{kind}");
+
+        var destinationId = MatchedTitleId(tmdbId);
+        foreach (var (id, source) in Details.ToList())
+        {
+            if (id == destinationId) continue;
+            var loose = source.Files.FirstOrDefault(f => f.FileId == fileId);
+            if (loose is null && !source.Seasons.Any(s => s.Episodes.Any(e => e.FileId == fileId))) continue;
+
+            var left = source with
+            {
+                Files = source.Files.Where(f => f.FileId != fileId).ToList(),
+                Seasons = source.Seasons.Select(s => s with
+                {
+                    Episodes = s.Episodes.Select(e => e.FileId == fileId ? e with { FileId = null, Watched = false } : e).ToList(),
+                }).ToList(),
+            };
+            if (left.Files.Count > 0 || left.Seasons.Any(s => s.Episodes.Any(e => e.FileId is not null))) Details[id] = left;
+            else Details.Remove(id);
+
+            var destination = Details.GetValueOrDefault(destinationId)
+                              ?? Movie(destinationId, "Match " + tmdbId) with { TmdbId = tmdbId, Kind = kind, Files = [] };
+            var moved = loose ?? new FileView(fileId, $"File {fileId}.mkv", $"File {fileId}.mkv", false, false, 0, 0, false);
+            Details[destinationId] = destination with { Files = destination.Files.Append(moved).ToList() };
+            break;
+        }
+
         return Task.CompletedTask;
     }
 
-    public void MarkNotMedia(int fileId) => throw new NotSupportedException();
+    public void MarkNotMedia(int fileId)
+    {
+        lock (Edits) Edits.Add($"notmedia:{fileId}");
+    }
 
     public DeletePreview PreviewDelete(int titleId) => Preview ?? new DeletePreview(titleId, "", []);
 

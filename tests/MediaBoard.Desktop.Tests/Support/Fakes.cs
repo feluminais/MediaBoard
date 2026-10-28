@@ -22,7 +22,7 @@ internal sealed class FakePlayback : IPlaybackService
         }
     }
 
-    public event Action<string>? AskFinished;
+    public event Action<int, string>? AskFinished;
 
     /// <summary>The ids passed to <see cref="AnswerFinished"/>, with the answer.</summary>
     public List<(int FileId, bool Finished)> Answers { get; } = [];
@@ -31,7 +31,7 @@ internal sealed class FakePlayback : IPlaybackService
     public Task? PlayGate { get; set; }
 
     /// <summary>Raised on the calling thread; the real service raises it on a player thread.</summary>
-    public void RaiseAskFinished(string title) => AskFinished?.Invoke(title);
+    public void RaiseAskFinished(int fileId, string title) => AskFinished?.Invoke(fileId, title);
 
     public Task PlayAsync(int fileId, bool fromStart, CancellationToken ct)
     {
@@ -123,6 +123,10 @@ internal sealed class Titles
 
     public Func<DeletePreview, Task<bool>> ConfirmDelete { get; set; } = _ => Task.FromResult(true);
 
+    public List<string> NotMediaAsked { get; } = [];
+
+    public bool ConfirmNotMedia { get; set; } = true;
+
     public Func<string, Task<bool?>> AskFinished { get; set; } = _ => Task.FromResult<bool?>(null);
 
     public int Identified { get; private set; }
@@ -139,6 +143,7 @@ internal sealed class Titles
 
     public TitleServices Services() => new(
         Library, Search, Hub, Posters, Launcher, () => Player, preview => ConfirmDelete(preview),
+        name => { NotMediaAsked.Add(name); return Task.FromResult(ConfirmNotMedia); },
         () => { Identified++; return Task.CompletedTask; });
 
     public TitleNavigation Navigation() => new(() => WentBack++, () => SettingsOpened++, Replaced.Add);

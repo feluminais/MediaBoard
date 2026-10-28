@@ -15,7 +15,6 @@ public sealed class PlaybackLauncher
     private readonly ActivityHub _hub;
     private readonly Func<string, Task<bool?>> _askFinished;
     private int _starting;
-    private int _launched;
 
     /// <param name="askFinished">Shows "Did you finish ...?" and answers yes or no; null when the viewer closed it without answering.</param>
     public PlaybackLauncher(IPlaybackService playback, ActivityHub hub, Func<string, Task<bool?>> askFinished)
@@ -34,9 +33,6 @@ public sealed class PlaybackLauncher
         try
         {
             await Task.Run(() => _playback.PlayAsync(fileId, fromStart: false, CancellationToken.None));
-            // Only now: a start that closes the previous player first raises that player's question while it runs,
-            // and the question must name the file that was playing, not the one being started.
-            Volatile.Write(ref _launched, fileId);
         }
         catch (Exception e)
         {
@@ -48,13 +44,9 @@ public sealed class PlaybackLauncher
         }
     }
 
-    // The service names the title, not the file; one player runs at a time, so it is the file started last.
-    // Raised on a player thread.
-    private void OnAskFinished(string title)
+    // The service names the file that was playing. Raised on a player thread.
+    private void OnAskFinished(int fileId, string title)
     {
-        var fileId = Volatile.Read(ref _launched);
-        if (fileId == 0) return;
-
         Dispatcher.UIThread.Post(async () =>
         {
             try

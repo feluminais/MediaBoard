@@ -175,6 +175,8 @@ public static class Composition
                 sp.GetRequiredService<PlaybackLauncher>(),
                 () => detector.Resolve(settings.Load())?.Name,
                 dialogs.ConfirmDeleteAsync,
+                name => dialogs.ConfirmAsync(
+                    $"Mark \"{name}\" as not a movie or show? It leaves the library and isn't identified again. Your files aren't touched.", "Mark"),
                 () => Task.Run(host.IdentifyPendingAsync));
         });
 

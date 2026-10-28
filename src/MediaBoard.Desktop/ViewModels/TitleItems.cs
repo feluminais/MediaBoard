@@ -39,9 +39,13 @@ public partial class EditableItem : ObservableObject
     [ObservableProperty]
     public partial string EditText { get; set; } = "";
 
+    /// <summary>The edit was carried over from the item this one replaced (a refresh): the box keeps what was typed and does not select it.</summary>
+    public bool ResumedEdit { get; private set; }
+
     [RelayCommand]
     private void BeginRename()
     {
+        ResumedEdit = false;
         EditText = Name;
         IsEditing = true;
     }
@@ -65,6 +69,7 @@ public partial class EditableItem : ObservableObject
 
     internal void CarryEditFrom(EditableItem old)
     {
+        ResumedEdit = true;
         EditText = old.EditText;
         IsEditing = old.IsEditing;
     }

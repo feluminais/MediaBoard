@@ -5,6 +5,7 @@ using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Desktop.Controls;
 using MediaBoard.Desktop.Tests.Support;
 using MediaBoard.Desktop.ViewModels;
 using MediaBoard.Desktop.Views;
@@ -374,7 +375,7 @@ public class TitleViewModelTests
     public async Task FixMatch_WhenTmdbCannotAnswer_ShowsTheReason_AndKeepsTheOldMatch()
     {
         _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        _library.OnFixMatch = () => throw new MetadataUnavailableException(UnavailableReason.Offline);
+        _library.OnFixMatch = _ => throw new MetadataUnavailableException(UnavailableReason.Offline);
         _t.Search.Candidates.Add(new SearchCandidate(11, TitleKind.Movie, "Klaus", null, 2019, 50, 8.1, null, null));
         var page = await Loaded(1);
         page.FixMatchCommand.Execute(null);
@@ -417,25 +418,145 @@ public class TitleViewModelTests
         Assert.Equal("No matches", page.Picker.Message);
     }
 
+    private async Task PickFirst(TitleViewModel page, int tmdbId, TitleKind kind)
+    {
+        _t.Search.Candidates.Clear();
+        _t.Search.Candidates.Add(new SearchCandidate(tmdbId, kind, "Better match", null, 2019, 50, 8.1, null, null));
+        page.FixMatchCommand.Execute(null);
+        page.Picker!.Filter = MatchFilter.All;
+        await page.Picker.SearchAsync();
+        await page.Picker.PickCommand.ExecuteAsync(page.Picker.Results[0]);
+    }
+
     [AvaloniaFact]
     public async Task FixMatch_MovesToTheNewTitle_WhenTheFileLeftThisOne()
     {
         _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        _t.Search.Candidates.Add(new SearchCandidate(111, TitleKind.Movie, "Klaus 2", null, 2019, 50, 8.1, null, null));
         var page = await Loaded(1);
-        page.FixMatchCommand.Execute(null);
-        await page.Picker!.SearchAsync();
-        _library.OnFixMatch = () =>
-        {
-            _library.Details.Remove(1); // the file moved to the title TMDB 111 stands for
-            _library.Details[8] = FakeLibrary.Movie(8, "Klaus 2") with { TmdbId = 111 };
-            _library.LocalSearch = _ => [FakeLibrary.Card(8, "Klaus 2")];
-        };
 
-        await page.Picker.PickCommand.ExecuteAsync(page.Picker.Results[0]);
+        await PickFirst(page, 111, TitleKind.Movie);
 
-        Assert.Equal([8], _t.Replaced);
+        Assert.Equal([FakeLibrary.MatchedTitleId(111)], _t.Replaced);
         Assert.Equal(0, _t.WentBack);
+    }
+
+    [AvaloniaFact]
+    public async Task FixMatch_MovesEveryFileOfAShow()
+    {
+        AddShow(); // files 24, 25, 26
+        var page = await Loaded(2);
+
+        await PickFirst(page, 99, TitleKind.Show);
+
+        Assert.Equal(["fix:24:99:Show", "fix:25:99:Show", "fix:26:99:Show"], _library.Edits);
+        Assert.False(_library.Details.ContainsKey(2)); // nothing is left behind on the old title
+        Assert.Equal(3, _library.Details[FakeLibrary.MatchedTitleId(99)].Files.Count);
+        Assert.Equal([FakeLibrary.MatchedTitleId(99)], _t.Replaced);
+        Assert.Equal(1, _t.Identified);
+    }
+
+    [AvaloniaFact]
+    public async Task FixMatch_MovesEveryFileOfAFlatFolderTitle()
+    {
+        _library.Details[1] = FakeLibrary.Movie(1, "Klaus") with
+        {
+            Files =
+            [
+                new FileView(10, "Klaus.mkv", "Klaus.mkv", false, false, 0, 0, false),
+                new FileView(11, "Klaus (extended).mkv", "Klaus (extended).mkv", false, false, 0, 0, false),
+            ],
+        };
+        var page = await Loaded(1);
+
+        await PickFirst(page, 99, TitleKind.Movie);
+
+        Assert.Equal(["fix:10:99:Movie", "fix:11:99:Movie"], _library.Edits);
+        Assert.False(_library.Details.ContainsKey(1));
+    }
+
+    [AvaloniaFact]
+    public async Task FixMatch_StopsAtTheFirstFailure_AndSaysHowManyMoved()
+    {
+        AddShow();
+        _library.OnFixMatch = file =>
+        {
+            if (file == 25) throw new MetadataUnavailableException(UnavailableReason.Offline);
+        };
+        var page = await Loaded(2);
+
+        await PickFirst(page, 99, TitleKind.Show);
+
+        Assert.Equal(["fix:24:99:Show"], _library.Edits); // 25 failed before it moved, 26 was never tried
+        Assert.Equal("Connect to the internet to fix this match. Moved 1 of 3 files.", page.Notice);
+        Assert.Equal(1, _t.Identified); // what moved is identified
+        Assert.True(_library.Details.ContainsKey(2)); // the title still has files, so the page stays
+        Assert.Empty(_t.Replaced);
+        Assert.Equal(0, _t.WentBack);
+    }
+
+    [AvaloniaFact]
+    public async Task NotAMovieOrShow_MarksEveryFile_AfterConfirm_AndGoesBack()
+    {
+        AddShow();
+        var page = await Loaded(2);
+
+        _t.ConfirmNotMedia = false;
+        await page.NotMediaCommand.ExecuteAsync(null);
+        Assert.Empty(_library.Edits);
+        Assert.Equal(0, _t.WentBack);
+
+        _t.ConfirmNotMedia = true;
+        await page.NotMediaCommand.ExecuteAsync(null);
+
+        Assert.Equal(["Dark", "Dark"], _t.NotMediaAsked);
+        Assert.Equal(["notmedia:24", "notmedia:25", "notmedia:26"], _library.Edits);
+        Assert.Equal(1, _t.WentBack);
+    }
+
+    [AvaloniaFact]
+    public async Task TitleView_OffersNotAMovieOrShow()
+    {
+        AddShow();
+        var view = new TitleView { DataContext = await Loaded(2) };
+        var window = new Window { Width = 1000, Height = 800, Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var buttons = view.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).Select(b => b.Content as string).ToList();
+
+        Assert.Contains("Not a movie or show", buttons);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task RenameBox_AfterARefresh_KeepsTheTextAndDoesNotSelectIt()
+    {
+        AddShow();
+        var page = await Loaded(2);
+        var view = new TitleView { DataContext = page };
+        var window = new Window { Width = 1000, Height = 800, Content = view };
+        window.Show();
+        Ui.Flush();
+        List<string?> Texts() => view.GetVisualDescendants().OfType<RenameBox>().Where(b => b.IsEffectivelyVisible).Select(b => b.Text).ToList();
+        RenameBox Box() => view.GetVisualDescendants().OfType<RenameBox>().Single(b => b.IsEffectivelyVisible);
+
+        page.Seasons[0].Episodes[1].BeginRenameCommand.Execute(null);
+        Ui.Flush();
+        window.UpdateLayout();
+        Ui.Flush();
+        Assert.Equal("Dark Matter", Box().SelectedText); // a fresh edit selects the whole name, to type over it
+
+        Box().Text = "Dark Matter, extended";
+        Box().CaretIndex = Box().Text!.Length;
+        await page.RefreshAsync(); // a scan changed the library while the viewer was typing
+        Ui.Flush();
+        window.UpdateLayout();
+        Ui.Flush();
+
+        Assert.Equal(["Dark Matter, extended"], Texts());
+        Assert.Equal("", Box().SelectedText);
+        Assert.Equal("Dark Matter, extended".Length, Box().CaretIndex);
+        window.Close();
     }
 
     [AvaloniaFact]
@@ -648,7 +769,7 @@ public class TitleViewModelTests
         var page = await Loaded(1);
         await page.PlayCommand.ExecuteAsync(null);
 
-        await Task.Run(() => _t.Playback.RaiseAskFinished("Klaus")); // the player closed: a background thread says so
+        await Task.Run(() => _t.Playback.RaiseAskFinished(10, "Klaus")); // the player closed: a background thread says so
         await Ui.WaitUntil(() => _t.Playback.Answers.Count == 1);
 
         Assert.Equal(["Klaus"], asked);
@@ -665,9 +786,9 @@ public class TitleViewModelTests
         var page = await Loaded(1);
         await page.PlayCommand.ExecuteAsync(null);
 
-        await Task.Run(() => _t.Playback.RaiseAskFinished("Klaus"));
+        await Task.Run(() => _t.Playback.RaiseAskFinished(10, "Klaus"));
         await Ui.WaitUntil(() => _t.Playback.Answers.Count == 1);
-        await Task.Run(() => _t.Playback.RaiseAskFinished("Klaus"));
+        await Task.Run(() => _t.Playback.RaiseAskFinished(10, "Klaus"));
         await Ui.WaitUntil(() => answers.Count == 0);
         Ui.Flush();
 
@@ -675,22 +796,15 @@ public class TitleViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task LaunchOnlyPlayer_AfterSwitchingFiles_AsksAboutTheFileThatClosed()
+    public async Task LaunchOnlyPlayer_AnswerGoesToTheFileTheServiceNamed_NotTheLastOneClicked()
     {
         _t.AskFinished = _ => Task.FromResult<bool?>(true);
-        _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        _library.Next[1] = 10;
-        await Loaded(1);
 
-        // Starting file 12 closes file 10's player first; its event arrives while the new start is still running.
+        // File 12 never started (missing, or no player); file 10's player closes meanwhile.
         await _t.Launcher.PlayAsync(10);
-        var gate = new TaskCompletionSource();
-        _t.Playback.PlayGate = gate.Task;
-        var second = _t.Launcher.PlayAsync(12);
-        await Task.Run(() => _t.Playback.RaiseAskFinished("Klaus"));
+        await _t.Launcher.PlayAsync(12);
+        await Task.Run(() => _t.Playback.RaiseAskFinished(10, "Klaus"));
         await Ui.WaitUntil(() => _t.Playback.Answers.Count == 1);
-        gate.SetResult();
-        await second;
 
         Assert.Equal([(10, true)], _t.Playback.Answers);
     }

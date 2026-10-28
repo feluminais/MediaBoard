@@ -31,7 +31,6 @@ public sealed partial class TitleViewModel : PageViewModel
     private string? _playerName;
     private bool _playerKnown;
     private int? _playFileId;
-    private int? _matchFileId;
     private TitleKind _kind;
     private IReadOnlyList<(int FileId, bool Watched)> _files = [];
     private string? _posterPath;
@@ -208,7 +207,7 @@ public sealed partial class TitleViewModel : PageViewModel
         {
             NotFound = true;
             _files = [];
-            _playFileId = _matchFileId = null;
+            _playFileId = null;
             Seasons = [];
             Files = [];
             CanPlay = false;
@@ -249,7 +248,6 @@ public sealed partial class TitleViewModel : PageViewModel
 
         var rows = seasons.SelectMany(s => s.Episodes).Concat(files).Where(i => i.FileId is not null).ToList();
         _files = rows.GroupBy(i => i.FileId!.Value).Select(g => (g.Key, g.Any(i => i.IsWatched))).ToList();
-        _matchFileId = _files.Count > 0 ? _files[0].FileId : null;
         OnPropertyChanged(nameof(HideText));
         OnPropertyChanged(nameof(WatchedText));
         OnPropertyChanged(nameof(CanMarkWatched));
@@ -412,7 +410,7 @@ public sealed partial class TitleViewModel : PageViewModel
             return;
         }
 
-        if (_matchFileId is null) return;
+        if (_files.Count == 0) return;
 
         Picker = new FixMatchPickerViewModel(_s.Search, _s.Hub, Header.Name, _kind, PickMatchAsync, () => Picker = null);
     }
@@ -425,31 +423,49 @@ public sealed partial class TitleViewModel : PageViewModel
         _ => null,
     };
 
+    // The library fixes one file at a time, so every file of the title is moved, one after the other. The first
+    // failure stops the run; what already moved stays moved, and the page says how many did.
     private async Task PickMatchAsync(SearchCandidate choice)
     {
         Picker = null;
-        if (_matchFileId is not { } fileId) return;
+        var fileIds = _files.Select(f => f.FileId).ToList();
+        if (fileIds.Count == 0) return;
 
+        var moved = 0;
+        string? problem = null;
         try
         {
-            await Task.Run(() => _s.Library.FixMatchAsync(fileId, choice.TmdbId, choice.Kind, CancellationToken.None));
+            await Task.Run(async () =>
+            {
+                foreach (var fileId in fileIds)
+                {
+                    await _s.Library.FixMatchAsync(fileId, choice.TmdbId, choice.Kind, CancellationToken.None);
+                    moved++;
+                }
+            });
         }
         catch (MetadataUnavailableException e)
         {
-            Notice = e.Reason switch
+            problem = e.Reason switch
             {
                 UnavailableReason.NoKey => "Add a TMDB key in Settings",
                 UnavailableReason.KeyRejected => "TMDB rejected the key. Check it in Settings.",
                 UnavailableReason.Offline => "Connect to the internet to fix this match",
                 _ => "TMDB isn't answering. Try again later.",
             };
-            return;
         }
         catch (Exception e)
         {
             _s.Hub.Log(ActivityLevel.Error, $"Couldn't fix the match: {e.Message}");
-            Notice = $"Couldn't fix the match: {e.Message}";
-            return;
+            problem = $"Couldn't fix the match: {e.Message}";
+        }
+
+        if (problem is not null)
+        {
+            Notice = moved == 0
+                ? problem
+                : $"{problem.TrimEnd('.')}. Moved {moved} of {Plural.Of(fileIds.Count, "file")}.";
+            if (moved == 0) return;
         }
 
         _ = IdentifyAsync();
@@ -497,6 +513,34 @@ public sealed partial class TitleViewModel : PageViewModel
         if (stays) await RefreshAsync();
         else if (target is { } id) _nav.Replace(id);
         else _nav.Back();
+    }
+
+    // ---- Not a movie or show ----
+
+    /// <summary>Takes the title out of the library for good: every file is marked "not media" and is not identified again.</summary>
+    [RelayCommand]
+    private async Task NotMediaAsync()
+    {
+        var fileIds = _files.Select(f => f.FileId).ToList();
+        if (fileIds.Count == 0) return;
+
+        if (!await _s.ConfirmNotMedia(Header.Name)) return;
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                foreach (var fileId in fileIds) _s.Library.MarkNotMedia(fileId);
+            });
+        }
+        catch (Exception e)
+        {
+            _s.Hub.Log(ActivityLevel.Error, $"Couldn't mark it as not a movie or show: {e.Message}");
+            Notice = $"Couldn't mark it as not a movie or show: {e.Message}";
+            return;
+        }
+
+        _nav.Back(); // the title has no files left
     }
 
     // ---- Delete from disk ----

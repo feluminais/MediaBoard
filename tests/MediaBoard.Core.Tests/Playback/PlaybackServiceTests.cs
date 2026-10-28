@@ -308,14 +308,14 @@ public sealed class PlaybackServiceTests : IDisposable
     {
         _settings.Save(new AppSettings { DefaultPlayerId = "custom", CustomPlayerPath = @"C:\Tools\viewer.exe" });
         var id = AddFile("Movie (2020).mkv");
-        var asked = new List<string>();
-        _service.AskFinished += asked.Add;
+        var asked = new List<(int FileId, string Title)>();
+        _service.AskFinished += (file, title) => asked.Add((file, title));
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
         Assert.Empty(asked);
 
         Session.Raise(new PlaybackEvent.Closed());
 
-        Assert.Equal(["Movie"], asked);
+        Assert.Equal([(id, "Movie")], asked);
         Assert.Null(_hub.Current.PlayerName);
         Assert.Null(_progress.Get(id));
 
@@ -327,10 +327,27 @@ public sealed class PlaybackServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LaunchOnly_AfterAFileThatCouldNotStart_AsksAboutTheFileThatWasPlaying()
+    {
+        _settings.Save(new AppSettings { DefaultPlayerId = "custom", CustomPlayerPath = @"C:\Tools\viewer.exe" });
+        var playing = AddFile("Movie (2020).mkv");
+        var missing = AddFile("Other (2021).mkv", missing: true);
+        var asked = new List<(int FileId, string Title)>();
+        _service.AskFinished += (file, title) => asked.Add((file, title));
+        await _service.PlayAsync(playing, fromStart: false, CancellationToken.None);
+
+        await _service.PlayAsync(missing, fromStart: false, CancellationToken.None); // returns without starting: the first player stays
+
+        Session.Raise(new PlaybackEvent.Closed());
+
+        Assert.Equal([(playing, "Movie")], asked);
+    }
+
+    [Fact]
     public async Task TrackingPlayer_DoesNotAskFinished()
     {
-        var asked = new List<string>();
-        _service.AskFinished += asked.Add;
+        var asked = new List<(int, string)>();
+        _service.AskFinished += (file, title) => asked.Add((file, title));
         await Play("Movie (2020).mkv");
 
         Session.Raise(new PlaybackEvent.Closed());

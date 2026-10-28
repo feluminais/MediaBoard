@@ -16,10 +16,10 @@ public interface IPlaybackService
     Task PlayAsync(int fileId, bool fromStart, CancellationToken ct);
 
     /// <summary>
-    /// A launch-only player closed, so nobody knows whether the viewer finished the file: the argument is its title.
-    /// Raised on a background thread; answer with <see cref="AnswerFinished"/>.
+    /// A launch-only player closed, so nobody knows whether the viewer finished the file: the arguments are the file
+    /// that was playing and its title. Raised on a background thread; answer with <see cref="AnswerFinished"/>.
     /// </summary>
-    event Action<string>? AskFinished;
+    event Action<int, string>? AskFinished;
 
     /// <summary>Records the viewer's answer to <see cref="AskFinished"/>.</summary>
     void AnswerFinished(int fileId, bool finished);
@@ -63,7 +63,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         _createSession = createSession ?? PlayerSessionFactory.Create;
     }
 
-    public event Action<string>? AskFinished;
+    public event Action<int, string>? AskFinished;
 
     public async Task PlayAsync(int fileId, bool fromStart, CancellationToken ct)
     {
@@ -205,7 +205,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         // Not awaited: this runs on the player's event thread, which must not wait on the session.
         _ = Task.Run(() => DisposeQuietlyAsync(playing.Session));
 
-        if (end == EndKind.Closed && !playing.Session.TracksProgress) AskFinished?.Invoke(playing.Title);
+        if (end == EndKind.Closed && !playing.Session.TracksProgress) AskFinished?.Invoke(playing.FileId, playing.Title);
     }
 
     // Called with playing.Gate held. Closed and Failed are already marked final, so Closed's save is the last one.
