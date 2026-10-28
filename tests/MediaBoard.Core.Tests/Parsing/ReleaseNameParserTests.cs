@@ -36,6 +36,11 @@ public class ReleaseNameParserTests
         Row("E02. Weight Gain 4000 (1997) BDRip-AVC [2xUKR_ENG] [Hurtom]", "", 1997, null, [2], ["Weight Gain 4000"]),
         Row("[FanVoxUA]_Over_the_garden_wall_01_[1080p]", "Over the garden wall", leadingNumber: 1),
         Row("01. South Park Bigger, Longer & Uncut (1999) BDRip-AVC [2xUKR_ENG] [Hurtom]", "South Park Bigger, Longer & Uncut", 1999, leadingNumber: 1),
+        Row("Movie.2010.UHD.BluRay.2160p.x265", "Movie", 2010),
+        Row("Movie.Name.2010.REMASTERED.1080p.BluRay", "Movie Name", 2010),
+        Row("Movie.2010.DDP5.1.Atmos.1080p", "Movie", 2010),
+        Row("The 1999 Incident (2015) 1080p", "The 1999 Incident", 2015),
+        Row("The 1999 Incident 2015 1080p", "The 1999 Incident", 2015),
         Row("Film (2010) [tmdbid-65567]", "Film", 2010, tmdbId: 65567),
         Row("Film (2010) [imdbid-tt0106145]", "Film", 2010, imdbId: "tt0106145"),
     ];

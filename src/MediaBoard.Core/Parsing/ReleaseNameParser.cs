@@ -201,7 +201,8 @@ public static class ReleaseNameParser
     }
 
     /// <summary>
-    /// A bracketed year wins. Otherwise the last bare year that is followed by nothing but release tags.
+    /// A bracketed year wins. Otherwise the last bare year followed by nothing but release tags,
+    /// falling back (title text only) to the last bare year not at the start.
     /// </summary>
     private static YearMatch? FindYear(string text, bool allowAtStart)
     {
@@ -209,14 +210,15 @@ public static class ReleaseNameParser
         if (bracketed.Success)
             return new YearMatch(bracketed.Index, bracketed.Length, int.Parse(bracketed.Groups["y"].Value));
 
-        foreach (var match in BareYear.Matches(text).Reverse())
-        {
-            if (match.Index == 0 && !allowAtStart)
-                continue;
-            if (CutAtNoise(text[(match.Index + match.Length)..]).Trim(Separators.ToCharArray()).Length == 0)
-                return new YearMatch(match.Index, match.Length, int.Parse(match.Groups["y"].Value));
-        }
-        return null;
+        var candidates = BareYear.Matches(text).Where(m => m.Index > 0 || allowAtStart).Reverse().ToList();
+        var strict = candidates.FirstOrDefault(m =>
+            CutAtNoise(text[(m.Index + m.Length)..]).Trim(Separators.ToCharArray()).Length == 0);
+
+        // Release tags the noise list does not know (UHD, REMASTERED, DDP5.1, Atmos) can follow the year.
+        // In a title the last bare year still ends it; after an episode marker the strict rule stays,
+        // so a number inside an episode title is not read as a year.
+        var match = strict ?? (allowAtStart ? null : candidates.FirstOrDefault());
+        return match is null ? null : new YearMatch(match.Index, match.Length, int.Parse(match.Groups["y"].Value));
     }
 
     /// <summary>Returns the text before the first noise token.</summary>
