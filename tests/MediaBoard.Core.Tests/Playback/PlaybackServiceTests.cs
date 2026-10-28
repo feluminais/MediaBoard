@@ -1,6 +1,8 @@
 using Dapper;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Players;
+using MediaBoard.Core.Players.MpcHc;
+using MediaBoard.Core.Tests.Players;
 using MediaBoard.Core.Playback;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
@@ -417,6 +419,176 @@ public sealed class PlaybackServiceTests : IDisposable
 
         AssertProgress(id, 720, Hour);
         Assert.True(Session.Disposed);
+    }
+
+    [Fact]
+    public async Task MpcHcMovesToAnotherFile_SessionEnds_PlayerKeepsRunning()
+    {
+        var transport = new LoopTransport();
+        var process = new FakePlayerProcess();
+        var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
+            player => new MpcHcSession(player, () => transport, _ => process));
+        var id = AddFile("Movie (2020).mkv");
+        await service.PlayAsync(id, fromStart: false, CancellationToken.None);
+        transport.Receive(MpcApi.CMD_CONNECT, "4660");
+        transport.Receive(MpcApi.CMD_STATE, "2");
+        transport.Receive(MpcApi.CMD_NOWPLAYING, $"Movie|||{_library.PathOf("Movie (2020).mkv")}|{Hour}.000");
+        transport.Receive(MpcApi.CMD_NOTIFYSEEK, "300.000");
+
+        transport.Receive(MpcApi.CMD_NOWPLAYING, $"Next|||{_library.PathOf("Next (2021).mkv")}|{Hour}.000"); // Next in MPC-HC
+
+        await Waiting.Until(() => process.Disposed);
+        Assert.False(process.CloseRequested);
+        Assert.False(process.Killed);
+        Assert.Null(_hub.Current.PlayerName);
+        AssertProgress(id, 300, Hour);
+    }
+
+    [Fact]
+    public async Task Stop_ClosingThePlayer_SavesAndClosesIt()
+    {
+        var id = await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Position = TimeSpan.FromMinutes(12);
+        Assert.Equal("mpv", _service.CurrentPlayer);
+
+        await _service.StopAsync(closePlayer: true, CancellationToken.None);
+
+        AssertProgress(id, 720, Hour);
+        Assert.True(Session.Disposed);
+        Assert.False(Session.Detached);
+        Assert.Null(_service.CurrentPlayer);
+        Assert.Null(_hub.Current.PlayerName);
+    }
+
+    [Fact]
+    public async Task Stop_LeavingThePlayerOpen_SavesAndDetaches()
+    {
+        var id = await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Position = TimeSpan.FromMinutes(12);
+
+        await _service.StopAsync(closePlayer: false, CancellationToken.None);
+
+        AssertProgress(id, 720, Hour);
+        Assert.True(Session.Detached);
+        Assert.True(Session.Disposed);
+        Assert.Null(_service.CurrentPlayer);
+    }
+
+    [Fact]
+    public async Task SavePosition_KeepsTheSessionGoing()
+    {
+        var id = await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Position = TimeSpan.FromMinutes(12);
+
+        await _service.SavePositionAsync(CancellationToken.None);
+
+        AssertProgress(id, 720, Hour);
+        Assert.False(Session.Disposed);
+        Assert.Equal("mpv", _service.CurrentPlayer);
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(13)));
+        AssertProgress(id, 780, Hour);
+    }
+
+    [Fact]
+    public async Task NothingPlaying_HasNoCurrentPlayer_AndStopDoesNothing()
+    {
+        Assert.Null(_service.CurrentPlayer);
+
+        await _service.SavePositionAsync(CancellationToken.None);
+        await _service.StopAsync(closePlayer: false, CancellationToken.None);
+
+        Assert.Empty(Sessions);
+    }
+
+    [Fact]
+    public async Task SecondPlay_ThatCannotCreateItsSession_ClearsThePlayerName()
+    {
+        var first = AddFile("First.mkv");
+        var second = AddFile("Second.mkv");
+        var calls = 0;
+        var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
+            _ => ++calls == 1 ? new FakePlayerSession() : throw new ArgumentException("bad player"));
+        await service.PlayAsync(first, fromStart: false, CancellationToken.None);
+        Assert.Equal("mpv", _hub.Current.PlayerName);
+
+        await service.PlayAsync(second, fromStart: false, CancellationToken.None);
+
+        Assert.Null(_hub.Current.PlayerName);
+        Assert.Null(service.CurrentPlayer);
+    }
+
+    [Fact]
+    public async Task ProgressChanged_WhenASessionEnds()
+    {
+        var changes = 0;
+        _service.ProgressChanged += () => Interlocked.Increment(ref changes);
+        await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(5)));
+
+        Session.Raise(new PlaybackEvent.Closed());
+
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task ProgressChanged_WhenAFileBecomesWatched()
+    {
+        var changes = 0;
+        _service.ProgressChanged += () => Interlocked.Increment(ref changes);
+        await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(5)));
+        Assert.Equal(0, changes);
+
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(Hour * 0.95)));
+
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task ProgressChanged_WhenAStopSavesTheLastPosition()
+    {
+        var changes = 0;
+        _service.ProgressChanged += () => Interlocked.Increment(ref changes);
+        await Play("Movie (2020).mkv");
+        Session.Position = TimeSpan.FromMinutes(12);
+
+        await _service.StopAsync(closePlayer: true, CancellationToken.None);
+
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public void ProgressChanged_WhenTheViewerAnswersFinished()
+    {
+        var id = AddFile("Movie (2020).mkv");
+        var changes = 0;
+        _service.ProgressChanged += () => Interlocked.Increment(ref changes);
+
+        _service.AnswerFinished(id, finished: true);
+
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>An MPC-HC message window that only records what is sent; the test plays MPC-HC's part.</summary>
+    private sealed class LoopTransport : IMpcTransport
+    {
+        public nint HostHandle => 4096;
+
+        public event Action<uint, string>? Received;
+
+        public void Receive(uint cmd, string payload) => Received?.Invoke(cmd, payload);
+
+        public void Send(nint target, uint cmd, string payload)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     private async Task<int> Play(string relPath)

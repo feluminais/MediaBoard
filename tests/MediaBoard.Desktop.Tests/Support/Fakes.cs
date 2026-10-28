@@ -43,6 +43,29 @@ internal sealed class FakePlayback : IPlaybackService
     {
         lock (Answers) Answers.Add((fileId, finished));
     }
+
+    public event Action? ProgressChanged;
+
+    public void RaiseProgressChanged() => ProgressChanged?.Invoke();
+
+    /// <summary>The player a test says is running; null when nothing plays.</summary>
+    public string? CurrentPlayer { get; set; }
+
+    /// <summary>Every SavePositionAsync and StopAsync call, in order: "save", "stop:close" or "stop:leave".</summary>
+    public List<string> Calls { get; } = [];
+
+    public Task SavePositionAsync(CancellationToken ct)
+    {
+        lock (Calls) Calls.Add("save");
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(bool closePlayer, CancellationToken ct)
+    {
+        lock (Calls) Calls.Add(closePlayer ? "stop:close" : "stop:leave");
+        CurrentPlayer = null;
+        return Task.CompletedTask;
+    }
 }
 
 internal static class Posters

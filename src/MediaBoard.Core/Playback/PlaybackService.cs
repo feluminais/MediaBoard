@@ -23,6 +23,24 @@ public interface IPlaybackService
 
     /// <summary>Records the viewer's answer to <see cref="AskFinished"/>.</summary>
     void AnswerFinished(int fileId, bool finished);
+
+    /// <summary>
+    /// Saved progress changed in a way the pages show: a session ended or was stopped (its last position is saved),
+    /// a file became watched, or <see cref="AnswerFinished"/> recorded an answer. Raised on a background thread.
+    /// </summary>
+    event Action? ProgressChanged;
+
+    /// <summary>The name of the player running the current file, or null when nothing plays.</summary>
+    string? CurrentPlayer { get; }
+
+    /// <summary>Asks the current player where it is and saves that position; the file keeps playing.</summary>
+    Task SavePositionAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Saves the current file's position and ends its session. <paramref name="closePlayer"/> false leaves the
+    /// player running, and from then on nothing it does is saved.
+    /// </summary>
+    Task StopAsync(bool closePlayer, CancellationToken ct);
 }
 
 /// <summary>
@@ -65,6 +83,16 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     public event Action<int, string>? AskFinished;
 
+    public event Action? ProgressChanged;
+
+    public string? CurrentPlayer
+    {
+        get
+        {
+            lock (_stateGate) return _current?.PlayerName;
+        }
+    }
+
     public async Task PlayAsync(int fileId, bool fromStart, CancellationToken ct)
     {
         await _playGate.WaitAsync(ct).ConfigureAwait(false);
@@ -78,7 +106,42 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
     }
 
-    public void AnswerFinished(int fileId, bool finished) => _progress.SetWatched(fileId, finished);
+    public void AnswerFinished(int fileId, bool finished)
+    {
+        _progress.SetWatched(fileId, finished);
+        ProgressChanged?.Invoke();
+    }
+
+    public async Task SavePositionAsync(CancellationToken ct)
+    {
+        await _playGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Playing? playing;
+            lock (_stateGate) playing = _current;
+            if (playing is null) return;
+
+            var position = await FreshPositionAsync(playing, ct).ConfigureAwait(false);
+            SaveAt(playing, position, final: false);
+        }
+        finally
+        {
+            _playGate.Release();
+        }
+    }
+
+    public async Task StopAsync(bool closePlayer, CancellationToken ct)
+    {
+        await _playGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await StopCurrentAsync(ct, closePlayer).ConfigureAwait(false);
+        }
+        finally
+        {
+            _playGate.Release();
+        }
+    }
 
     /// <summary>Saves the open session's position and closes its player.</summary>
     public async ValueTask DisposeAsync()
@@ -133,7 +196,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
 
         var title = string.IsNullOrWhiteSpace(file.Parsed.Title) ? Path.GetFileNameWithoutExtension(file.RelPath) : file.Parsed.Title;
-        var playing = new Playing(fileId, title, session)
+        var playing = new Playing(fileId, title, player.Name, session)
         {
             Duration = file.DurationS ?? saved?.DurationS ?? 0,
             Marked = saved?.Watched ?? false,
@@ -173,11 +236,13 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             PlaybackEvent.Failed => EndKind.Failed,
             _ => EndKind.None,
         };
+        bool markedNow;
         lock (playing.Gate)
         {
             if (playing.Final) return;
             playing.Final = end != EndKind.None;
 
+            var wasMarked = playing.Marked;
             try
             {
                 Apply(playing, e);
@@ -192,9 +257,15 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
                     _hub.Log(ActivityLevel.Warning, "Couldn't save progress", "Check that the library database is writable");
                 }
             }
+
+            markedNow = playing.Marked && !wasMarked;
         }
 
-        if (end == EndKind.None) return;
+        if (end == EndKind.None)
+        {
+            if (markedNow) ProgressChanged?.Invoke();
+            return;
+        }
 
         if (e is PlaybackEvent.Failed failed)
         {
@@ -205,6 +276,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         // Not awaited: this runs on the player's event thread, which must not wait on the session.
         _ = Task.Run(() => DisposeQuietlyAsync(playing.Session));
 
+        ProgressChanged?.Invoke();
         if (end == EndKind.Closed && !playing.Session.TracksProgress) AskFinished?.Invoke(playing.FileId, playing.Title);
     }
 
@@ -258,58 +330,74 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         playing.Marked = true;
     }
 
-    /// <summary>Saves the current session's last position (asking the player for a fresher one) and closes it.</summary>
-    private async Task StopCurrentAsync(CancellationToken ct)
+    /// <summary>
+    /// Saves the current session's last position (asking the player for a fresher one) and ends it: closes the
+    /// player, or with <paramref name="closePlayer"/> false leaves it running.
+    /// </summary>
+    private async Task StopCurrentAsync(CancellationToken ct, bool closePlayer = true)
     {
         Playing? playing;
         lock (_stateGate)
         {
             playing = _current;
             _current = null;
+            if (playing is not null) _hub.SetPlayer(null);
         }
 
         if (playing is null) return;
 
-        TimeSpan? position = null;
-        if (playing.Session.TracksProgress)
-        {
-            try
-            {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(PositionTimeout);
-                position = await playing.Session.GetPositionAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                // The player may be gone already; the last reported position stands.
-                Trace.TraceInformation($"No final position from {playing.Title}: {ex.Message}");
-            }
-        }
+        var position = await FreshPositionAsync(playing, ct).ConfigureAwait(false);
+        if (SaveAt(playing, position, final: true)) ProgressChanged?.Invoke();
 
+        if (!closePlayer) playing.Session.Detach();
+        await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+    }
+
+    /// <summary>Where the player is now, or null when it can't tell (the last reported position then stands).</summary>
+    private static async Task<TimeSpan?> FreshPositionAsync(Playing playing, CancellationToken ct)
+    {
+        if (!playing.Session.TracksProgress) return null;
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(PositionTimeout);
+            return await playing.Session.GetPositionAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The player may be gone already; the last reported position stands.
+            Trace.TraceInformation($"No final position from {playing.Title}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Saves <paramref name="position"/> (or the last reported one); <paramref name="final"/> ends the session's saving.</summary>
+    /// <returns>False when the session had already ended.</returns>
+    private bool SaveAt(Playing playing, TimeSpan? position, bool final)
+    {
         lock (playing.Gate)
         {
-            if (!playing.Final)
+            if (playing.Final) return false;
+            playing.Final = final;
+            try
             {
-                playing.Final = true;
-                try
+                if (position is { } at)
                 {
-                    if (position is { } at)
-                    {
-                        playing.LastPosition = at.TotalSeconds;
-                        if (at.TotalSeconds > RealPositionS) playing.CanSave = true;
-                    }
+                    playing.LastPosition = at.TotalSeconds;
+                    if (at.TotalSeconds > RealPositionS) playing.CanSave = true;
+                }
 
-                    SaveLastPosition(playing);
-                }
-                catch (Exception ex) when (ex is SqliteException or IOException)
-                {
-                    Trace.TraceWarning($"Could not save progress: {ex}");
-                    _hub.Log(ActivityLevel.Warning, "Couldn't save progress", "Check that the library database is writable");
-                }
+                SaveLastPosition(playing);
             }
-        }
+            catch (Exception ex) when (ex is SqliteException or IOException)
+            {
+                Trace.TraceWarning($"Could not save progress: {ex}");
+                _hub.Log(ActivityLevel.Warning, "Couldn't save progress", "Check that the library database is writable");
+            }
 
-        await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+            return true;
+        }
     }
 
     /// <summary>Gives up on a session that never got going.</summary>
@@ -350,12 +438,13 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private enum EndKind { None, Closed, Failed }
 
-    private sealed class Playing(int fileId, string title, IPlayerSession session)
+    private sealed class Playing(int fileId, string title, string playerName, IPlayerSession session)
     {
         public readonly Lock Gate = new();
 
         public int FileId => fileId;
         public string Title => title;
+        public string PlayerName => playerName;
         public IPlayerSession Session => session;
 
         // Everything below is guarded by Gate.
