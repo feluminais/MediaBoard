@@ -9,11 +9,13 @@ namespace MediaBoard.Core.Tests.Support;
 public sealed class FakeMetadataProvider : IMetadataProvider
 {
     private readonly Dictionary<(string Title, int? Year, TitleKind Kind), SearchCandidate[]> _searches = [];
+    private readonly Dictionary<string, SearchCandidate[]> _searchesAny = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (int TmdbId, TitleKind Kind)> _imdb = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(int TmdbId, TitleKind Kind), TitleDetails> _titles = [];
     private readonly Dictionary<(int Show, int Season), SeasonDetails> _seasons = [];
 
     public List<(string Title, int? Year, TitleKind Kind)> Searches { get; } = [];
+    public List<string> AnySearches { get; } = [];
     public List<string> ImdbLookups { get; } = [];
     public List<(int TmdbId, TitleKind Kind)> TitleFetches { get; } = [];
     public List<(int Show, int Season)> SeasonFetches { get; } = [];
@@ -24,6 +26,12 @@ public sealed class FakeMetadataProvider : IMetadataProvider
     public FakeMetadataProvider OnSearch(string title, int? year, TitleKind kind, params SearchCandidate[] results)
     {
         _searches[(title.ToLowerInvariant(), year, kind)] = results;
+        return this;
+    }
+
+    public FakeMetadataProvider OnSearchAny(string query, params SearchCandidate[] results)
+    {
+        _searchesAny[query] = results;
         return this;
     }
 
@@ -56,8 +64,11 @@ public sealed class FakeMetadataProvider : IMetadataProvider
 
     public Task<IReadOnlyList<SearchCandidate>> SearchAnyAsync(string query, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         ThrowIfUnavailable();
-        return Task.FromResult<IReadOnlyList<SearchCandidate>>([]);
+        AnySearches.Add(query);
+        IReadOnlyList<SearchCandidate> found = _searchesAny.TryGetValue(query, out var hit) ? hit : [];
+        return Task.FromResult(found);
     }
 
     public Task<(int TmdbId, TitleKind Kind)?> FindByImdbIdAsync(string imdbId, CancellationToken ct)
