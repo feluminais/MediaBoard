@@ -40,8 +40,8 @@ public static class ReleaseNameParser
         // S01E01, S01E01-E02, S01E01E02, S01E01-02
         new(TokenStart + @"S(?<s>\d{1,2})E(?<e>\d{1,3})(?:-?E?(?<e2>\d{1,3}))?" + TokenEnd,
             RegexOptions.IgnoreCase | RegexOptions.Compiled),
-        // 1x02
-        new(TokenStart + @"(?<s>\d{1,2})x(?<e>\d{1,3})" + TokenEnd,
+        // 1x02, and 8x15a / 8x15b for the two halves of a split episode
+        new(TokenStart + @"(?<s>\d{1,2})x(?<e>\d{1,3})[ab]?" + TokenEnd,
             RegexOptions.IgnoreCase | RegexOptions.Compiled),
         // E02 at the start of the name
         new(@"^E(?<e>\d{1,3})" + TokenEnd, RegexOptions.IgnoreCase | RegexOptions.Compiled),

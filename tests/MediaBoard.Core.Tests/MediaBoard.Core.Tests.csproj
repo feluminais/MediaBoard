@@ -16,4 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaBoard.Core\MediaBoard.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Corpus\torrent-downloads.paths.txt" LogicalName="torrent-downloads.paths.txt" />
+  </ItemGroup>
 </Project>

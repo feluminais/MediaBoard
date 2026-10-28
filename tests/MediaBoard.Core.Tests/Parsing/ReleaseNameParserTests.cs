@@ -32,6 +32,8 @@ public class ReleaseNameParserTests
         Row("Supernatural.S01E01.BluRay.1080p-DVT", "Supernatural", null, 1, [1]),
         Row("Show.S01E01-E02.720p", "Show", null, 1, [1, 2]),
         Row("Show 1x02 Title", "Show", null, 1, [2], ["Title"]),
+        Row("[8x15a] The Krabby Patty That Ate Bikini Bottom [Ukr.Eng] DVDRip-AVC", "", null, 8, [15], ["The Krabby Patty That Ate Bikini Bottom"]),
+        Row("[8x15b] Bubble Buddy Returns [Ukr.Eng] DVDRip-AVC", "", null, 8, [15], ["Bubble Buddy Returns"]),
         Row("[5x03] Rise and Shine & Waiting & Fungus Among Us [Ukr] SATRip-AVC", "", null, 5, [3], ["Rise and Shine & Waiting & Fungus Among Us"]),
         Row("E02. Weight Gain 4000 (1997) BDRip-AVC [2xUKR_ENG] [Hurtom]", "", 1997, null, [2], ["Weight Gain 4000"]),
         Row("[FanVoxUA]_Over_the_garden_wall_01_[1080p]", "Over the garden wall", leadingNumber: 1),
