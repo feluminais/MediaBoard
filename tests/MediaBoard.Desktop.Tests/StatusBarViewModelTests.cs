@@ -117,6 +117,35 @@ public class StatusBarViewModelTests
     }
 
     [AvaloniaFact]
+    public void StatusBar_ShowsLibraryError_InsteadOfUpToDate()
+    {
+        var vm = Create();
+
+        _hub.SetLibraryError("Make sure no other program is using library.db.");
+        Flush();
+
+        Assert.Equal("Can't open the library", vm.LibraryProblem);
+        Assert.Equal("Make sure no other program is using library.db.", vm.LibraryErrorHint);
+        Assert.Null(vm.Progress);
+    }
+
+    [AvaloniaFact]
+    public void StatusBar_ShowsFailedScan_UntilItWorksAgain()
+    {
+        var vm = Create();
+
+        _hub.SetFailedScans(["Movies"]);
+        Flush();
+        Assert.Equal("Scan failed: Movies", vm.FailedScans);
+        Assert.Null(vm.Progress);
+
+        _hub.SetFailedScans([]);
+        Flush();
+        Assert.Null(vm.FailedScans);
+        Assert.Equal("Up to date", vm.Progress);
+    }
+
+    [AvaloniaFact]
     public async Task StatusBar_UpdatesFromBackgroundThread()
     {
         var vm = Create();

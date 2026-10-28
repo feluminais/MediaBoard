@@ -34,7 +34,9 @@ public static class Composition
 
     public static ServiceProvider Build() => Build(DataPaths.Default);
 
-    public static ServiceProvider Build(DataPaths paths)
+    /// <param name="overrides">Runs last, so a test can replace a registration (for instance a Connectivity that never
+    /// touches the network).</param>
+    public static ServiceProvider Build(DataPaths paths, Action<IServiceCollection>? overrides = null)
     {
         var services = new ServiceCollection();
 
@@ -122,6 +124,7 @@ public static class Composition
         services.AddSingleton<StatusBarViewModel>();
         services.AddSingleton<ActivityPanelViewModel>();
         services.AddSingleton<MainWindowViewModel>();
+        overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }

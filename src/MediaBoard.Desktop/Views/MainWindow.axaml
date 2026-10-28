@@ -72,6 +72,12 @@
                             <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center"
                                        Text="{Binding StatusBar.Connection}" />
                             <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding StatusBar.LibraryProblem}"
+                                           Foreground="{DynamicResource ErrorTextBrush}"
+                                           IsVisible="{Binding StatusBar.LibraryProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                <TextBlock Text="{Binding StatusBar.FailedScans}"
+                                           Foreground="{DynamicResource ErrorTextBrush}"
+                                           IsVisible="{Binding StatusBar.FailedScans, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <TextBlock Text="{Binding StatusBar.Progress}"
                                            IsVisible="{Binding StatusBar.Progress, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <TextBlock Text="{Binding StatusBar.Identifying}"

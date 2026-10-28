@@ -23,5 +23,11 @@ public sealed record StatusSnapshot
 
     public IReadOnlyList<string> UnavailableFolders { get; init; } = [];
 
+    /// <summary>The library database could not be opened: what to do about it. Null once it opened.</summary>
+    public string? LibraryError { get; init; }
+
+    /// <summary>Folders whose last scan threw; a folder leaves the list when a scan of it succeeds.</summary>
+    public IReadOnlyList<string> FailedScans { get; init; } = [];
+
     public bool IsScanning => ScanFolder is not null;
 }

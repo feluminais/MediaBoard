@@ -15,9 +15,21 @@ public class MainWindowViewModelTests
     private readonly FakeLibrary _library = new();
 
     private MainWindowViewModel Create() =>
-        new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub));
+        new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub);
 
     private static void Flush() => Dispatcher.UIThread.RunJobs();
+
+    // Queries run on the thread pool; pump the UI thread until their results are applied.
+    private static async Task WaitUntil(Func<bool> done)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!done())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("The view model never caught up.");
+            await Task.Delay(10);
+            Flush();
+        }
+    }
 
     [AvaloniaFact]
     public async Task Sidebar_ReviewCountUpdates_OnLibraryChanged()
@@ -25,6 +37,7 @@ public class MainWindowViewModelTests
         var vm = Create();
         _library.RaiseChanged();
         Flush();
+        await WaitUntil(() => vm.CurrentPage is HomeViewModel { IsLoaded: true });
         Assert.Equal(0, vm.ReviewCount);
 
         _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
@@ -32,8 +45,100 @@ public class MainWindowViewModelTests
         await Task.Run(_library.RaiseChanged); // a scan or identification run raises it off the UI thread
         Flush();
 
-        Assert.Equal(2, vm.ReviewCount);
+        await WaitUntil(() => vm.ReviewCount == 2);
         Assert.Equal(2, vm.NavItems.Single(i => i.Key == MainWindowViewModel.ReviewPage).Badge);
+    }
+
+    [AvaloniaFact]
+    public async Task Refresh_ReturnsAtOnce_WhileAQueryBlocks()
+    {
+        using var gate = new ManualResetEventSlim();
+        var uiThread = Environment.CurrentManagedThreadId;
+        var queryThreads = new List<int>();
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        _library.OnQuery = _ =>
+        {
+            lock (queryThreads) queryThreads.Add(Environment.CurrentManagedThreadId);
+            gate.Wait(TimeSpan.FromSeconds(10));
+        };
+        var vm = Create();
+
+        _library.RaiseChanged();
+        Flush(); // runs the posted refresh; it must not wait for the blocked queries
+
+        Assert.Equal(0, vm.ReviewCount);
+        gate.Set();
+        await WaitUntil(() => vm.ReviewCount == 1 && vm.CurrentPage is HomeViewModel { IsLoaded: true });
+        lock (queryThreads) Assert.DoesNotContain(uiThread, queryThreads);
+    }
+
+    [AvaloniaFact]
+    public async Task Refresh_DropsAStaleResult()
+    {
+        using var firstGate = new ManualResetEventSlim();
+        using var firstDone = new ManualResetEventSlim();
+        var calls = 0;
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        _library.OnQuery = name =>
+        {
+            if (name != nameof(FakeLibrary.NeedsReviewCount) || Interlocked.Increment(ref calls) != 1) return;
+            firstGate.Wait(TimeSpan.FromSeconds(10));
+            firstDone.Set();
+        };
+        var vm = Create();
+
+        _library.RaiseChanged(); // first count reads 1 and blocks
+        Flush();
+        _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
+        _library.RaiseChanged(); // second count reads 2 and returns at once
+        Flush();
+        await WaitUntil(() => vm.ReviewCount == 2);
+
+        firstGate.Set();
+        Assert.True(firstDone.Wait(TimeSpan.FromSeconds(10)));
+        await Task.Delay(50);
+        Flush();
+
+        Assert.Equal(2, vm.ReviewCount);
+    }
+
+    [AvaloniaFact]
+    public async Task Refresh_LogsAFailedQuery_WithoutCrashing()
+    {
+        _library.OnQuery = _ => throw new InvalidOperationException("database is locked");
+        var vm = Create();
+
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error));
+
+        var error = _hub.Recent.First(e => e.Level == ActivityLevel.Error);
+        Assert.Contains("database is locked", error.Message);
+        Assert.Equal(BackgroundQuery.FailureHint, error.Hint);
+        Assert.Equal(0, vm.ReviewCount);
+
+        // The same failure again is not logged twice.
+        var logged = _hub.Recent.Count;
+        _library.RaiseChanged();
+        Flush();
+        await Task.Delay(100);
+        Flush();
+        Assert.Equal(logged, _hub.Recent.Count);
+    }
+
+    [AvaloniaFact]
+    public void LibraryError_ShowsOnHome_AndOpensActivity()
+    {
+        var vm = Create();
+
+        _hub.SetLibraryError("Make sure no other program is using library.db.");
+        Flush();
+
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+        Assert.True(home.ShowError);
+        Assert.False(home.ShowNoFolders);
+        Assert.Equal("Make sure no other program is using library.db.", home.LibraryError);
+        Assert.True(vm.IsActivityOpen);
     }
 
     [AvaloniaFact]
@@ -105,29 +210,34 @@ public class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
-    public void Home_PromptsForFolder_WhenThereAreNone()
+    public async Task Home_PromptsForFolder_WhenThereAreNone()
     {
         var vm = Create();
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+        Assert.False(home.ShowNoFolders); // nothing until the first load
+
         _library.RaiseChanged();
         Flush();
+        await WaitUntil(() => home.IsLoaded);
 
-        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
-        Assert.True(home.HasNoFolders);
-
+        Assert.True(home.ShowNoFolders);
+        Assert.False(home.ShowRows);
         home.AddFolderCommand.Execute(null);
         Assert.Equal("Folders", Assert.IsAssignableFrom<PageViewModel>(vm.CurrentPage).Title);
     }
 
     [AvaloniaFact]
-    public void Home_ShowsRows_WhenAFolderExists()
+    public async Task Home_ShowsRows_WhenAFolderExists()
     {
         _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
         var vm = Create();
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+
         _library.RaiseChanged();
         Flush();
+        await WaitUntil(() => home.IsLoaded);
 
-        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
-        Assert.False(home.HasNoFolders);
-        Assert.True(home.IsLoaded);
+        Assert.True(home.ShowRows);
+        Assert.False(home.ShowNoFolders);
     }
 }

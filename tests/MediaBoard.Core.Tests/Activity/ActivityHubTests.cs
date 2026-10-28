@@ -95,6 +95,28 @@ public class ActivityHubTests
     }
 
     [Fact]
+    public void ActivityHub_TracksLibraryErrorAndFailedScans()
+    {
+        var hub = new ActivityHub();
+        var raised = 0;
+        hub.StatusChanged += _ => raised++;
+
+        hub.SetLibraryError("Close other programs using library.db");
+        hub.SetFailedScans(["Movies"]);
+        hub.SetLibraryError("Close other programs using library.db");
+        hub.SetFailedScans(["Movies"]);
+
+        Assert.Equal(2, raised);
+        Assert.Equal("Close other programs using library.db", hub.Current.LibraryError);
+        Assert.Equal(["Movies"], hub.Current.FailedScans);
+
+        hub.SetLibraryError(null);
+        hub.SetFailedScans([]);
+        Assert.Null(hub.Current.LibraryError);
+        Assert.Empty(hub.Current.FailedScans);
+    }
+
+    [Fact]
     public void ActivityHub_RaisesEntryLogged_OutsideItsLock()
     {
         var hub = new ActivityHub();

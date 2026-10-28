@@ -113,6 +113,20 @@ public sealed partial class LocalLibrary
 
     // ---- Needs review and folders ----
 
+    /// <summary>One COUNT query: a file is hidden when it, or its folder, is (the same rule as the snapshot).</summary>
+    public int NeedsReviewCount()
+    {
+        using var connection = _db.Open();
+        return connection.ExecuteScalar<int>(
+            """
+            SELECT COUNT(*) FROM files f
+            WHERE f.status = 'review'
+              AND NOT EXISTS (SELECT 1 FROM overrides o WHERE o.hidden = 1
+                              AND ((o.target_kind = 'file' AND o.target_id = f.id)
+                                OR (o.target_kind = 'folder' AND o.target_id = f.folder_id)))
+            """);
+    }
+
     public IReadOnlyList<ReviewItem> NeedsReview()
     {
         var snapshot = LibrarySnapshot.Load(_db);

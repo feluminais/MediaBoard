@@ -54,6 +54,15 @@ public sealed class ActivityHub
         Update(s => s.UnavailableFolders.SequenceEqual(copy) ? s : s with { UnavailableFolders = copy });
     }
 
+    public void SetLibraryError(string? hint) =>
+        Update(s => s.LibraryError == hint ? s : s with { LibraryError = hint });
+
+    public void SetFailedScans(IReadOnlyList<string> names)
+    {
+        var copy = names.ToArray();
+        Update(s => s.FailedScans.SequenceEqual(copy) ? s : s with { FailedScans = copy });
+    }
+
     public void Log(ActivityLevel level, string message, string? hint = null)
     {
         var entry = new ActivityEntry(_time.GetLocalNow().DateTime, level, message, hint);

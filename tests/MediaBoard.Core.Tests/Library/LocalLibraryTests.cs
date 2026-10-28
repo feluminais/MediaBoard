@@ -728,6 +728,28 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal([fargo.Id], _library.NeedsReview().Select(i => i.FileId));
     }
 
+    [Fact]
+    public async Task NeedsReviewCount_MatchesNeedsReview_SkippingHiddenFilesAndFolders()
+    {
+        _lib.File(@"Fargo Season 1\Fargo.S01E01.mkv", 4096);
+        _lib.File(@"Other\Other.2020.mkv", 4096);
+        _lib.File(@"Third\Third.2021.mkv", 4096);
+        await Scan();
+        Assert.Equal(0, _library.NeedsReviewCount());
+        foreach (var rel in new[] { @"Fargo Season 1\Fargo.S01E01.mkv", @"Other\Other.2020.mkv", @"Third\Third.2021.mkv" })
+            _matches.SetReview(Row(rel).Id, [], _titles.UpsertProvisional("X", TitleKind.Movie, null));
+
+        Assert.Equal(3, _library.NeedsReviewCount());
+
+        _library.SetHidden(TargetKind.File, Row(@"Other\Other.2020.mkv").Id, true);
+        Assert.Equal(2, _library.NeedsReviewCount());
+        Assert.Equal(_library.NeedsReview().Count, _library.NeedsReviewCount());
+
+        _library.SetHidden(TargetKind.Folder, _folder.Id, true);
+        Assert.Equal(0, _library.NeedsReviewCount());
+        Assert.Empty(_library.NeedsReview());
+    }
+
     // ---- Folders ----
 
     [Fact]

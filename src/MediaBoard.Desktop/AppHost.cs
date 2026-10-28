@@ -30,6 +30,7 @@ public sealed class AppHost(
 {
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _keyGate = new();
+    private readonly Dictionary<int, string> _failedScans = [];
     private string? _lastKey;
     private Task _startup = Task.CompletedTask;
     private int _lastPending;
@@ -74,7 +75,7 @@ public sealed class AppHost(
     {
         try
         {
-            db.Open().Dispose(); // creates or upgrades the database here rather than on the UI thread
+            if (!TryOpenDatabase()) return; // nothing else can work without it
             library.NotifyChanged(); // the pages can read it now
 
             connectivity.Start();
@@ -104,6 +105,25 @@ public sealed class AppHost(
         }
     }
 
+    // Creates or upgrades the database here rather than on the UI thread. A locked or corrupt library.db, or a
+    // data folder that can't be written, ends startup: the status bar and Home say so and the activity panel opens.
+    private bool TryOpenDatabase()
+    {
+        try
+        {
+            db.Open().Dispose();
+            hub.SetLibraryError(null);
+            return true;
+        }
+        catch (Exception e)
+        {
+            var hint = $"Make sure no other program is using {db.FilePath} and that you can write to it, then restart MediaBoard.";
+            hub.Log(ActivityLevel.Error, $"Can't open the library: {e.Message}", hint);
+            hub.SetLibraryError(hint);
+            return false;
+        }
+    }
+
     private async Task ScanAsync(LibraryFolder folder, CancellationToken ct)
     {
         try
@@ -114,10 +134,32 @@ public sealed class AppHost(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             hub.Log(ActivityLevel.Error, $"Couldn't scan {folder.Path}: {e.Message}", "Restart MediaBoard to scan it again.");
+            SetScanFailed(folder.Id, FolderName(folder.Path));
             return;
         }
 
+        SetScanFailed(folder.Id, null);
         _ = IdentifyAsync(ct);
+    }
+
+    /// <summary>Records that a folder's last scan threw (a name) or worked (null), and publishes the failed names.</summary>
+    private void SetScanFailed(int folderId, string? name)
+    {
+        string[] names;
+        lock (_failedScans)
+        {
+            var changed = name is null ? _failedScans.Remove(folderId) : _failedScans.TryAdd(folderId, name);
+            if (!changed) return;
+            names = _failedScans.Values.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        hub.SetFailedScans(names);
+    }
+
+    private static string FolderName(string path)
+    {
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+        return string.IsNullOrEmpty(name) ? path : name; // a drive root has no name of its own
     }
 
     private async Task IdentifyAsync(CancellationToken ct)
@@ -126,9 +168,11 @@ public sealed class AppHost(
         library.NotifyChanged();
     }
 
-    // A watcher rescan only reports the folder id, so there is no result for RecordScan.
+    // A watcher rescan only reports the folder id, so there is no result for RecordScan. The watcher raises this
+    // only after a scan that worked; a failed rescan is logged by the watcher itself.
     private void OnRescanned(int folderId)
     {
+        SetScanFailed(folderId, null);
         library.NotifyChanged();
         _ = IdentifyAsync(_stopping.Token);
     }

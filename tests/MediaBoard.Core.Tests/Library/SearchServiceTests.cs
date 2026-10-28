@@ -235,6 +235,7 @@ public sealed class SearchServiceTests : IDisposable
         public IReadOnlyList<TitleCard> Titles(TitleKind kind, TitleSort sort, bool includeHidden) => throw new NotSupportedException();
         public TitleDetailsView? Title(int titleId) => throw new NotSupportedException();
         public IReadOnlyList<ReviewItem> NeedsReview() => throw new NotSupportedException();
+        public int NeedsReviewCount() => throw new NotSupportedException();
         public IReadOnlyList<FolderRow> Folders() => throw new NotSupportedException();
         public int? NextEpisodeFileId(int titleId) => throw new NotSupportedException();
         public void Rename(TargetKind kind, int id, string? displayName) => throw new NotSupportedException();

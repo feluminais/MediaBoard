@@ -46,6 +46,18 @@ public sealed partial class StatusBarViewModel : ObservableObject
     [ObservableProperty]
     public partial string? UnavailableFolders { get; private set; }
 
+    /// <summary>"Can't open the library" when the database could not be opened.</summary>
+    [ObservableProperty]
+    public partial string? LibraryProblem { get; private set; }
+
+    /// <summary>What to do about <see cref="LibraryProblem"/>; Home shows it.</summary>
+    [ObservableProperty]
+    public partial string? LibraryErrorHint { get; private set; }
+
+    /// <summary>"Scan failed: Movies" until a scan of that folder works again.</summary>
+    [ObservableProperty]
+    public partial string? FailedScans { get; private set; }
+
     /// <summary>The player's name while a file plays.</summary>
     [ObservableProperty]
     public partial string? Player { get; private set; }
@@ -70,8 +82,17 @@ public sealed partial class StatusBarViewModel : ObservableObject
             { ScanFolder: { } folder, ScanTotal: > 0 } => string.Create(CultureInfo.InvariantCulture,
                 $"Scanning {folder}, {s.ScanDone} of {s.ScanTotal}"),
             { ScanFolder: { } folder } => $"Scanning {folder}",
-            { PendingIdentification: > 0 } => null,
+            // "Up to date" would be wrong next to any of these.
+            { PendingIdentification: > 0 } or { LibraryError: not null } or { FailedScans.Count: > 0 } => null,
             _ => "Up to date",
+        };
+        LibraryProblem = s.LibraryError is null ? null : "Can't open the library";
+        LibraryErrorHint = s.LibraryError;
+        FailedScans = s.FailedScans.Count switch
+        {
+            0 => null,
+            1 => $"Scan failed: {s.FailedScans[0]}",
+            _ => $"Scans failed: {string.Join(", ", s.FailedScans)}",
         };
         Identifying = s.PendingIdentification > 0
             ? string.Create(CultureInfo.InvariantCulture, $"Identifying {s.PendingIdentification}")

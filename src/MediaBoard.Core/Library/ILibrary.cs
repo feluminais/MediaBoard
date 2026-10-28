@@ -26,6 +26,9 @@ public interface ILibrary
 
     IReadOnlyList<ReviewItem> NeedsReview();
 
+    /// <summary>How many items <see cref="NeedsReview"/> would list, without building them (the sidebar badge).</summary>
+    int NeedsReviewCount();
+
     /// <summary>Library folders with the non-media folders the last scan skipped and whether each can be read.</summary>
     IReadOnlyList<FolderRow> Folders();
 
