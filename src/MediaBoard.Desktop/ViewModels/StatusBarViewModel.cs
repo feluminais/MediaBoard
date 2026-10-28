@@ -16,12 +16,15 @@ public sealed partial class StatusBarViewModel : ObservableObject
 {
     private readonly ActivityHub _hub;
     private int _applyQueued;
+    private int _unseenProblems;
+    private string? _latestProblem;
 
     public StatusBarViewModel(ActivityHub hub)
     {
         _hub = hub;
         Apply(hub.Current);
         hub.StatusChanged += OnStatusChanged;
+        hub.EntryLogged += OnEntryLogged;
     }
 
     /// <summary>Raised when the user clicks the TMDB key segment.</summary>
@@ -58,12 +61,47 @@ public sealed partial class StatusBarViewModel : ObservableObject
     [ObservableProperty]
     public partial string? FailedScans { get; private set; }
 
+    /// <summary>
+    /// Warnings and errors logged since the activity panel was last open: the latest message, or "3 problems".
+    /// Null when there is nothing unseen. Clicking the strip opens the panel, which clears it.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? Problem { get; private set; }
+
+    /// <summary>The activity panel is open (set by the shell): problems logged meanwhile are seen as they arrive.</summary>
+    [ObservableProperty]
+    public partial bool IsActivityOpen { get; set; }
+
     /// <summary>The player's name while a file plays.</summary>
     [ObservableProperty]
     public partial string? Player { get; private set; }
 
     [RelayCommand]
     private void OpenSettings() => SettingsRequested?.Invoke();
+
+    partial void OnIsActivityOpenChanged(bool value)
+    {
+        if (!value) return;
+        _unseenProblems = 0;
+        _latestProblem = null;
+        Problem = null;
+    }
+
+    // Raised on the logging thread; counted on the UI thread, where IsActivityOpen lives.
+    private void OnEntryLogged(ActivityEntry entry)
+    {
+        if (entry.Level == ActivityLevel.Info) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (IsActivityOpen) return;
+            _unseenProblems++;
+            _latestProblem = entry.Message;
+            Problem = _unseenProblems == 1
+                ? _latestProblem
+                : string.Create(CultureInfo.InvariantCulture, $"{_unseenProblems} problems");
+        });
+    }
 
     private void OnStatusChanged(StatusSnapshot _)
     {

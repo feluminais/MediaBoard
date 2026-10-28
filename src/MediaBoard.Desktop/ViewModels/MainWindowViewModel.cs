@@ -248,6 +248,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void ToggleActivity() => IsActivityOpen = !IsActivityOpen;
 
+    partial void OnIsActivityOpenChanged(bool value) => StatusBar.IsActivityOpen = value;
+
     partial void OnIsSearchOpenChanged(bool value)
     {
         if (value) Search.Reset();

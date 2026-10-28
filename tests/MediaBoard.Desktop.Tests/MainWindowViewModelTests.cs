@@ -1,3 +1,4 @@
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -241,6 +242,37 @@ public partial class MainWindowViewModelTests
 
         Assert.Equal("Folder unavailable: Shows", vm.Entries[0].Message);
         Assert.Equal("Connect the drive", vm.Entries[0].Hint);
+    }
+
+    [AvaloniaFact]
+    public void OpeningTheActivityPanel_MarksProblemsSeen()
+    {
+        var vm = Create();
+        _hub.Log(ActivityLevel.Warning, "Couldn't start MPC-HC");
+        Flush();
+        Assert.Equal("Couldn't start MPC-HC", vm.StatusBar.Problem);
+
+        vm.ToggleActivityCommand.Execute(null);
+
+        Assert.Null(vm.StatusBar.Problem);
+    }
+
+    [AvaloniaFact]
+    public void Problem_ShowsInTheStatusBar_InTheErrorColour()
+    {
+        var vm = Create();
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+
+        _hub.Log(ActivityLevel.Error, "Couldn't delete the files: access denied");
+        Flush();
+
+        var text = window.FindControl<TextBlock>("ProblemText")!;
+        Assert.True(text.IsEffectivelyVisible);
+        Assert.Equal("Couldn't delete the files: access denied", text.Text);
+        Assert.True(window.TryFindResource("ErrorTextBrush", window.ActualThemeVariant, out var brush));
+        Assert.Same(brush, text.Foreground);
+        window.Close();
     }
 
     [AvaloniaFact]

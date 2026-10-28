@@ -15,6 +15,60 @@ public class StatusBarViewModelTests
     private static void Flush() => Dispatcher.UIThread.RunJobs();
 
     [AvaloniaFact]
+    public void Problem_ShowsTheLatestWarningOrError()
+    {
+        var vm = Create();
+        Assert.Null(vm.Problem);
+
+        _hub.Log(ActivityLevel.Warning, "Couldn't start MPC-HC", "Choose another player in Settings");
+        Flush();
+
+        Assert.Equal("Couldn't start MPC-HC", vm.Problem);
+    }
+
+    [AvaloniaFact]
+    public void Problem_CountsSeveral()
+    {
+        var vm = Create();
+
+        _hub.Log(ActivityLevel.Warning, "File missing: Heat.mkv");
+        _hub.Log(ActivityLevel.Error, "Couldn't delete the files: access denied");
+        Flush();
+
+        Assert.Equal("2 problems", vm.Problem);
+    }
+
+    [AvaloniaFact]
+    public void Problem_IgnoresInfo()
+    {
+        var vm = Create();
+
+        _hub.Log(ActivityLevel.Info, "Added 3 files");
+        Flush();
+
+        Assert.Null(vm.Problem);
+    }
+
+    [AvaloniaFact]
+    public void Problem_ClearsOnceSeen_AndSkipsWhatArrivesWhileTheActivityPanelIsOpen()
+    {
+        var vm = Create();
+        _hub.Log(ActivityLevel.Warning, "File missing: Heat.mkv");
+        Flush();
+
+        vm.IsActivityOpen = true;
+        Assert.Null(vm.Problem);
+        _hub.Log(ActivityLevel.Error, "Couldn't fix the match: locked");
+        Flush();
+        Assert.Null(vm.Problem);
+
+        vm.IsActivityOpen = false;
+        _hub.Log(ActivityLevel.Error, "Couldn't save progress");
+        Flush();
+        Assert.Equal("Couldn't save progress", vm.Problem);
+    }
+
+    [AvaloniaFact]
     public void StatusBar_ShowsScanProgress()
     {
         var vm = Create();

@@ -71,7 +71,8 @@
 
     <Panel>
         <DockPanel>
-            <!-- Status bar: always visible. The key segment opens Settings; the rest toggles the activity panel. -->
+            <!-- Status bar: always visible. The key segment opens Settings; the rest toggles the activity panel. A problem
+                 segment (red) shows warnings and errors logged since the panel was last open. -->
             <Border DockPanel.Dock="Bottom" Height="30"
                     Background="{DynamicResource StripBrush}"
                     BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0">
@@ -87,6 +88,10 @@
                             <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center"
                                        Text="{Binding StatusBar.Connection}" />
                             <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+                                <TextBlock x:Name="ProblemText" Text="{Binding StatusBar.Problem}"
+                                           Foreground="{DynamicResource ErrorTextBrush}" MaxWidth="480"
+                                           TextTrimming="CharacterEllipsis"
+                                           IsVisible="{Binding StatusBar.Problem, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <TextBlock Text="{Binding StatusBar.LibraryProblem}"
                                            Foreground="{DynamicResource ErrorTextBrush}"
                                            IsVisible="{Binding StatusBar.LibraryProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
