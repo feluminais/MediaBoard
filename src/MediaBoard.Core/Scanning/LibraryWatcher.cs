@@ -1,4 +1,5 @@
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Core.Scanning;
@@ -124,15 +125,26 @@ public sealed class LibraryWatcher : IDisposable
             var created = watch = new Watch(folder, fsw);
             created.Timer = new Timer(_ => OnTimer(created), null, Timeout.Infinite, Timeout.Infinite);
 
-            fsw.Created += (_, _) => Schedule(created);
+            // Only changes the scanner cares about: a torrent client writing a partial download, or a file in a
+            // hidden folder, would otherwise keep the folder rescanning for as long as the download runs.
+            fsw.Created += (_, e) =>
+            {
+                if (Matters(folder.Path, e.FullPath)) Schedule(created);
+            };
             // A directory's own Changed event is only a timestamp update. Windows also fires it when the scan
             // opens a file for the first time, which would queue a pointless second scan after every scan.
             fsw.Changed += (_, e) =>
             {
-                if (!Directory.Exists(e.FullPath)) Schedule(created);
+                if (!Directory.Exists(e.FullPath) && Matters(folder.Path, e.FullPath)) Schedule(created);
             };
-            fsw.Deleted += (_, _) => Schedule(created);
-            fsw.Renamed += (_, _) => Schedule(created);
+            fsw.Deleted += (_, e) =>
+            {
+                if (Matters(folder.Path, e.FullPath)) Schedule(created);
+            };
+            fsw.Renamed += (_, e) =>
+            {
+                if (Matters(folder.Path, e.FullPath) || Matters(folder.Path, e.OldFullPath)) Schedule(created);
+            };
             fsw.Error += (_, e) =>
             {
                 // The buffer overflowed or the folder vanished: individual events are lost, so rescan it all.
@@ -152,6 +164,19 @@ public sealed class LibraryWatcher : IDisposable
             watch?.Cancel.Dispose();
             return null;
         }
+    }
+
+    /// <summary>
+    /// Whether a change to <paramref name="fullPath"/> can change what a scan finds: a video outside hidden folders
+    /// and not a partial download, or a folder (it may hold videos). A deleted path can't be checked, so one with no
+    /// extension counts as a folder.
+    /// </summary>
+    private static bool Matters(string folderPath, string fullPath)
+    {
+        // The size is unknown here, so the small-sample rule is left to the scan.
+        if (MediaFileRules.IsIgnored(Path.GetRelativePath(folderPath, fullPath), long.MaxValue)) return false;
+        if (MediaFileRules.IsVideo(fullPath)) return true;
+        return Directory.Exists(fullPath) || Path.GetExtension(fullPath).Length == 0;
     }
 
     /// <summary>Restarts the folder's quiet-period timer.</summary>

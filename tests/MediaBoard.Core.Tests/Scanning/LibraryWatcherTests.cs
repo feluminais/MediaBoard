@@ -99,6 +99,50 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task PartialDownloadsHiddenAndNonVideoFiles_DoNotTriggerRescans()
+    {
+        _folders.Add(_lib.Root);
+        _lib.Folder("Movies");
+        _lib.Folder(".sync");
+        _watcher.Start();
+
+        _lib.File(@"Movies\Heat.1995.mkv.!qB", 4096);
+        _lib.File(@"Movies\Alien.1979.mkv.part", 4096);
+        _lib.File(@".sync\Heat.1995.mkv", 4096);
+        _lib.File(@"Movies\readme.txt", 10);
+        _lib.Resize(@"Movies\Heat.1995.mkv.!qB", 8192);
+        await Task.Delay(Debounce * 3, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, RescanCount());
+    }
+
+    [Fact]
+    public async Task FinishedDownload_TriggersRescan_WhenRenamedToItsVideoName()
+    {
+        var folder = _folders.Add(_lib.Root);
+        _lib.Folder("Movies");
+        _lib.File(@"Movies\Heat.1995.mkv.!qB", 4096);
+        _watcher.Start();
+        var rescan = NextRescan();
+
+        File.Move(_lib.PathOf(@"Movies\Heat.1995.mkv.!qB"), _lib.PathOf(@"Movies\Heat.1995.mkv"));
+
+        Assert.Equal(folder.Id, await Within(rescan, Deadline));
+    }
+
+    [Fact]
+    public async Task NewFolder_TriggersRescan()
+    {
+        var folder = _folders.Add(_lib.Root);
+        _watcher.Start();
+        var rescan = NextRescan();
+
+        _lib.Folder("Shows");
+
+        Assert.Equal(folder.Id, await Within(rescan, Deadline));
+    }
+
+    [Fact]
     public async Task BurstOfChanges_TriggersOneRescan()
     {
         var folder = _folders.Add(_lib.Root);
