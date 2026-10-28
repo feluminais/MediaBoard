@@ -86,10 +86,20 @@ internal sealed class FakeSearch : ISearchService
 
     public List<string> Queries { get; } = [];
 
+    /// <summary>TMDB ids the library already holds, with the local title id SearchAsync reports for them.</summary>
+    public Dictionary<int, int> LibraryIds { get; } = [];
+
+    /// <summary>Answers SearchAsync instead of <see cref="Candidates"/>; a test can hold a search open or look at its token.</summary>
+    public Func<string, CancellationToken, Task<SearchResults>>? OnSearch { get; set; }
+
     public Task<SearchResults> SearchAsync(string query, CancellationToken ct)
     {
         lock (Queries) Queries.Add(query);
-        var online = State == OnlineState.Ok ? Candidates.Select(c => new OnlineResult(c, null)).ToList() : [];
+        if (OnSearch is not null) return OnSearch(query, ct);
+
+        var online = State == OnlineState.Ok
+            ? Candidates.Select(c => new OnlineResult(c, LibraryIds.TryGetValue(c.TmdbId, out var id) ? id : null)).ToList()
+            : [];
         return Task.FromResult(new SearchResults([], online, State));
     }
 
@@ -107,7 +117,12 @@ internal sealed class FakeSearch : ISearchService
         return Task.FromResult(answer);
     }
 
-    public IReadOnlyList<PaletteCommand> Commands(string filter) => [];
+    /// <summary>The palette commands this fake offers; <see cref="Commands"/> filters them like the real service.</summary>
+    public List<PaletteCommand> CommandList { get; } = [];
+
+    public IReadOnlyList<PaletteCommand> Commands(string filter) => CommandList
+        .Where(c => filter.Length == 0 || c.Label.Split(' ').Any(w => w.StartsWith(filter.Trim(), StringComparison.OrdinalIgnoreCase)))
+        .ToList();
 }
 
 /// <summary>Builds the title page's collaborators for a test; every seam is a field the test can read or replace.</summary>

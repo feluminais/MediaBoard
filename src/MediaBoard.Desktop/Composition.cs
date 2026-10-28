@@ -190,7 +190,9 @@ public static class Composition
             sp.GetRequiredService<FoldersViewModel>(),
             sp.GetRequiredService<SettingsViewModel>(),
             sp.GetRequiredService<PosterLoader>(),
-            sp.GetRequiredService<TitleServices>()));
+            sp.GetRequiredService<TitleServices>(),
+            sp.GetRequiredService<FolderActions>().RescanAllAsync,
+            sp.GetRequiredService<TimeProvider>()));
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

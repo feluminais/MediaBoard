@@ -119,6 +119,16 @@ public sealed class FolderActions(
         return FolderOutcome.Done;
     });
 
+    /// <summary>
+    /// The palette's "Rescan library": starts a scan of every enabled folder (each one then refreshes the watcher and
+    /// identifies, as after an add) and returns once they are started; the status bar shows the progress.
+    /// </summary>
+    public Task<FolderOutcome> RescanAllAsync() => RunAsync("rescan the library", () =>
+    {
+        foreach (var folder in folders.All().Where(f => f.Enabled)) StartScan(folder);
+        return Task.FromResult(FolderOutcome.Done);
+    });
+
     public Task WhenIdleAsync()
     {
         Task[] running;

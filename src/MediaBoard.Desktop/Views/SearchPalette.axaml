@@ -1,0 +1,61 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             x:Class="MediaBoard.Desktop.Views.SearchPalette"
+             x:DataType="vm:SearchPaletteViewModel">
+    <UserControl.Styles>
+        <!-- A flat choice; the selected one is shaded, and so is the one under the mouse. -->
+        <Style Selector="Button.choice">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button.choice:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SelectedNavBrush}" />
+        </Style>
+        <Style Selector="Button.choice.selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SelectedNavBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Padding="12" CornerRadius="8"
+            Background="{DynamicResource PanelBrush}"
+            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
+            KeyboardNavigation.TabNavigation="Contained">
+        <StackPanel Spacing="8">
+            <TextBox x:Name="Input" Text="{Binding Query}" PlaceholderText="Search, or type &gt; for commands" />
+
+            <TextBlock Classes="muted" Text="{Binding EmptyText}" Margin="8,4"
+                       IsVisible="{Binding EmptyText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+            <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto"
+                          IsVisible="{Binding HasRows}">
+                <ItemsControl x:Name="RowList" ItemsSource="{Binding Rows}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PaletteRow">
+                            <Panel>
+                                <TextBlock Classes="muted" FontSize="12" FontWeight="SemiBold" Margin="8,10,8,2"
+                                           Text="{Binding Text}" IsVisible="{Binding IsHeader}" />
+                                <TextBlock Classes="muted" Margin="8,4" Text="{Binding Text}" IsVisible="{Binding IsNote}" />
+                                <!-- Not focusable: the caret stays in the box while the arrows move the selection. -->
+                                <Button Classes="choice" Classes.selected="{Binding IsSelected}" Focusable="False"
+                                        Command="{Binding OpenCommand}" IsVisible="{Binding IsSelectable}">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" Classes="muted" FontSize="12" Margin="12,0,0,0"
+                                                   VerticalAlignment="Center" Text="{Binding Detail}"
+                                                   IsVisible="{Binding HasDetail}" />
+                                        <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Button>
+                            </Panel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </StackPanel>
+    </Border>
+</UserControl>

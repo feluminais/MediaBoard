@@ -151,12 +151,12 @@
             <ContentControl Content="{Binding CurrentPage}" Margin="32,24" />
         </DockPanel>
 
-        <!-- Search palette placeholder: Task 26 replaces this with the real palette. -->
-        <Border IsVisible="{Binding IsSearchOpen}" Background="{DynamicResource OverlayBrush}">
-            <Border Width="560" VerticalAlignment="Top" Margin="0,80,0,0" Padding="12" CornerRadius="8"
-                    Background="{DynamicResource PanelBrush}">
-                <TextBox x:Name="SearchBox" PlaceholderText="Search" />
-            </Border>
+        <!-- Search palette: a dimmed backdrop (a click on it closes the palette) with the palette near the top. -->
+        <Border x:Name="SearchBackdrop" IsVisible="{Binding IsSearchOpen}"
+                Background="{DynamicResource OverlayBrush}"
+                PointerPressed="OnBackdropPressed">
+            <views:SearchPalette x:Name="Palette" DataContext="{Binding Search}"
+                                 Width="600" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,80,0,0" />
         </Border>
     </Panel>
 </Window>

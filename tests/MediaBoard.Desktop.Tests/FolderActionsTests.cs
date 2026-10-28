@@ -223,6 +223,41 @@ public sealed class FolderActionsTests
         }
     }
 
+    [Fact]
+    public async Task RescanAll_ScansTheEnabledFoldersAgain_AndNotTheDisabledOnes()
+    {
+        using var stack = new ShellStack();
+        var movies = stack.MakeLibrary("Movies", "Heat (1995).mkv");
+        var shows = stack.MakeLibrary("Shows", "Dark S01E01.mkv");
+        await stack.Actions.AddAsync(movies);
+        await stack.Actions.AddAsync(shows);
+        await stack.Actions.WhenIdleAsync();
+        var showsId = stack.Library.Folders().Single(f => f.Path == shows).Id;
+        await stack.Actions.SetEnabledAsync(showsId, false);
+        var moviesId = stack.Library.Folders().Single(f => f.Path == movies).Id;
+        File.WriteAllBytes(Path.Combine(movies, "Alien (1979).mkv"), []);
+        File.WriteAllBytes(Path.Combine(shows, "Dark S01E02.mkv"), []);
+
+        var outcome = await stack.Services.GetRequiredService<FolderActions>().RescanAllAsync();
+        await stack.Actions.WhenIdleAsync();
+
+        Assert.True(outcome.Ok);
+        Assert.Equal(2, RowsOf(stack, moviesId));
+        Assert.Equal(1, RowsOf(stack, showsId)); // switched off: left alone
+        AssertNoErrors(stack);
+    }
+
+    [Fact]
+    public async Task RescanAll_WithNoFolders_DoesNothing()
+    {
+        using var stack = new ShellStack();
+
+        var outcome = await stack.Services.GetRequiredService<FolderActions>().RescanAllAsync();
+
+        Assert.True(outcome.Ok);
+        AssertNoErrors(stack);
+    }
+
     private static async Task WaitFor(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(15);

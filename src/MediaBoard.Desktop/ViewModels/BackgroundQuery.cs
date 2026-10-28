@@ -17,6 +17,9 @@ public sealed class BackgroundQuery(ActivityHub hub, string what)
     private int _generation;
     private string? _lastFailure;
 
+    /// <summary>Call on the UI thread. Makes the result of a query that is still running stale, so it is dropped.</summary>
+    public void Discard() => _generation++;
+
     /// <summary>Call on the UI thread. Returns at once; the task completes after <paramref name="apply"/> ran or was skipped.</summary>
     public async Task RunAsync<T>(Func<T> query, Action<T> apply)
     {

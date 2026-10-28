@@ -9,21 +9,21 @@ using MediaBoard.Desktop.Views;
 
 namespace MediaBoard.Desktop.Tests;
 
-public class MainWindowViewModelTests
+public partial class MainWindowViewModelTests
 {
     private readonly ActivityHub _hub = new();
     private readonly FakeLibrary _library = new();
 
     private readonly string _settingsPath = Path.Combine(Path.GetTempPath(), $"mediaboard-shell-{Guid.NewGuid():N}.json");
 
-    private MainWindowViewModel Create(Titles? titles = null) =>
+    private MainWindowViewModel Create(Titles? titles = null, Func<Task>? rescan = null, TimeProvider? clock = null) =>
         new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub,
             new FoldersViewModel(_library, new IdleFolderActions(), _hub, () => Task.FromResult<string?>(null), _ => Task.FromResult(true)),
             new SettingsViewModel(
                 new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
                 new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
                 _hub, () => Task.FromResult<string?>(null), _ => { }),
-            Posters.None(), (titles ?? new Titles(_library, _hub)).Services());
+            Posters.None(), (titles ?? new Titles(_library, _hub)).Services(), rescan, clock);
 
     private static void Flush() => Dispatcher.UIThread.RunJobs();
 

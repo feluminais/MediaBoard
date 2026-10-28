@@ -45,6 +45,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly PosterLoader _posters;
     private readonly TitleServices _titles;
     private readonly TitleNavigation _titleNavigation;
+    private readonly Func<Task>? _rescanAll;
     private readonly Stack<PageViewModel> _back = [];
     private readonly PageActions _actions;
     private readonly HomeViewModel _home;
@@ -61,12 +62,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
         FoldersViewModel folders,
         SettingsViewModel settings,
         PosterLoader posters,
-        TitleServices titles)
+        TitleServices titles,
+        Func<Task>? rescanAll = null,
+        TimeProvider? timeProvider = null)
     {
         _library = library;
         _hub = hub;
         _posters = posters;
         _titles = titles;
+        _rescanAll = rescanAll;
         _titleNavigation = new TitleNavigation(GoBack, () => Navigate(SettingsPage), ReplaceTitle);
         _actions = new PageActions(OpenTitle, PlayFile, OpenList);
         _home = new HomeViewModel(
@@ -83,6 +87,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _reviewCount = new BackgroundQuery(hub, "the review count");
         StatusBar = statusBar;
         Activity = activity;
+        Search = new SearchPaletteViewModel(
+            titles.Search,
+            library,
+            new PaletteActions(OpenTitle, OpenOnlineTitle, () => Navigate(SettingsPage), RescanAsync, ShowHiddenItems),
+            hub,
+            timeProvider ?? TimeProvider.System,
+            () => IsSearchOpen = false);
 
         _pages = new Dictionary<string, PageViewModel>
         {
@@ -115,6 +126,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public StatusBarViewModel StatusBar { get; }
 
     public ActivityPanelViewModel Activity { get; }
+
+    /// <summary>The Ctrl+F palette; it empties each time it opens.</summary>
+    public SearchPaletteViewModel Search { get; }
 
     /// <summary>Sidebar entries below Search, in order.</summary>
     public IReadOnlyList<NavItem> NavItems { get; }
@@ -202,6 +216,29 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _ = list.RefreshAsync();
     }
 
+    // The palette's "Show hidden items": the grid on screen if it is one, otherwise Movies.
+    private void ShowHiddenItems()
+    {
+        var grid = CurrentPage as TitleGridViewModel ?? (TitleGridViewModel)_pages[MoviesPage];
+        grid.ShowHidden = true;
+        if (!ReferenceEquals(grid, CurrentPage)) Navigate(MoviesPage);
+    }
+
+    // The palette's "Rescan library": one call on the thread pool; the scans report through the status bar.
+    private async Task RescanAsync()
+    {
+        if (_rescanAll is not { } rescan) return;
+
+        try
+        {
+            await Task.Run(rescan);
+        }
+        catch (Exception e)
+        {
+            _hub.Log(ActivityLevel.Error, $"Couldn't rescan the library: {e.Message}", BackgroundQuery.FailureHint);
+        }
+    }
+
     [RelayCommand]
     private void OpenSearch() => IsSearchOpen = true;
 
@@ -210,6 +247,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleActivity() => IsActivityOpen = !IsActivityOpen;
+
+    partial void OnIsSearchOpenChanged(bool value)
+    {
+        if (value) Search.Reset();
+        else Search.Cancel();
+    }
 
     partial void OnCurrentPageChanged(ObservableObject oldValue, ObservableObject newValue)
     {
