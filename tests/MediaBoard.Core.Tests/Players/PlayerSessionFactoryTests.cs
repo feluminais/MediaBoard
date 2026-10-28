@@ -200,6 +200,20 @@ public class PlayerSessionFactoryTests
     }
 
     [Fact]
+    public async Task LaunchOnly_Detach_ThenDispose_LeavesPlayerRunning()
+    {
+        var session = CreateLaunchOnly();
+        await session.StartAsync(File, null, Ct);
+
+        session.Detach();
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+    }
+
+    [Fact]
     public async Task LaunchOnly_Dispose_KillsPlayerThatIgnoresClose()
     {
         _process.ExitOnClose = false;

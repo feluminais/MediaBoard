@@ -406,6 +406,20 @@ public class VlcSessionTests
     }
 
     [Fact]
+    public async Task Detach_ThenDispose_LeavesPlayerRunning()
+    {
+        var session = Create();
+        await session.StartAsync(File, null, Ct);
+
+        session.Detach();
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+    }
+
+    [Fact]
     public async Task Dispose_ClosesProcessItStartedAndStopsPolling()
     {
         var session = Create();

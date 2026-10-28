@@ -49,6 +49,7 @@ public sealed class MpvSession : IPlayerSession
     private long _startStamp;
     private bool _started;
     private bool _disposed;
+    private volatile bool _detached;
     private bool _answered;
     private TimeSpan? _lastTimePos;
 
@@ -141,6 +142,8 @@ public sealed class MpvSession : IPlayerSession
         lock (_gate) return Task.FromResult(_pump.IsFinished ? null : _lastTimePos);
     }
 
+    public void Detach() => _detached = true;
+
     /// <summary>
     /// Closes mpv if this session started it and it is still running (asks first, kills after the close timeout),
     /// then closes the pipe. Raises no events.
@@ -159,7 +162,7 @@ public sealed class MpvSession : IPlayerSession
         _pump.Stop();
         await _stop.CancelAsync();
         pipe?.Dispose();
-        if (process is not null) await PlayerLaunch.CloseAsync(process, _closeTimeout);
+        if (process is not null) await PlayerLaunch.ReleaseAsync(process, _closeTimeout, _detached);
     }
 
     /// <summary>Connects (mpv creates the pipe a moment after it starts), asks for the properties, then reads until mpv closes the pipe.</summary>

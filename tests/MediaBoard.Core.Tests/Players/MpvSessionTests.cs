@@ -439,6 +439,20 @@ public class MpvSessionTests
     }
 
     [Fact]
+    public async Task Detach_ThenDispose_LeavesPlayerRunning()
+    {
+        var session = await StartConnectedAsync();
+
+        session.Detach();
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+        Assert.True(_pipe.Disposed);
+    }
+
+    [Fact]
     public async Task Dispose_KillsPlayerThatIgnoresClose()
     {
         _process.ExitOnClose = false;

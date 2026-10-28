@@ -19,7 +19,7 @@ namespace MediaBoard.Core.Players.MpcHc;
 /// <para>
 /// The session covers the launched file only. When MPC-HC closes it or moves on to another file (next in
 /// folder, a file dropped onto the window), the session raises <see cref="PlaybackEvent.Closed"/> and stops
-/// reporting, so another file's positions are never attributed to this one.
+/// reporting, so another file's positions are never attributed to this one. Disposing it then leaves MPC-HC open.
 /// </para>
 /// </remarks>
 public sealed class MpcHcSession : IPlayerSession
@@ -50,6 +50,7 @@ public sealed class MpcHcSession : IPlayerSession
     private nint _playerWindow;
     private bool _started;
     private volatile bool _disposed;
+    private volatile bool _detached;
     private string _filePath = "";
     private TimeSpan? _startAt;
     private bool _fileLoaded;
@@ -173,9 +174,12 @@ public sealed class MpcHcSession : IPlayerSession
     /// <summary>Asks MPC-HC to close; <see cref="PlaybackEvent.Closed"/> follows. Does nothing until it has connected.</summary>
     public void Close() => SendToPlayer(MpcApi.CMD_CLOSEAPP, "");
 
+    public void Detach() => _detached = true;
+
     /// <summary>
     /// Closes MPC-HC if this session started it and it is still running (asks first, kills after the close
-    /// timeout), then destroys the message window. Raises no events.
+    /// timeout), then destroys the message window. Raises no events. A detached session, or one that ended because
+    /// MPC-HC moved to another file, leaves MPC-HC running.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -196,7 +200,7 @@ public sealed class MpcHcSession : IPlayerSession
         reply?.TrySetCanceled();
         if (timer is not null) await timer.DisposeAsync();
 
-        if (process is not null) await PlayerLaunch.CloseAsync(process, _closeTimeout);
+        if (process is not null) await PlayerLaunch.ReleaseAsync(process, _closeTimeout, _detached);
 
         if (transport is not null)
         {
@@ -307,9 +311,13 @@ public sealed class MpcHcSession : IPlayerSession
         RaiseLoadedOnce();
     }
 
-    /// <summary>MPC-HC closed the launched file or opened another one: this session is over (R25).</summary>
+    /// <summary>
+    /// MPC-HC closed the launched file or opened another one: this session is over (R25), but the player is the
+    /// viewer's now, so disposal leaves it running (R44).
+    /// </summary>
     private void EndForFileChange()
     {
+        Detach();
         StopPolling();
         Raise(new PlaybackEvent.Closed());
     }

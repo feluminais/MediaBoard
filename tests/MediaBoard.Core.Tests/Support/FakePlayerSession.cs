@@ -22,6 +22,11 @@ public sealed class FakePlayerSession(bool tracksProgress = true) : IPlayerSessi
 
     public bool Disposed { get; private set; }
 
+    /// <summary>The service let the player run on (<see cref="Detach"/>) before disposing the session.</summary>
+    public bool Detached { get; private set; }
+
+    public void Detach() => Detached = true;
+
     public void Raise(PlaybackEvent e) => Event?.Invoke(e);
 
     public Task StartAsync(string filePath, TimeSpan? startAt, CancellationToken ct)

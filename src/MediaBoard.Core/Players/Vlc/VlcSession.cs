@@ -49,6 +49,7 @@ public sealed class VlcSession : IPlayerSession
     private long _startStamp;
     private bool _started;
     private bool _disposed;
+    private volatile bool _detached;
     private bool _answered;
     private int _port;
     private string _password = "";
@@ -165,6 +166,8 @@ public sealed class VlcSession : IPlayerSession
         return status is { State: not VlcState.Stopped } playing ? playing.Time : null;
     }
 
+    public void Detach() => _detached = true;
+
     /// <summary>Closes VLC if this session started it and it is still running (asks first, kills after the close timeout). Raises no events.</summary>
     public async ValueTask DisposeAsync()
     {
@@ -178,7 +181,7 @@ public sealed class VlcSession : IPlayerSession
 
         _pump.Stop();
         await _stop.CancelAsync();
-        if (process is not null) await PlayerLaunch.CloseAsync(process, _closeTimeout);
+        if (process is not null) await PlayerLaunch.ReleaseAsync(process, _closeTimeout, _detached);
     }
 
     /// <summary>A port nothing listens on right now. VLC binds it a moment later, so another program could in theory take it first.</summary>

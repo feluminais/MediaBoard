@@ -62,6 +62,18 @@ internal static class PlayerLaunch
         : exitCode != 0 ? new PlaybackEvent.Failed($"{name} stopped unexpectedly")
         : new PlaybackEvent.Closed();
 
+    /// <summary>
+    /// Ends a session's hold on the player: closes it like <see cref="CloseAsync"/>, or, for a detached session,
+    /// only disposes the process handle and leaves the player running.
+    /// </summary>
+    public static Task ReleaseAsync(IPlayerProcess process, TimeSpan timeout, bool detached)
+    {
+        if (!detached) return CloseAsync(process, timeout);
+
+        process.Dispose();
+        return Task.CompletedTask;
+    }
+
     /// <summary>Asks the player to close, kills it after <paramref name="timeout"/>, then disposes the process.</summary>
     public static async Task CloseAsync(IPlayerProcess process, TimeSpan timeout)
     {

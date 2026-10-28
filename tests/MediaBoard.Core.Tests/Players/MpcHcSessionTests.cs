@@ -419,6 +419,49 @@ public class MpcHcSessionTests
     }
 
     [Fact]
+    public async Task OtherFileOpened_ThenDispose_LeavesPlayerRunning()
+    {
+        var session = await LoadedAsync();
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1500.000");
+
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+        Assert.True(_transport.Disposed);
+    }
+
+    [Theory]
+    [InlineData("3")] // MLS_CLOSING
+    [InlineData("0")] // MLS_CLOSED
+    public async Task FileClosed_ThenDispose_LeavesPlayerRunning(string state)
+    {
+        var session = await LoadedAsync();
+        _transport.Receive(MpcApi.CMD_STATE, state);
+
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+    }
+
+    [Fact]
+    public async Task Detach_ThenDispose_LeavesPlayerRunning()
+    {
+        var session = await LoadedAsync();
+
+        session.Detach();
+        await session.DisposeAsync();
+
+        Assert.False(_process.CloseRequested);
+        Assert.False(_process.Killed);
+        Assert.True(_process.Disposed);
+        Assert.True(_transport.Disposed);
+    }
+
+    [Fact]
     public async Task Dispose_KillsPlayerThatIgnoresClose()
     {
         _process.ExitOnClose = false;

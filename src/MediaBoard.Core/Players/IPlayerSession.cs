@@ -19,4 +19,10 @@ public interface IPlayerSession : IAsyncDisposable
 
     /// <summary>The current position, or null when the player cannot tell right now.</summary>
     Task<TimeSpan?> GetPositionAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Leaves the player running: disposing the session afterwards stops listening to it and releases the process
+    /// handle without closing the player. Without this, disposal closes a player the session started.
+    /// </summary>
+    void Detach();
 }

@@ -28,6 +28,7 @@ public sealed class LaunchOnlySession : IPlayerSession
     private long _startStamp;
     private bool _started;
     private bool _disposed;
+    private volatile bool _detached;
 
     /// <param name="player">The program to run; <see cref="PlayerInfo.ExePath"/> is launched and <see cref="PlayerInfo.Name"/> names it in messages.</param>
     /// <param name="start">Starts the program's process.</param>
@@ -82,6 +83,8 @@ public sealed class LaunchOnlySession : IPlayerSession
 
     public Task<TimeSpan?> GetPositionAsync(CancellationToken ct) => Task.FromResult<TimeSpan?>(null);
 
+    public void Detach() => _detached = true;
+
     /// <summary>Closes the program if this session started it and it is still running (asks first, kills after the close timeout). Raises no events.</summary>
     public async ValueTask DisposeAsync()
     {
@@ -94,7 +97,7 @@ public sealed class LaunchOnlySession : IPlayerSession
         }
 
         _pump.Stop();
-        if (process is not null) await PlayerLaunch.CloseAsync(process, _closeTimeout);
+        if (process is not null) await PlayerLaunch.ReleaseAsync(process, _closeTimeout, _detached);
     }
 
     private async Task ObserveExitAsync(IPlayerProcess process)
