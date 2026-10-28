@@ -70,6 +70,7 @@ public sealed class LibraryWatcher : IDisposable
             .ToDictionary(f => f.Id);
 
         List<Watch> dropped = [];
+        HashSet<int> recovering = [];
         lock (_gate)
         {
             if (!_started || _disposed) return;
@@ -78,6 +79,8 @@ public sealed class LibraryWatcher : IDisposable
             {
                 // A watcher that reported an error may be dead (its folder vanished); a fresh one replaces it.
                 if (wanted.TryGetValue(id, out var folder) && watch.Folder.Path == folder.Path && !watch.Broken) continue;
+                // The broken watch had a rescan planned or running that its shutdown cancels.
+                if (watch.Broken && wanted.ContainsKey(id)) recovering.Add(id);
                 _watches.Remove(id);
                 watch.Closed = true;
                 dropped.Add(watch);
@@ -87,7 +90,10 @@ public sealed class LibraryWatcher : IDisposable
             {
                 if (_watches.ContainsKey(folder.Id)) continue;
                 var watch = TryWatch(folder);
-                if (watch is not null) _watches[folder.Id] = watch;
+                if (watch is null) continue;
+                _watches[folder.Id] = watch;
+                // Events were lost while the old watch was broken: the replacement rescans what it missed.
+                if (recovering.Contains(folder.Id)) Schedule(watch);
             }
         }
 

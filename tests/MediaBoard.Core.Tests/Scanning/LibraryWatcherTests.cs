@@ -298,6 +298,22 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task BrokenWatchReplacedByRefresh_RescansWhatTheOldOneMissed()
+    {
+        var folder = _folders.Add(_lib.Root);
+        _watcher.Start();
+        Directory.Delete(_lib.Root, recursive: true); // the watcher reports an error and plans a rescan
+        await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Warning && e.Message.StartsWith("Lost track")));
+
+        // The folder is back and holds a file before the planned rescan runs; the replacement doesn't see
+        // that file be created, so only a rescan scheduled by Refresh can find it.
+        _lib.File(@"Movies\Heat.1995.mkv");
+        _watcher.Refresh();
+
+        await WaitUntil(() => _files.ByFolder(folder.Id).Any(f => f.RelPath == @"Movies\Heat.1995.mkv"));
+    }
+
+    [Fact]
     public void MissingFolder_IsSkipped()
     {
         var gone = Path.Combine(Path.GetTempPath(), "mediaboard-gone-" + Guid.NewGuid().ToString("N"));
