@@ -38,6 +38,25 @@ public sealed class FileStore(LibraryDatabase db)
             .Select(r => r.ToRow()).ToList();
     }
 
+    /// <summary>Every file with this status in a folder that is switched on, missing ones included.</summary>
+    public IReadOnlyList<MediaFileRow> ByStatusInEnabledFolders(string status)
+    {
+        using var connection = db.Open();
+        return connection.Query<Row>(
+                $"{Select} WHERE status = @status AND folder_id IN (SELECT id FROM folders WHERE enabled = 1) ORDER BY id",
+                new { status })
+            .Select(r => r.ToRow()).ToList();
+    }
+
+    /// <summary>The file is still in the library and its folder is switched on (it may have been removed or disabled since it was read).</summary>
+    public bool IsActive(int id)
+    {
+        using var connection = db.Open();
+        return connection.ExecuteScalar<int>(
+            "SELECT EXISTS (SELECT 1 FROM files JOIN folders ON folders.id = files.folder_id WHERE files.id = @id AND folders.enabled = 1)",
+            new { id }) != 0;
+    }
+
     public IReadOnlyList<MediaFileRow> ByFolder(int folderId)
     {
         using var connection = db.Open();
@@ -65,11 +84,15 @@ public sealed class FileStore(LibraryDatabase db)
     }
 
     /// <summary>The file's absolute path on disk.</summary>
-    public string FullPath(MediaFileRow file)
+    public string FullPath(MediaFileRow file) =>
+        TryFullPath(file) ?? throw new InvalidOperationException($"Folder {file.FolderId} is no longer in the library.");
+
+    /// <summary>The file's absolute path on disk, or null when its folder was removed.</summary>
+    public string? TryFullPath(MediaFileRow file)
     {
         using var connection = db.Open();
-        var folder = connection.QuerySingle<string>("SELECT path FROM folders WHERE id = @FolderId", new { file.FolderId });
-        return Path.Combine(folder, file.RelPath);
+        var folder = connection.QuerySingleOrDefault<string>("SELECT path FROM folders WHERE id = @FolderId", new { file.FolderId });
+        return folder is null ? null : Path.Combine(folder, file.RelPath);
     }
 
     internal static string FormatTime(DateTimeOffset time) =>

@@ -200,7 +200,8 @@ public sealed class IdentificationService : IDisposable
 
     private async Task ProcessAsync(CancellationToken ct)
     {
-        var work = _files.ByStatus("pending").Concat(_files.ByStatus("offline"))
+        // Disabled folders wait until they are switched on again; removed ones have no files left.
+        var work = _files.ByStatusInEnabledFolders("pending").Concat(_files.ByStatusInEnabledFolders("offline"))
             .Where(f => !f.Missing)
             .OrderBy(f => f.FolderId)
             .ThenBy(f => f.RelPath, StringComparer.OrdinalIgnoreCase)
@@ -221,6 +222,14 @@ public sealed class IdentificationService : IDisposable
                 ct.ThrowIfCancellationRequested();
                 try
                 {
+                    // The user may have removed or switched off the folder while the pass ran.
+                    if (!_files.IsActive(file.Id))
+                    {
+                        run.Waiting--;
+                        _hub.SetPendingIdentification(run.Waiting);
+                        continue;
+                    }
+
                     if (RestoreUserMatch(file, run)) continue;
 
                     if (stop != Stop.None) MarkUnreachable(file, run);
@@ -229,6 +238,12 @@ public sealed class IdentificationService : IDisposable
                 catch (OperationCanceledException)
                 {
                     throw;
+                }
+                catch (Exception) when (!_files.IsActive(file.Id))
+                {
+                    // Its folder was removed or switched off while the file was being identified.
+                    run.Waiting--;
+                    _hub.SetPendingIdentification(run.Waiting);
                 }
                 catch (Exception e)
                 {
@@ -287,7 +302,7 @@ public sealed class IdentificationService : IDisposable
     /// <summary>Identifies one file. Returns why the run must stop, or None.</summary>
     private async Task<Stop> IdentifyAsync(MediaFileRow file, Run run, CancellationToken ct)
     {
-        var fullPath = _files.FullPath(file);
+        if (_files.TryFullPath(file) is not { } fullPath) return Stop.None; // its folder was just removed
         var duration = file.DurationS;
         if (duration is null)
         {

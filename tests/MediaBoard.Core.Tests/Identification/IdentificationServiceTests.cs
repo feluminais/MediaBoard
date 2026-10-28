@@ -575,6 +575,39 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM review_candidates WHERE file_id = @id", new { id }));
     }
 
+    [Fact]
+    public async Task DisabledFolder_IsNotIdentified()
+    {
+        KnowHeat();
+        _lib.File("Heat (1995).mkv");
+        await Scan();
+        new FolderStore(_db, _clock).SetEnabled(_folder.Id, false);
+
+        await Run();
+
+        Assert.Empty(_tmdb.Searches);
+        Assert.Equal("pending", Row("Heat (1995).mkv").Status);
+        Assert.Equal(0, _hub.Current.PendingIdentification);
+    }
+
+    [Fact]
+    public async Task FolderRemovedMidPass_SkipsItsFilesQuietly()
+    {
+        KnowHeat();
+        _lib.File("Heat (1995).mkv");
+        _lib.File("Heat 2 (1996).mkv");
+        _lib.File("Heat 3 (1997).mkv");
+        await Scan();
+        using var service = new IdentificationService(
+            _db, new HookedProvider(_tmdb, () => new FolderStore(_db, _clock).Remove(_folder.Id)), _probe, _connectivity, _settings, _hub, _clock);
+
+        await service.RunPendingAsync(Ct);
+
+        Assert.DoesNotContain(_hub.Recent, e => e.Level == ActivityLevel.Error);
+        Assert.Empty(_files.ByStatus("pending"));
+        Assert.Equal(0, _hub.Current.PendingIdentification);
+    }
+
     /// <summary>Runs <c>onFirstCall</c> once, before the first search reaches the inner provider.</summary>
     private sealed class HookedProvider(IMetadataProvider inner, Action onFirstCall) : IMetadataProvider
     {
