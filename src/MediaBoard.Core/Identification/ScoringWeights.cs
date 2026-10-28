@@ -31,4 +31,7 @@ public static class ScoringWeights
     // Title similarity = TitleSortShare * token-sort ratio + TitleSetShare * token-set ratio.
     public const double TitleSortShare = 0.8;
     public const double TitleSetShare = 0.2;
+
+    // An episode title from a file name matches a TMDB episode name at or above this similarity.
+    public const double EpisodeTitleThreshold = 0.85;
 }
