@@ -3,9 +3,11 @@ namespace MediaBoard.Core.Identification;
 public static class TitleSimilarity
 {
     /// <summary>
-    /// Similarity of two titles in 0..1. Blends a token-set ratio (word order and repeated words are
-    /// ignored, a title that contains the other's words scores high) with Levenshtein on the joined
-    /// normalized strings, which keeps "Meatballs 2" below "Meatballs".
+    /// Similarity of two titles in 0..1: <see cref="ScoringWeights.TitleSortShare"/> times the token-sort
+    /// ratio plus <see cref="ScoringWeights.TitleSetShare"/> times the token-set ratio. Both parts ignore
+    /// word order. The token-sort ratio is the Levenshtein ratio of the normalized words sorted
+    /// alphabetically, so extra words (a sequel number) cost points; the token-set ratio compares the
+    /// shared words with the rest and scores a title that contains the other's words as 1.0.
     /// </summary>
     public static double Score(string a, string b)
     {
@@ -14,10 +16,15 @@ public static class TitleSimilarity
         if (na.Length == 0 || nb.Length == 0) return 0.0;
         if (na == nb) return 1.0;
 
-        var score = ScoringWeights.TokenSetShare * TokenSetRatio(na, nb)
-                    + ScoringWeights.LevenshteinShare * Ratio(na, nb);
+        var score = ScoringWeights.TitleSortShare * TokenSortRatio(na, nb)
+                    + ScoringWeights.TitleSetShare * TokenSetRatio(na, nb);
         return Math.Clamp(score, 0.0, 1.0);
     }
+
+    private static double TokenSortRatio(string a, string b) => Ratio(SortWords(a), SortWords(b));
+
+    private static string SortWords(string normalized) =>
+        string.Join(' ', normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).OrderBy(t => t, StringComparer.Ordinal));
 
     public static int Levenshtein(string a, string b)
     {

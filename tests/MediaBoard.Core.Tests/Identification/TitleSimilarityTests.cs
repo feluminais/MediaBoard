@@ -41,9 +41,9 @@ public class TitleSimilarityTests
     public void Score_Sequel_ScoresBelowExactTitle()
     {
         const string title = "Cloudy With A Chance Of Meatballs";
-        Assert.True(
-            TitleSimilarity.Score(title, "Cloudy with a Chance of Meatballs 2")
-            < TitleSimilarity.Score(title, "Cloudy with a Chance of Meatballs"));
+        var gap = TitleSimilarity.Score(title, "Cloudy with a Chance of Meatballs")
+                  - TitleSimilarity.Score(title, "Cloudy with a Chance of Meatballs 2");
+        Assert.True(gap >= 0.03, $"gap was {gap}");
     }
 
     [Fact]
@@ -53,9 +53,9 @@ public class TitleSimilarityTests
     }
 
     [Fact]
-    public void Score_WordOrder_StillScoresWell()
+    public void Score_WordOrder_DoesNotMatter()
     {
-        Assert.True(TitleSimilarity.Score("Rescue Fire", "Fire Rescue") >= 0.55);
+        Assert.True(TitleSimilarity.Score("fire rescue", "rescue fire") >= 0.99);
     }
 
     [Fact]

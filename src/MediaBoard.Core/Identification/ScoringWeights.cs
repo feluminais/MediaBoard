@@ -28,7 +28,7 @@ public static class ScoringWeights
     public const double DurationToleranceMinMinutes = 15.0;
     public const double DurationToleranceFraction = 0.35;
 
-    // Title similarity: share of the token-set ratio; the rest is Levenshtein on the joined strings.
-    public const double TokenSetShare = 0.5;
-    public const double LevenshteinShare = 1.0 - TokenSetShare;
+    // Title similarity = TitleSortShare * token-sort ratio + TitleSetShare * token-set ratio.
+    public const double TitleSortShare = 0.8;
+    public const double TitleSetShare = 0.2;
 }
