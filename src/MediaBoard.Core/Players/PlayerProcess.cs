@@ -10,6 +10,9 @@ public interface IPlayerProcess : IDisposable
 
     bool HasExited { get; }
 
+    /// <summary>The exit code; read only after <see cref="Exited"/> has completed.</summary>
+    int ExitCode { get; }
+
     /// <summary>Asks the player to close (WM_CLOSE to its main window).</summary>
     void CloseMainWindow();
 
@@ -34,6 +37,8 @@ public sealed class PlayerProcess : IPlayerProcess
     public Task Exited { get; }
 
     public bool HasExited => _process.HasExited;
+
+    public int ExitCode => _process.ExitCode;
 
     public void CloseMainWindow() => _process.CloseMainWindow();
 

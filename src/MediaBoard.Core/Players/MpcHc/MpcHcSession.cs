@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -10,14 +11,21 @@ namespace MediaBoard.Core.Players.MpcHc;
 /// </summary>
 /// <remarks>
 /// <see cref="Event"/> is raised on the message-window thread (for messages from MPC-HC) or on a thread-pool
-/// thread (when the process exits or start fails). Handlers must return quickly, must not block on this session,
-/// and must marshal to the UI thread themselves. <see cref="PlaybackEvent.Closed"/> and
-/// <see cref="PlaybackEvent.Failed"/> are final: nothing is raised after them, nor after disposal.
+/// thread (when the process exits or start fails), one at a time and in order, with no lock held. Handlers must
+/// return quickly, must not block on this session, and must marshal to the UI thread with <c>InvokeAsync</c>/<c>Post</c>,
+/// never a synchronous <c>Invoke</c>. <see cref="PlaybackEvent.Closed"/> and <see cref="PlaybackEvent.Failed"/> are
+/// final: nothing is raised after them, nor after disposal.
+/// <para>
+/// The session covers the launched file only. When MPC-HC closes it or moves on to another file (next in
+/// folder, a file dropped onto the window), the session raises <see cref="PlaybackEvent.Closed"/> and stops
+/// reporting, so another file's positions are never attributed to this one.
+/// </para>
 /// </remarks>
 public sealed class MpcHcSession : IPlayerSession
 {
     private const string EarlyExitMessage = "MPC-HC closed right after starting";
     private const string OpenFailedMessage = "MPC-HC could not open the file";
+    private const string CrashMessage = "MPC-HC stopped unexpectedly";
 
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultCloseTimeout = TimeSpan.FromSeconds(3);
@@ -43,7 +51,8 @@ public sealed class MpcHcSession : IPlayerSession
     private IPlayerProcess? _process;
     private nint _playerWindow;
     private bool _started;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private string _filePath = "";
     private TimeSpan? _startAt;
     private bool _fileLoaded;
     private NowPlaying? _nowPlaying;
@@ -53,6 +62,8 @@ public sealed class MpcHcSession : IPlayerSession
     private int _polling;
     private TaskCompletionSource<TimeSpan>? _positionReply;
     private volatile bool _finished;
+    private readonly ConcurrentQueue<PlaybackEvent> _outbox = new();
+    private int _delivering;
 
     /// <param name="player">MPC-HC as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="transportFactory">Creates the window MPC-HC talks to; called once by <see cref="StartAsync"/>.</param>
@@ -90,6 +101,7 @@ public sealed class MpcHcSession : IPlayerSession
             if (_started) throw new InvalidOperationException("A session plays one file; create a new session.");
             _started = true;
             _startAt = startAt > TimeSpan.Zero ? startAt : null;
+            _filePath = filePath;
         }
 
         IMpcTransport transport;
@@ -277,6 +289,14 @@ public sealed class MpcHcSession : IPlayerSession
             return;
         }
 
+        if (state is MpcLoadState.Closing or MpcLoadState.Closed)
+        {
+            bool wasLoaded;
+            lock (_gate) wasLoaded = _fileLoaded;
+            if (wasLoaded) EndForFileChange();
+            return;
+        }
+
         if (state != MpcLoadState.Loaded) return;
 
         TimeSpan? startAt;
@@ -303,8 +323,42 @@ public sealed class MpcHcSession : IPlayerSession
             return; // A DVD or malformed payload carries no usable duration.
         }
 
-        lock (_gate) _nowPlaying ??= nowPlaying;
+        bool otherFile;
+        lock (_gate)
+        {
+            otherFile = _fileLoaded && _nowPlaying is not null && !SamePath(nowPlaying.FileName, _filePath);
+            _nowPlaying ??= nowPlaying;
+        }
+
+        if (otherFile)
+        {
+            EndForFileChange();
+            return;
+        }
+
         RaiseLoadedOnce();
+    }
+
+    /// <summary>MPC-HC closed the launched file or opened another one: this session is over (R25).</summary>
+    private void EndForFileChange()
+    {
+        StopPolling();
+        Raise(new PlaybackEvent.Closed());
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(NormalizePath(a), NormalizePath(b), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizePath(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
     }
 
     /// <summary>Loaded needs both the Loaded state and the now-playing duration; MPC-HC sends the state first.</summary>
@@ -398,12 +452,23 @@ public sealed class MpcHcSession : IPlayerSession
 
     private void OnProcessExited()
     {
+        int exitCode;
+        try
+        {
+            exitCode = _process?.ExitCode ?? 0;
+        }
+        catch (InvalidOperationException)
+        {
+            exitCode = 0; // not available; treat as a normal exit
+        }
+
         PlaybackEvent exit;
         lock (_gate)
         {
             if (_disposed) return;
-            exit = _playerWindow == 0 && _sinceStart.Elapsed < EarlyExitWindow
-                ? new PlaybackEvent.Failed(EarlyExitMessage)
+            // A CMD_DISCONNECT before the exit has already raised the final Closed, so a crash code after it is moot.
+            exit = _playerWindow == 0 && _sinceStart.Elapsed < EarlyExitWindow ? new PlaybackEvent.Failed(EarlyExitMessage)
+                : exitCode != 0 ? new PlaybackEvent.Failed(CrashMessage)
                 : new PlaybackEvent.Closed();
         }
 
@@ -431,13 +496,47 @@ public sealed class MpcHcSession : IPlayerSession
         transport.Send(target, cmd, payload);
     }
 
+    /// <summary>
+    /// Queues the event in order and delivers it. Finality is decided under the lock; handlers run outside it,
+    /// so a handler that waits on another thread (say, one busy in <see cref="DisposeAsync"/>) cannot deadlock it.
+    /// </summary>
     private void Raise(PlaybackEvent e)
     {
         lock (_raiseGate)
         {
             if (_finished) return;
             if (e is PlaybackEvent.Closed or PlaybackEvent.Failed) _finished = true;
-            Event?.Invoke(e);
+            _outbox.Enqueue(e);
+        }
+
+        Deliver();
+    }
+
+    /// <summary>
+    /// One thread at a time delivers queued events in queue order. A thread that finds delivery in progress
+    /// leaves its event to that thread; a handler that raises again (through a reply) does not recurse.
+    /// </summary>
+    private void Deliver()
+    {
+        while (!_outbox.IsEmpty && Interlocked.CompareExchange(ref _delivering, 1, 0) == 0)
+        {
+            try
+            {
+                while (_outbox.TryDequeue(out var e))
+                {
+                    if (_disposed)
+                    {
+                        _outbox.Clear();
+                        break;
+                    }
+
+                    Event?.Invoke(e);
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _delivering, 0);
+            }
         }
     }
 }

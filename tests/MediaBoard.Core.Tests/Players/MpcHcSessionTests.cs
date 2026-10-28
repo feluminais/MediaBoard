@@ -43,6 +43,14 @@ public class MpcHcSessionTests
         return session;
     }
 
+    private async Task<MpcHcSession> LoadedAsync()
+    {
+        var session = await StartConnectedAsync();
+        _transport.Receive(MpcApi.CMD_STATE, "2");
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"test|||C:\Videos\test.mp4|1500.000");
+        return session;
+    }
+
     [Fact]
     public async Task Session_StartsSlaveWithArgumentList()
     {
@@ -161,10 +169,105 @@ public class MpcHcSessionTests
     {
         await using var session = await StartConnectedAsync();
 
-        _process.Exit();
+        _process.Exit(exitCode: 0);
 
         await _events.WaitFor<PlaybackEvent.Closed>(Timeout);
         Assert.Empty(_events.OfType<PlaybackEvent.Failed>());
+    }
+
+    [Fact]
+    public async Task Session_CrashAfterConnect_RaisesFailed()
+    {
+        await using var session = await StartConnectedAsync();
+
+        _process.Exit(exitCode: unchecked((int)0xC0000005));
+
+        var failed = await _events.WaitFor<PlaybackEvent.Failed>(Timeout);
+        Assert.Equal("MPC-HC stopped unexpectedly", failed.Message);
+        Assert.Equal([failed], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_DisconnectThenNonZeroExit_StaysClosed()
+    {
+        await using var session = await StartConnectedAsync();
+
+        _transport.Receive(MpcApi.CMD_DISCONNECT, "");
+        _process.Exit(exitCode: 1);
+        await Task.Delay(50, Ct);
+
+        Assert.Equal([new PlaybackEvent.Closed()], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_OtherFileOpened_RaisesClosed()
+    {
+        await using var session = await LoadedAsync();
+
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1500.000");
+        _transport.Receive(MpcApi.CMD_NOTIFYSEEK, "3.000");
+        _transport.Receive(MpcApi.CMD_NOTIFYENDOFSTREAM, "");
+
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.Closed()], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_SameFileReported_KeepsSession()
+    {
+        await using var session = await LoadedAsync();
+
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"test|||c:\videos\.\TEST.mp4|1500.000");
+        _transport.Receive(MpcApi.CMD_NOTIFYSEEK, "3.000");
+
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.Position(TimeSpan.FromSeconds(3))], _events.All);
+    }
+
+    [Theory]
+    [InlineData("3")] // MLS_CLOSING
+    [InlineData("0")] // MLS_CLOSED
+    public async Task Session_FileClosedAfterLoaded_RaisesClosed(string state)
+    {
+        await using var session = await LoadedAsync();
+
+        _transport.Receive(MpcApi.CMD_STATE, state);
+        _transport.Receive(MpcApi.CMD_CURRENTPOSITION, "3.000");
+
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.Closed()], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_ClosedStateBeforeLoaded_IsIgnored()
+    {
+        await using var session = await StartConnectedAsync();
+
+        _transport.Receive(MpcApi.CMD_STATE, "0");
+
+        Assert.Empty(_events.All);
+    }
+
+    [Fact]
+    public async Task Handler_BlockingUntilDispose_DoesNotDeadlock()
+    {
+        await using var session = await StartConnectedAsync();
+        using var handlerEntered = new ManualResetEventSlim();
+        using var disposeCalled = new ManualResetEventSlim();
+        var handlerSawDispose = false;
+        session.Event += e =>
+        {
+            if (e is not PlaybackEvent.Playing) return;
+            handlerEntered.Set();
+            // Like a synchronous Dispatcher.Invoke onto a UI thread that is busy in DisposeAsync.
+            handlerSawDispose = disposeCalled.Wait(TimeSpan.FromSeconds(2));
+        };
+
+        var receive = Task.Run(() => _transport.Receive(MpcApi.CMD_PLAYMODE, "0"), Ct);
+        Assert.True(handlerEntered.Wait(Timeout, Ct));
+        var dispose = session.DisposeAsync().AsTask();
+        disposeCalled.Set();
+
+        await dispose.WaitAsync(Timeout, Ct);
+        await receive.WaitAsync(Timeout, Ct);
+        Assert.True(handlerSawDispose, "DisposeAsync blocked while a handler was running");
     }
 
     [Fact]
@@ -354,8 +457,14 @@ public class MpcHcSessionTests
         public bool Disposed { get; private set; }
         public Task Exited => _exited.Task;
         public bool HasExited => _exited.Task.IsCompleted;
+        public int ExitCode { get; private set; }
 
-        public void Exit() => _exited.TrySetResult();
+        public void Exit(int exitCode = 0)
+        {
+            if (HasExited) return;
+            ExitCode = exitCode;
+            _exited.TrySetResult();
+        }
 
         public void CloseMainWindow()
         {

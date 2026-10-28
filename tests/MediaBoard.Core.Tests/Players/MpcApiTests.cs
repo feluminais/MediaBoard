@@ -47,6 +47,15 @@ public class MpcApiTests
     }
 
     [Fact]
+    public void ParseNowPlaying_CurlyApostropheAndBackslashInTitle()
+    {
+        var nowPlaying = MpcApi.ParseNowPlaying(@"Bob’s \ Burgers\x|||C:\Відео\Bob’s.mkv|1.500");
+
+        Assert.Equal(@"Bob’s \ Burgers\x", nowPlaying.Title);
+        Assert.Equal(@"C:\Відео\Bob’s.mkv", nowPlaying.FileName);
+    }
+
+    [Fact]
     public void ParseNowPlaying_EmptyDuration_IsZero()
     {
         Assert.Equal(TimeSpan.Zero, MpcApi.ParseNowPlaying(@"t|||C:\v.mkv|").Duration);

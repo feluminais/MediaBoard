@@ -7,8 +7,10 @@ public interface IPlayerSession : IAsyncDisposable
     bool TracksProgress { get; }
 
     /// <summary>
-    /// Raised on a background thread (for MPC-HC, its message-window thread). Handlers must return quickly,
-    /// must not block on the session, and must marshal to the UI thread themselves.
+    /// Raised on a background thread (for MPC-HC, its message-window thread), one event at a time and in order.
+    /// Handlers must return quickly and must not block on the session. Marshal to the UI thread with
+    /// <c>InvokeAsync</c>/<c>Post</c>, never a synchronous <c>Invoke</c>: the UI thread may be busy disposing the
+    /// session.
     /// </summary>
     event Action<PlaybackEvent>? Event;
 
