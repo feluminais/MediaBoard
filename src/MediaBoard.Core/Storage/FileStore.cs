@@ -45,6 +45,13 @@ public sealed class FileStore(LibraryDatabase db)
             .Select(r => r.ToRow()).ToList();
     }
 
+    /// <summary>Stores the probed length; the identification service is the only caller.</summary>
+    public void SetDuration(int id, double seconds)
+    {
+        using var connection = db.Open();
+        connection.Execute("UPDATE files SET duration_s = @seconds WHERE id = @id", new { id, seconds });
+    }
+
     /// <summary>The file's absolute path on disk.</summary>
     public string FullPath(MediaFileRow file)
     {
