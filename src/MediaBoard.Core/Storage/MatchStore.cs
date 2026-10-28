@@ -90,6 +90,19 @@ public sealed class MatchStore(LibraryDatabase db)
         return true;
     }
 
+    /// <summary>
+    /// The user says the file is not a movie or show: its title, episode and candidate links go and the status
+    /// becomes "not_media", which identification never touches. A user match is replaced too.
+    /// </summary>
+    public void SetNotMedia(int fileId)
+    {
+        using var connection = db.Open();
+        using var transaction = BeginWrite(connection);
+        ClearLinks(connection, transaction, fileId);
+        SetStatus(connection, transaction, fileId, "not_media");
+        transaction.Commit();
+    }
+
     public bool HasUserMatch(int fileId)
     {
         using var connection = db.Open();

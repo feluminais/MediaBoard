@@ -19,6 +19,9 @@ public sealed record TitleRow(
     string? PosterPath,
     DateTime? FetchedAt);
 
+/// <summary>An episode as stored, with the row id that overrides and file links point at.</summary>
+public sealed record StoredEpisode(int Id, int Season, int Number, string? Name, int? RuntimeMin, string? AirDate);
+
 /// <summary>A provisional title and one parsed file linked to it.</summary>
 public sealed record ProvisionalLink(int TitleId, TitleKind Kind, int FolderId, ParsedMedia Parsed);
 
@@ -133,6 +136,17 @@ public sealed class TitleStore(LibraryDatabase db, TimeProvider? timeProvider = 
             r.AirDate is null ? null : DateOnly.ParseExact(r.AirDate, DateFormat, CultureInfo.InvariantCulture))).ToList());
     }
 
+    /// <summary>Every stored episode of a title, by season and number.</summary>
+    public IReadOnlyList<StoredEpisode> Episodes(int titleId)
+    {
+        using var connection = db.Open();
+        return connection.Query<EpisodeRow>(
+                "SELECT id, season, number, name, runtime_min AS RuntimeMin, air_date AS AirDate FROM episodes " +
+                "WHERE title_id = @titleId ORDER BY season, number", new { titleId })
+            .Select(r => new StoredEpisode((int)r.Id, (int)r.Season, (int)r.Number, r.Name, (int?)r.RuntimeMin, r.AirDate))
+            .ToList();
+    }
+
     /// <summary>The stored season numbers of a title, ascending.</summary>
     public IReadOnlyList<int> StoredSeasons(int titleId)
     {
@@ -222,6 +236,7 @@ public sealed class TitleStore(LibraryDatabase db, TimeProvider? timeProvider = 
 
     private sealed class EpisodeRow
     {
+        public long Id { get; set; }
         public long Season { get; set; }
         public long Number { get; set; }
         public string? Name { get; set; }

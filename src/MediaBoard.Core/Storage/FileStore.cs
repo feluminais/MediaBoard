@@ -17,7 +17,7 @@ public sealed record MediaFileRow(
     string Status,
     double? DurationS);
 
-/// <summary>Read access to the files table. The scanner owns the writes.</summary>
+/// <summary>Read access to the files table. The scanner owns the writes; only a delete from disk removes rows besides it.</summary>
 public sealed class FileStore(LibraryDatabase db)
 {
     private const string Select =
@@ -50,6 +50,18 @@ public sealed class FileStore(LibraryDatabase db)
     {
         using var connection = db.Open();
         connection.Execute("UPDATE files SET duration_s = @seconds WHERE id = @id", new { id, seconds });
+    }
+
+    /// <summary>
+    /// Forgets files after they were sent to the Recycle Bin. By cascade their title and episode links, progress
+    /// and review candidates go too. Nothing on disk is touched.
+    /// </summary>
+    public void Remove(IEnumerable<int> ids)
+    {
+        using var connection = db.Open();
+        using var transaction = connection.BeginTransaction();
+        foreach (var id in ids) connection.Execute("DELETE FROM files WHERE id = @id", new { id }, transaction);
+        transaction.Commit();
     }
 
     /// <summary>The file's absolute path on disk.</summary>

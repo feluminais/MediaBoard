@@ -1,0 +1,269 @@
+using System.Collections.Concurrent;
+using MediaBoard.Core.Identification;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Parsing;
+using MediaBoard.Core.Scanning;
+using MediaBoard.Core.Storage;
+
+namespace MediaBoard.Core.Library;
+
+/// <summary>
+/// <see cref="ILibrary"/> over the local database. This half holds the edits and the delete; the queries are in
+/// LocalLibrary.Queries.cs.
+/// <para>
+/// Edits only write to the database. <see cref="DeleteFromDiskAsync"/> is the one call that touches files, and it
+/// sends them to the Recycle Bin through the injected action. Their rows are removed from the library at once
+/// rather than left for the next scan to mark missing, so the title is gone as soon as the user confirms.
+/// </para>
+/// <para>
+/// <see cref="Changed"/> is raised on the calling thread after every edit. When the data changes behind the
+/// library's back (a scan, an identification run) the app calls <see cref="NotifyChanged"/>.
+/// </para>
+/// </summary>
+public sealed partial class LocalLibrary : ILibrary
+{
+    private readonly LibraryDatabase _db;
+    private readonly IMetadataProvider _provider;
+    private readonly Action<string> _sendToRecycleBin;
+    private readonly FileStore _files;
+    private readonly FolderStore _folders;
+    private readonly TitleStore _titles;
+    private readonly MatchStore _matches;
+    private readonly ProgressStore _progress;
+    private readonly OverrideStore _overrides;
+    private readonly ConcurrentDictionary<int, ScanInfo> _scans = new();
+
+    public LocalLibrary(
+        LibraryDatabase db,
+        IMetadataProvider provider,
+        Action<string>? sendToRecycleBin = null,
+        TimeProvider? timeProvider = null)
+    {
+        _db = db;
+        _provider = provider;
+        _sendToRecycleBin = sendToRecycleBin ?? RecycleBin.Send;
+        _files = new FileStore(db);
+        _folders = new FolderStore(db, timeProvider);
+        _titles = new TitleStore(db, timeProvider);
+        _matches = new MatchStore(db);
+        _progress = new ProgressStore(db, timeProvider);
+        _overrides = new OverrideStore(db);
+    }
+
+    public event Action? Changed;
+
+    /// <summary>Tells the library its data changed underneath it (after a scan or an identification run).</summary>
+    public void NotifyChanged() => RaiseChanged();
+
+    /// <summary>
+    /// Keeps what a scan found that the database does not: the non-media folders it skipped and whether the folder
+    /// could be read. The app calls this with every scan result; it also raises <see cref="Changed"/>.
+    /// </summary>
+    public void RecordScan(int folderId, ScanResult result)
+    {
+        _scans.AddOrUpdate(
+            folderId,
+            _ => new ScanInfo(result.IgnoredFolders, result.FolderUnavailable),
+            // An unreadable folder reports no listing, so the last list of skipped folders stays.
+            (_, previous) => new ScanInfo(result.FolderUnavailable ? previous.IgnoredFolders : result.IgnoredFolders, result.FolderUnavailable));
+        RaiseChanged();
+    }
+
+    // ---- Edits ----
+
+    public void Rename(TargetKind kind, int id, string? displayName)
+    {
+        if (kind == TargetKind.Folder) throw new ArgumentException("A folder has no display name to change.", nameof(kind));
+
+        _overrides.SetDisplayName(kind, id, displayName);
+        RaiseChanged();
+    }
+
+    public void SetHidden(TargetKind kind, int id, bool hidden)
+    {
+        _overrides.SetHidden(kind, id, hidden);
+        RaiseChanged();
+    }
+
+    public void SetWatched(int fileId, bool watched)
+    {
+        RequireFile(fileId);
+        _progress.SetWatched(fileId, watched);
+        RaiseChanged();
+    }
+
+    public void MarkNotMedia(int fileId)
+    {
+        RequireFile(fileId);
+        _matches.SetNotMedia(fileId);
+        _titles.DeleteOrphanProvisional();
+        RaiseChanged();
+    }
+
+    /// <summary>
+    /// Everything TMDB has to say is fetched first and stored after, so a failed lookup leaves the file as it was.
+    /// An episode gets a rule for its show folder and parsed title, which identification applies to the other
+    /// files of that folder; a movie, or a file outside a show folder, gets none.
+    /// </summary>
+    public async Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct)
+    {
+        var file = RequireFile(fileId);
+        var parsed = file.Parsed;
+
+        var details = await _provider.GetTitleAsync(tmdbId, kind, ct).ConfigureAwait(false);
+        var seasons = new List<SeasonDetails>();
+        IReadOnlyList<EpisodeDetails> episodes = [];
+        if (kind == TitleKind.Show) (episodes, seasons) = await ResolveEpisodesAsync(parsed, tmdbId, ct).ConfigureAwait(false);
+
+        var titleId = _titles.Upsert(details);
+        foreach (var season in seasons) _titles.UpsertEpisodes(titleId, season);
+        var episodeIds = _titles.EpisodeIds(titleId, episodes.Select(e => (e.Season, e.Number)));
+        _matches.SetMatch(fileId, titleId, episodeIds, 1.0, "user");
+
+        if (kind == TitleKind.Show && parsed.Kind == MediaKind.Episode
+            && !string.IsNullOrEmpty(parsed.ShowFolder) && !string.IsNullOrWhiteSpace(parsed.Title))
+        {
+            _matches.AddRule(file.FolderId, parsed.ShowFolder, parsed.Title, titleId);
+        }
+
+        _titles.DeleteOrphanProvisional();
+        RaiseChanged();
+    }
+
+    /// <summary>
+    /// The episodes the file holds in the chosen show. The resolver goes first (it matches episode titles and
+    /// numbers against TMDB's list); when it cannot decide, the numbers parsed from the name are used as they are.
+    /// </summary>
+    private async Task<(IReadOnlyList<EpisodeDetails> Episodes, List<SeasonDetails> Seasons)> ResolveEpisodesAsync(
+        ParsedMedia parsed, int tmdbId, CancellationToken ct)
+    {
+        var seasons = new List<SeasonDetails>();
+        if (parsed.Episodes.Count == 0 && parsed.EpisodeTitles.Count == 0) return ([], seasons);
+
+        var number = parsed.Season ?? 1;
+        var season = await TryGetSeasonAsync(tmdbId, number, ct).ConfigureAwait(false);
+        if (season is null) return ([], seasons);
+        seasons.Add(season);
+
+        // The resolver reads season 0 only to match an episode title.
+        SeasonDetails? specials = null;
+        if (number != 0 && parsed.EpisodeTitles.Count > 0)
+        {
+            specials = await TryGetSeasonAsync(tmdbId, 0, ct).ConfigureAwait(false);
+            if (specials is not null) seasons.Add(specials);
+        }
+
+        var resolved = EpisodeResolver.Resolve(parsed, season, specials)
+                       ?? season.Episodes.Where(e => parsed.Episodes.Contains(e.Number)).OrderBy(e => e.Number).ToList();
+        return (resolved, seasons);
+    }
+
+    /// <summary>A season TMDB does not have is not an error: the file is matched without episodes.</summary>
+    private async Task<SeasonDetails?> TryGetSeasonAsync(int tmdbId, int season, CancellationToken ct)
+    {
+        try
+        {
+            return await _provider.GetSeasonAsync(tmdbId, season, ct).ConfigureAwait(false);
+        }
+        catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+        {
+            return null;
+        }
+    }
+
+    // ---- Delete from disk ----
+
+    public DeletePreview PreviewDelete(int titleId)
+    {
+        var snapshot = LibrarySnapshot.Load(_db);
+        if (!snapshot.Titles.TryGetValue(titleId, out var title)) return new DeletePreview(titleId, "", []);
+
+        var folders = snapshot.Folders.ToDictionary(f => f.Id, f => f.Path);
+        var files = new List<DeleteFile>();
+        foreach (var file in snapshot.FilesByTitle[titleId].Where(f => !f.Missing).OrderBy(f => f.RelPath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (InsideLibrary(folders, file.FolderId, file.RelPath) is { } path) files.Add(new DeleteFile(file.Id, path, file.Size));
+        }
+
+        return new DeletePreview(titleId, snapshot.TitleName(title), files);
+    }
+
+    /// <summary>
+    /// The paths come from the database again, not from the preview, and a file that does not resolve to a place
+    /// below one of the library folders is refused. A file that cannot be sent keeps its row; the rest are removed.
+    /// </summary>
+    public Task<DeleteResult> DeleteFromDiskAsync(DeletePreview preview) => Task.Run(() => DeleteFiles(preview));
+
+    private DeleteResult DeleteFiles(DeletePreview preview)
+    {
+        var folders = _folders.All().ToDictionary(f => f.Id, f => f.Path);
+        var deleted = new List<string>();
+        var failed = new List<DeleteFailure>();
+        var gone = new List<int>();
+
+        foreach (var entry in preview.Files)
+        {
+            var file = _files.Get(entry.FileId);
+            if (file is null)
+            {
+                failed.Add(new DeleteFailure(entry.Path, "The file is no longer in the library."));
+                continue;
+            }
+
+            if (InsideLibrary(folders, file.FolderId, file.RelPath) is not { } path)
+            {
+                failed.Add(new DeleteFailure(entry.Path, "The file is not inside a library folder, so it was left alone."));
+                continue;
+            }
+
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    failed.Add(new DeleteFailure(path, "The file was not found on disk."));
+                    continue;
+                }
+
+                _sendToRecycleBin(path);
+                deleted.Add(path);
+                gone.Add(file.Id);
+            }
+            catch (Exception e)
+            {
+                failed.Add(new DeleteFailure(path, e.Message));
+            }
+        }
+
+        if (gone.Count > 0)
+        {
+            _files.Remove(gone);
+            _titles.DeleteOrphanProvisional();
+            RaiseChanged();
+        }
+
+        return new DeleteResult(deleted, failed);
+    }
+
+    /// <summary>The file's full path, or null when it does not lie below its library folder (a ".." or rooted path).</summary>
+    private static string? InsideLibrary(Dictionary<int, string> folders, int folderId, string relPath)
+    {
+        if (!folders.TryGetValue(folderId, out var folder) || string.IsNullOrWhiteSpace(relPath) || Path.IsPathRooted(relPath)) return null;
+
+        var full = Path.GetFullPath(Path.Combine(folder, relPath));
+        var prefix = Path.EndsInDirectorySeparator(folder) ? folder : folder + Path.DirectorySeparatorChar;
+        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && full.Length > prefix.Length ? full : null;
+    }
+
+    // ---- Helpers ----
+
+    private MediaFileRow RequireFile(int fileId) =>
+        _files.Get(fileId) ?? throw new ArgumentException($"There is no file with id {fileId}.", nameof(fileId));
+
+    private void RaiseChanged()
+    {
+        InvalidateSearchIndex();
+        Changed?.Invoke();
+    }
+
+    private sealed record ScanInfo(IReadOnlyList<string> IgnoredFolders, bool Unavailable);
+}

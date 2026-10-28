@@ -9,10 +9,14 @@ public static class TitleSimilarity
     /// alphabetically, so extra words (a sequel number) cost points; the token-set ratio compares the
     /// shared words with the rest and scores a title that contains the other's words as 1.0.
     /// </summary>
-    public static double Score(string a, string b)
+    public static double Score(string a, string b) => ScoreNormalized(TitleNormalizer.Normalize(a), TitleNormalizer.Normalize(b));
+
+    /// <summary>
+    /// <see cref="Score"/> for two titles that went through <see cref="TitleNormalizer.Normalize"/> already, for
+    /// callers that compare one title against many and normalize each only once.
+    /// </summary>
+    public static double ScoreNormalized(string na, string nb)
     {
-        var na = TitleNormalizer.Normalize(a);
-        var nb = TitleNormalizer.Normalize(b);
         if (na.Length == 0 || nb.Length == 0) return 0.0;
         if (na == nb) return 1.0;
 
