@@ -133,6 +133,26 @@ public sealed class TitleStore(LibraryDatabase db, TimeProvider? timeProvider = 
             r.AirDate is null ? null : DateOnly.ParseExact(r.AirDate, DateFormat, CultureInfo.InvariantCulture))).ToList());
     }
 
+    /// <summary>The stored season numbers of a title, ascending.</summary>
+    public IReadOnlyList<int> StoredSeasons(int titleId)
+    {
+        using var connection = db.Open();
+        return connection.Query<int>(
+            "SELECT DISTINCT season FROM episodes WHERE title_id = @titleId ORDER BY season", new { titleId }).ToList();
+    }
+
+    /// <summary>
+    /// Ids of titles with a TMDB id whose details were fetched before <paramref name="cutoff"/>, oldest first.
+    /// Provisional titles never qualify.
+    /// </summary>
+    public IReadOnlyList<int> FetchedBefore(DateTimeOffset cutoff)
+    {
+        using var connection = db.Open();
+        return connection.Query<int>(
+            "SELECT id FROM titles WHERE tmdb_id IS NOT NULL AND (fetched_at IS NULL OR fetched_at < @cutoff) ORDER BY fetched_at, id",
+            new { cutoff = FileStore.FormatTime(cutoff) }).ToList();
+    }
+
     /// <summary>Row ids of the given (season, number) episodes of a title; ones that are not stored are left out.</summary>
     public IReadOnlyList<int> EpisodeIds(int titleId, IEnumerable<(int Season, int Number)> episodes)
     {
