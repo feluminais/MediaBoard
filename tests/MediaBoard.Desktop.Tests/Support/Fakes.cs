@@ -102,7 +102,9 @@ internal sealed class FakeSearch : ISearchService
     public Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct)
     {
         lock (DetailRequests) DetailRequests.Add((tmdbId, kind));
-        return Task.FromResult(OnDetails is null ? Details : OnDetails(tmdbId, kind));
+        var answer = OnDetails is null ? Details : OnDetails(tmdbId, kind);
+        ct.ThrowIfCancellationRequested(); // like the real client, a request cancelled while it waits ends with the cancellation
+        return Task.FromResult(answer);
     }
 
     public IReadOnlyList<PaletteCommand> Commands(string filter) => [];

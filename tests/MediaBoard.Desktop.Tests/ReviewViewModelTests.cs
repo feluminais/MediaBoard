@@ -421,6 +421,7 @@ public class ReviewViewModelTests
     [AvaloniaFact]
     public async Task Enrichment_StopsWhenThePageIsLeft()
     {
+        var logged = _hub.Recent.Count;
         using var gate = new ManualResetEventSlim();
         _t.Search.OnDetails = (id, _) =>
         {
@@ -438,6 +439,32 @@ public class ReviewViewModelTests
         await page.Enrichment;
 
         Assert.Single(_t.Search.DetailRequests);
+        Assert.Equal(logged, _hub.Recent.Count); // the cancelled request is no failure
+    }
+
+    [AvaloniaFact]
+    public async Task Enrichment_ReopeningWhileARequestIsStillInFlight_CarriesOn()
+    {
+        using var gate = new ManualResetEventSlim();
+        _t.Search.OnDetails = (id, _) =>
+        {
+            gate.Wait(TimeSpan.FromSeconds(10));
+            return Details(id);
+        };
+        _library.Review.Add(MovieFile(1, "A.mkv", "A", null, Movie(1, "A", 2000)));
+        _library.Review.Add(MovieFile(2, "B.mkv", "B", null, Movie(2, "B", 2000)));
+        var logged = _hub.Recent.Count;
+        var page = new ReviewViewModel(_t.Services());
+        _ = page.RefreshAsync();
+        await Ui.WaitUntil(() => _t.Search.DetailRequests.Count == 1); // the first request is in flight
+
+        page.Closed();
+        page.Opened(); // back again before that request ended
+        gate.Set();
+
+        var candidates = () => page.Groups.SelectMany(g => g.Rows).SelectMany(r => r.Candidates).ToList();
+        await Ui.WaitUntil(() => candidates().Count == 2 && candidates().All(c => c.Detail.EndsWith("7.0")));
+        Assert.Equal(logged, _hub.Recent.Count);
     }
 
     // ---- Refreshes keep what they can ----

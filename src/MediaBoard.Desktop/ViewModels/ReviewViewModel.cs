@@ -448,6 +448,19 @@ public sealed partial class ReviewViewModel : PageViewModel
         return null;
     }
 
+    // Thread pool. Leaving the page cancels the request, which is no failure: it answers null and the loop ends.
+    private TitleDetails? AskTmdb((int TmdbId, TitleKind Kind) key, CancellationToken ct)
+    {
+        try
+        {
+            return _s.Search.GetOnlineDetailsAsync(key.TmdbId, key.Kind, ct).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     private async Task EnrichAsync(CancellationToken ct)
     {
         try
@@ -456,7 +469,7 @@ public sealed partial class ReviewViewModel : PageViewModel
             {
                 OnlineInfo? found = null;
                 await _details.RunAsync(
-                    () => _s.Search.GetOnlineDetailsAsync(key.TmdbId, key.Kind, ct).GetAwaiter().GetResult(),
+                    () => AskTmdb(key, ct),
                     details => found = details is null ? null : new OnlineInfo(details.Rating, details.PosterPath));
                 if (ct.IsCancellationRequested) break;
 
@@ -478,6 +491,9 @@ public sealed partial class ReviewViewModel : PageViewModel
         finally
         {
             _enriching = false;
+
+            // The page was left and opened again while the last request was still in flight: carry on for the new visit.
+            if (ct.IsCancellationRequested && !_lifetime.IsCancellationRequested) StartEnrichment();
         }
     }
 
