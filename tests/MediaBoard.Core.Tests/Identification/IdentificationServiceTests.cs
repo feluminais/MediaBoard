@@ -406,6 +406,86 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.Empty(_tmdb.TitleFetches);
     }
 
+    [Theory]
+    [InlineData(UnavailableReason.Offline)]
+    [InlineData(UnavailableReason.NoKey)]
+    [InlineData(UnavailableReason.KeyRejected)]
+    public async Task UserMatch_SurvivesARunThatStopsBeforeReachingIt(UnavailableReason reason)
+    {
+        _tmdb.Unavailable = reason;
+        _lib.File(@"A\Lost.S01E01.mkv");
+        _lib.File(@"B\Heat (1995).mkv");
+        await Scan();
+        var file = Row(@"B\Heat (1995).mkv");
+        var titleId = _titles.Upsert(FilmTitle(111, "Chosen By Hand", 1990));
+        _matches.SetMatch(file.Id, titleId, [], 1.0, "user");
+        ResetToPending(file.Id);
+
+        // The file in A stops the run, so the user's file in B is one of the remaining ones.
+        await Run();
+
+        Assert.Equal("offline", Row(@"A\Lost.S01E01.mkv").Status);
+        Assert.Equal("matched", Row(@"B\Heat (1995).mkv").Status);
+        Assert.Equal("user", LinkSource(file.Id));
+        Assert.Equal("Chosen By Hand", LinkedTitleName(file.Id));
+    }
+
+    [Theory]
+    [InlineData(UnavailableReason.Offline)]
+    [InlineData(UnavailableReason.KeyRejected)]
+    public async Task UserMatch_SurvivesARunThatStartsStopped(UnavailableReason reason)
+    {
+        _tmdb.Unavailable = reason;
+        _networkUp = false;
+        _lib.File(@"Heat (1995).mkv");
+        _lib.File(@"Lost\Season 1\Lost.S01E01.mkv");
+        await Scan();
+        await Run(); // learns that TMDB cannot answer, so the next run starts stopped
+        var file = Row("Heat (1995).mkv");
+        var titleId = _titles.Upsert(FilmTitle(111, "Chosen By Hand", 1990));
+        _matches.SetMatch(file.Id, titleId, [], 1.0, "user");
+        ResetToPending(file.Id);
+
+        await Run();
+
+        Assert.Equal("matched", Row("Heat (1995).mkv").Status);
+        Assert.Equal("user", LinkSource(file.Id));
+        Assert.Equal("Chosen By Hand", LinkedTitleName(file.Id));
+    }
+
+    [Fact]
+    public async Task AutoWrites_NeverReplaceAUserLink()
+    {
+        _lib.File(@"Heat (1995).mkv");
+        await Scan();
+        var file = Row("Heat (1995).mkv");
+        var chosen = _titles.Upsert(FilmTitle(111, "Chosen By Hand", 1990));
+        var other = _titles.Upsert(FilmTitle(949, "Heat", 1995));
+        var provisional = _titles.UpsertProvisional("Heat", TitleKind.Movie, 1995);
+        _matches.SetMatch(file.Id, chosen, [], 1.0, "user");
+
+        Assert.False(_matches.SetMatch(file.Id, other, [], 0.9, "auto"));
+        Assert.False(_matches.SetMatch(file.Id, other, [], 1.0, "rule"));
+        Assert.False(_matches.SetMatch(file.Id, other, [], 1.0, "id_tag"));
+        Assert.False(_matches.SetProvisional(file.Id, provisional));
+        Assert.False(_matches.SetReview(file.Id, [FilmHit(949, "Heat", 1995)], provisional));
+
+        Assert.Equal("user", LinkSource(file.Id));
+        Assert.Equal("Chosen By Hand", LinkedTitleName(file.Id));
+        Assert.Equal("matched", Scalar<string>("SELECT status FROM files WHERE id = @id", new { id = file.Id }));
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM review_candidates"));
+
+        // The user can still choose again.
+        Assert.True(_matches.SetMatch(file.Id, other, [], 1.0, "user"));
+        Assert.Equal("Heat", LinkedTitleName(file.Id));
+    }
+
+    private void ResetToPending(int fileId)
+    {
+        using var conn = _db.Open();
+        conn.Execute("UPDATE files SET status = 'pending' WHERE id = @fileId", new { fileId });
+    }
+
     [Fact]
     public async Task ErrorInsideARun_IsLogged_NotThrown()
     {

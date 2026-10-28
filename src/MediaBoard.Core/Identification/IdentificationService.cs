@@ -221,6 +221,8 @@ public sealed class IdentificationService : IDisposable
                 ct.ThrowIfCancellationRequested();
                 try
                 {
+                    if (RestoreUserMatch(file, run)) continue;
+
                     if (stop != Stop.None) MarkUnreachable(file, run);
                     else stop = await IdentifyAsync(file, run, ct).ConfigureAwait(false);
                 }
@@ -268,17 +270,23 @@ public sealed class IdentificationService : IDisposable
         return _connectivity.IsOnline ? Stop.None : Stop.Offline;
     }
 
+    /// <summary>
+    /// A file the user matched is never identified again. A rescan may have reset it to pending, so its
+    /// status goes back to matched, with no call to TMDB and whatever state the run is in.
+    /// </summary>
+    private bool RestoreUserMatch(MediaFileRow file, Run run)
+    {
+        if (!_matches.HasUserMatch(file.Id)) return false;
+
+        _matches.RestoreMatched(file.Id);
+        run.Waiting--;
+        _hub.SetPendingIdentification(run.Waiting);
+        return true;
+    }
+
     /// <summary>Identifies one file. Returns why the run must stop, or None.</summary>
     private async Task<Stop> IdentifyAsync(MediaFileRow file, Run run, CancellationToken ct)
     {
-        if (_matches.HasUserMatch(file.Id))
-        {
-            _matches.RestoreMatched(file.Id);
-            run.Waiting--;
-            _hub.SetPendingIdentification(run.Waiting);
-            return Stop.None;
-        }
-
         var fullPath = _files.FullPath(file);
         var duration = file.DurationS;
         if (duration is null)

@@ -13,15 +13,19 @@ public sealed class MatchStore(LibraryDatabase db)
 {
     private const int ReviewCandidateCount = 5;
     private const double RankScoreStep = 0.1;
+    private const string UserSource = "user";
 
     /// <summary>
     /// Points the file at the title and episodes and marks it matched. Earlier links, provisional ones
-    /// included, and its review candidates are replaced.
+    /// included, and its review candidates are replaced. A source other than "user" never replaces the
+    /// user's own match: the write is skipped and false is returned.
     /// </summary>
-    public void SetMatch(int fileId, int titleId, IReadOnlyList<int> episodeIds, double confidence, string source)
+    public bool SetMatch(int fileId, int titleId, IReadOnlyList<int> episodeIds, double confidence, string source)
     {
         using var connection = db.Open();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = BeginWrite(connection);
+        if (source != UserSource && HasUserLink(connection, transaction, fileId)) return false;
+
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, titleId, confidence, source);
         foreach (var episodeId in episodeIds)
@@ -33,31 +37,38 @@ public sealed class MatchStore(LibraryDatabase db)
 
         SetStatus(connection, transaction, fileId, "matched");
         transaction.Commit();
+        return true;
     }
 
     /// <summary>
     /// Gives a file TMDB could not place a provisional title (confidence 0) and the status "offline", so it
-    /// stays playable and listed until the lookup can run again.
+    /// stays playable and listed until the lookup can run again. Skipped (false) for a file with a user match.
     /// </summary>
-    public void SetProvisional(int fileId, int provisionalTitleId)
+    public bool SetProvisional(int fileId, int provisionalTitleId)
     {
         using var connection = db.Open();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = BeginWrite(connection);
+        if (HasUserLink(connection, transaction, fileId)) return false;
+
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, provisionalTitleId, 0, "auto");
         SetStatus(connection, transaction, fileId, "offline");
         transaction.Commit();
+        return true;
     }
 
     /// <summary>
     /// Stores the best five candidates (replacing earlier ones) and marks the file "review". With a
     /// provisional title the file keeps that title until the user decides. The candidates arrive best
     /// first; the stored score is that rank (1.0 for the best, 0.1 less for each place after it).
+    /// Skipped (false) for a file with a user match.
     /// </summary>
-    public void SetReview(int fileId, IReadOnlyList<SearchCandidate> candidates, int? provisionalTitleId = null)
+    public bool SetReview(int fileId, IReadOnlyList<SearchCandidate> candidates, int? provisionalTitleId = null)
     {
         using var connection = db.Open();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = BeginWrite(connection);
+        if (HasUserLink(connection, transaction, fileId)) return false;
+
         ClearLinks(connection, transaction, fileId);
         if (provisionalTitleId is { } titleId) LinkTitle(connection, transaction, fileId, titleId, 0, "auto");
 
@@ -76,6 +87,7 @@ public sealed class MatchStore(LibraryDatabase db)
 
         SetStatus(connection, transaction, fileId, "review");
         transaction.Commit();
+        return true;
     }
 
     public bool HasUserMatch(int fileId)
@@ -116,6 +128,14 @@ public sealed class MatchStore(LibraryDatabase db)
             new { folderId, showFolder, key = TitleNormalizer.Normalize(parsedTitle) });
         return id is { } found ? (int)found : null;
     }
+
+    /// <summary>Takes the write lock up front, so the user-link check and the write cannot be split by another writer.</summary>
+    private static SqliteTransaction BeginWrite(SqliteConnection connection) => connection.BeginTransaction(deferred: false);
+
+    private static bool HasUserLink(SqliteConnection connection, SqliteTransaction transaction, int fileId) =>
+        connection.ExecuteScalar<int>(
+            "SELECT EXISTS (SELECT 1 FROM file_titles WHERE file_id = @fileId AND source = 'user')",
+            new { fileId }, transaction) != 0;
 
     private static void ClearLinks(SqliteConnection connection, SqliteTransaction transaction, int fileId)
     {
