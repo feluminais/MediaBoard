@@ -30,6 +30,8 @@ public sealed class LeaseCache<T>(int capacity)
         internal LinkedListNode<Entry>? Node { get; set; }
     }
 
+    public int Capacity => capacity;
+
     public int Count => _entries.Count;
 
     /// <summary>The entry for the key, held by the caller until <see cref="Release"/>; null when it is not cached.</summary>

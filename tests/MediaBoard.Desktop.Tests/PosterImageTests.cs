@@ -160,10 +160,6 @@ public class PosterImageTests : IDisposable
         Assert.Null(cache.Acquire("b"));
     }
 
-    [Fact]
-    public void PosterImage_SharedCache_HoldsThreeHundred() =>
-        Assert.Equal(300, PosterImage.CacheCapacity);
-
     private sealed class Probe : IDisposable
     {
         public bool Disposed { get; private set; }

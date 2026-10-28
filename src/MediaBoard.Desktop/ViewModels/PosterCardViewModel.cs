@@ -59,6 +59,9 @@ public sealed partial class PosterCardViewModel : ObservableObject
     /// <summary>Hidden or missing: drawn faded.</summary>
     public bool IsDimmed { get; }
 
+    /// <summary>A poster lookup is queued or running for this card.</summary>
+    public bool IsLookingForPoster => _request is not null;
+
     public bool HasProgress => Progress > 0;
 
     public bool HasSubtitle => !string.IsNullOrEmpty(Subtitle);

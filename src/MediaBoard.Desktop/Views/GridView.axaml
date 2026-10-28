@@ -30,7 +30,7 @@
             </StackPanel>
 
             <!-- ItemsRepeater builds only the cards in the scroll viewer's window and reuses them as it scrolls. -->
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <ItemsRepeater x:Name="Cards" ItemsSource="{Binding Items}">
                     <ItemsRepeater.Layout>
                         <UniformGridLayout MinItemWidth="176" MinItemHeight="304" ItemsStretch="None" />

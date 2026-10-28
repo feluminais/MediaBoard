@@ -17,6 +17,9 @@ public sealed class PosterImage : Control
     /// <summary>How many decoded posters the app keeps in memory.</summary>
     public const int CacheCapacity = 300;
 
+    /// <summary>The capacity of the cache every PosterImage in the app shares.</summary>
+    public static int SharedCacheCapacity => Shared.Capacity;
+
     public static readonly StyledProperty<string?> LocalPathProperty =
         AvaloniaProperty.Register<PosterImage, string?>(nameof(LocalPath));
 
@@ -33,6 +36,7 @@ public sealed class PosterImage : Control
     private string? _key;
     private int _generation;
     private bool _attached;
+    private bool _suspended;
     private IBrush? _blockBrush;
     private IBrush? _textBrush;
     private FormattedText? _text;
@@ -46,7 +50,31 @@ public sealed class PosterImage : Control
         TitleProperty.Changed.AddClassHandler<PosterImage>((image, _) => image._text = null);
     }
 
-    public PosterImage() => ActualThemeVariantChanged += OnThemeChanged;
+    public PosterImage()
+    {
+        ActualThemeVariantChanged += OnThemeChanged;
+        // A panel that recycles a view may only hide it: a hidden image lets go of its bitmap like a detached one.
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property.Name == nameof(IsEffectivelyVisible)) Reload();
+        };
+    }
+
+    /// <summary>
+    /// Set by a panel that keeps views for reuse (an <c>ItemsRepeater</c> pool) while they are off screen: the image lets
+    /// go of its bitmap and stops decoding until it is set back.
+    /// </summary>
+    public bool Suspended
+    {
+        get => _suspended;
+        set
+        {
+            if (_suspended == value) return;
+
+            _suspended = value;
+            Reload();
+        }
+    }
 
     /// <summary>The cached image file to show, or null for the placeholder.</summary>
     public string? LocalPath
@@ -71,6 +99,8 @@ public sealed class PosterImage : Control
 
     /// <summary>The picture being shown, or null while the placeholder is.</summary>
     public Bitmap? Image => _lease?.Value;
+
+    private bool Active => _attached && !_suspended && IsEffectivelyVisible;
 
     public bool ShowsPlaceholder => Image is null;
 
@@ -150,7 +180,7 @@ public sealed class PosterImage : Control
     {
         var path = LocalPath;
         var width = DecodeWidth;
-        if (!_attached || string.IsNullOrEmpty(path) || width <= 0)
+        if (!Active || string.IsNullOrEmpty(path) || width <= 0)
         {
             _generation++;
             IsLoading = false;
@@ -188,7 +218,7 @@ public sealed class PosterImage : Control
 
         // The first control back stores the bitmap; the others find it there.
         var entry = Shared.Acquire(key) ?? Shared.Add(key, bitmap);
-        if (generation != _generation || !_attached)
+        if (generation != _generation || !Active)
         {
             Shared.Release(entry); // the control moved on while this decoded
             return;
