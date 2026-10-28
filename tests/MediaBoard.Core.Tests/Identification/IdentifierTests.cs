@@ -387,6 +387,95 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
+    public async Task Movie_DurationMismatch_StaysPenalised_WhenARetryReturnsTheSameFilm()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnSearch("Heat", null, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995, runtimeMin: 170));
+
+        var result = await Identify(Movie("Heat", 1995), durationS: 20 * 60);
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal(2, _tmdb.Searches.Count);
+        Assert.Single(_tmdb.TitleFetches);
+    }
+
+    [Fact]
+    public async Task Movie_ShortenedTitle_WithMatchingDuration_IsAccepted()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995, runtimeMin: 170));
+
+        var result = await Identify(Movie("Heat Extended Cut", 1995), durationS: 168 * 60);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(949, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task ShortenedTitle_DoesNotAutoAcceptTheWrongSequel()
+    {
+        _tmdb.OnSearch("Dune", 2024, TitleKind.Movie, Film(438631, "Dune", 2021, 80))
+            .OnTitle(FilmTitle(438631, "Dune", 2021));
+
+        var result = await Identify(Movie("Dune Part Two", 2024));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal(438631, result.Candidates[0].TmdbId);
+    }
+
+    [Fact]
+    public async Task ShortenedTitle_LosesAPenaltyPerDroppedWord()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995)).OnTitle(FilmTitle(949, "Heat", 1995));
+        var exact = await Identify(Movie("Heat", 1995));
+        var shortened = await Identify(Movie("Heat Extended Cut", 1995));
+
+        Assert.Equal(2 * ScoringWeights.ShortenedWordPenalty, exact.Confidence - shortened.Confidence, 9);
+    }
+
+    [Fact]
+    public async Task TmdbIdTag_UnknownToTmdb_FallsBackToSearch()
+    {
+        _tmdb.OnSearch("The Matrix", 1999, TitleKind.Movie, Film(603, "The Matrix", 1999))
+            .OnTitle(FilmTitle(603, "The Matrix", 1999));
+        var parsed = Movie("The Matrix", 1999) with { TmdbId = 999999 };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(603, result.Title!.TmdbId);
+        Assert.Equal("auto", result.Source);
+        Assert.Equal([(999999, TitleKind.Movie), (603, TitleKind.Movie)], _tmdb.TitleFetches);
+    }
+
+    [Fact]
+    public async Task NfoId_UnknownToTmdb_FallsBackToSearch()
+    {
+        WriteNfo("Heat.nfo", "<movie><tmdbid>111</tmdbid></movie>");
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995));
+
+        var result = await Identify(Movie("Heat", 1995), Path.Combine(_dir, "Heat.mkv"));
+
+        Assert.Equal(949, result.Title!.TmdbId);
+        Assert.Equal("auto", result.Source);
+    }
+
+    [Fact]
+    public async Task EpisodeWithoutTitle_DoesNotFetchSpecials()
+    {
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 0, 1))
+            .OnSeason(91239, Season(1, "Pilot", "Two"));
+
+        var result = await Identify(Episode("Brassic", 2019, 1, 2));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal([(91239, 1)], _tmdb.SeasonFetches);
+    }
+
+    [Fact]
     public async Task Movie_UnknownDuration_FetchesTheTitleOnlyOnce()
     {
         _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))

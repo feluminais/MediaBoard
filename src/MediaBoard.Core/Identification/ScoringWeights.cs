@@ -23,6 +23,9 @@ public static class ScoringWeights
     // Popularity component: log10(1 + popularity) / PopularityLogDivisor, capped at 1.
     public const double PopularityLogDivisor = 3.0;
 
+    // A retry with a shortened title loses this much per word dropped from the parsed title.
+    public const double ShortenedWordPenalty = 0.03;
+
     // Duration check: a file this far from the runtime is probably a different title.
     public const double DurationPenalty = 0.25;
     public const double DurationToleranceMinMinutes = 15.0;

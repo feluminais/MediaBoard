@@ -18,14 +18,21 @@ public sealed class Identifier(IMetadataProvider provider)
     private const string MovieNfo = "movie.nfo";
     private const string EpisodeNfoRoot = "episodedetails";
 
-    private sealed record Scored(SearchCandidate Candidate, double Score);
+    /// <summary>
+    /// One pool candidate. <see cref="BaseScore"/> is the best score over all attempts (each already reduced
+    /// for dropped words); the duration penalty is kept apart so a later attempt cannot undo it.
+    /// </summary>
+    private sealed record Entry(SearchCandidate Candidate, double BaseScore, bool DurationMismatch)
+    {
+        public double Score => Math.Clamp(BaseScore - (DurationMismatch ? ScoringWeights.DurationPenalty : 0.0), 0.0, 1.0);
+    }
 
     private sealed class SearchState
     {
-        public Dictionary<(int, TitleKind), Scored> Pool { get; } = [];
+        public Dictionary<(int, TitleKind), Entry> Pool { get; } = [];
         public Dictionary<(int, TitleKind), TitleDetails> Details { get; } = [];
 
-        public List<Scored> Ranked() => [.. Pool.Values.OrderByDescending(s => s.Score)];
+        public List<Entry> Ranked() => [.. Pool.Values.OrderByDescending(e => e.Score)];
     }
 
     /// <param name="durationS">Probed length of the file, when known.</param>
@@ -34,9 +41,8 @@ public sealed class Identifier(IMetadataProvider provider)
     {
         try
         {
-            if (await FindHardIdAsync(parsed, fullPath, ct).ConfigureAwait(false) is { } hard)
+            if (await FindHardIdTitleAsync(parsed, fullPath, ct).ConfigureAwait(false) is { } title)
             {
-                var title = await provider.GetTitleAsync(hard.TmdbId, hard.Kind, ct).ConfigureAwait(false);
                 return await ResolveAsync(parsed, title, 1.0, "id_tag", [], ct).ConfigureAwait(false);
             }
 
@@ -59,11 +65,15 @@ public sealed class Identifier(IMetadataProvider provider)
 
     // ---- Hard ids ----
 
-    private async Task<(int TmdbId, TitleKind Kind)?> FindHardIdAsync(ParsedMedia parsed, string fullPath, CancellationToken ct)
+    /// <summary>
+    /// The title a name tag or nfo id points to. An id TMDB answers with a server error for (a stale or wrong
+    /// id gives a 404) is skipped, so the next source or the normal search decides instead.
+    /// </summary>
+    private async Task<TitleDetails?> FindHardIdTitleAsync(ParsedMedia parsed, string fullPath, CancellationToken ct)
     {
         var fileKind = parsed.Kind == MediaKind.Episode ? TitleKind.Show : TitleKind.Movie;
 
-        if (await FromIdsAsync(parsed.TmdbId, parsed.ImdbId, fileKind, ct).ConfigureAwait(false) is { } tagged)
+        if (await TitleFromIdsAsync(parsed.TmdbId, parsed.ImdbId, fileKind, ct).ConfigureAwait(false) is { } tagged)
         {
             return tagged;
         }
@@ -71,7 +81,7 @@ public sealed class Identifier(IMetadataProvider provider)
         foreach (var nfo in NfoCandidates(parsed, fullPath))
         {
             var (tmdbId, imdbId) = NfoReader.ReadIds(nfo);
-            if (await FromIdsAsync(tmdbId, imdbId, fileKind, ct).ConfigureAwait(false) is { } found)
+            if (await TitleFromIdsAsync(tmdbId, imdbId, fileKind, ct).ConfigureAwait(false) is { } found)
             {
                 return found;
             }
@@ -80,12 +90,37 @@ public sealed class Identifier(IMetadataProvider provider)
         return null;
     }
 
-    private async Task<(int TmdbId, TitleKind Kind)?> FromIdsAsync(int? tmdbId, string? imdbId, TitleKind fileKind, CancellationToken ct)
+    private async Task<TitleDetails?> TitleFromIdsAsync(int? tmdbId, string? imdbId, TitleKind fileKind, CancellationToken ct)
     {
-        if (tmdbId is > 0) return (tmdbId.Value, fileKind);
+        if (tmdbId is > 0 && await TryGetTitleAsync(tmdbId.Value, fileKind, ct).ConfigureAwait(false) is { } byTmdb)
+        {
+            return byTmdb;
+        }
+
         if (string.IsNullOrWhiteSpace(imdbId)) return null;
 
-        return await provider.FindByImdbIdAsync(imdbId, ct).ConfigureAwait(false);
+        try
+        {
+            return await provider.FindByImdbIdAsync(imdbId, ct).ConfigureAwait(false) is { } found
+                ? await TryGetTitleAsync(found.TmdbId, found.Kind, ct).ConfigureAwait(false)
+                : null;
+        }
+        catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+        {
+            return null;
+        }
+    }
+
+    private async Task<TitleDetails?> TryGetTitleAsync(int tmdbId, TitleKind kind, CancellationToken ct)
+    {
+        try
+        {
+            return await provider.GetTitleAsync(tmdbId, kind, ct).ConfigureAwait(false);
+        }
+        catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -137,18 +172,18 @@ public sealed class Identifier(IMetadataProvider provider)
         };
 
         var state = new SearchState();
-        foreach (var (title, year) in Attempts(parsed))
+        foreach (var (title, year, dropped) in Attempts(parsed))
         {
             foreach (var kind in kinds)
             {
                 var found = await provider.SearchAsync(title, year, kind, ct).ConfigureAwait(false);
                 foreach (var c in found)
                 {
-                    var score = Score(parsed, title, c, null, null);
-                    if (!state.Pool.TryGetValue((c.TmdbId, c.Kind), out var known) || score > known.Score)
-                    {
-                        state.Pool[(c.TmdbId, c.Kind)] = new Scored(c, score);
-                    }
+                    var score = Math.Max(0.0, Score(parsed, title, c) - ScoringWeights.ShortenedWordPenalty * dropped);
+                    var key = (c.TmdbId, c.Kind);
+                    state.Pool[key] = state.Pool.TryGetValue(key, out var known)
+                        ? known with { BaseScore = Math.Max(known.BaseScore, score) }
+                        : new Entry(c, score, false);
                 }
             }
 
@@ -161,46 +196,56 @@ public sealed class Identifier(IMetadataProvider provider)
         return await DecideAsync(parsed, state, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The query sequence: each shortening of the title with the year, then the same without it.</summary>
-    private static IEnumerable<(string Title, int? Year)> Attempts(ParsedMedia parsed)
+    /// <summary>
+    /// The query sequence: each shortening of the title with the year, then the same without it. Dropped is
+    /// the number of words left out of the parsed title.
+    /// </summary>
+    private static IEnumerable<(string Title, int? Year, int Dropped)> Attempts(ParsedMedia parsed)
     {
         var words = parsed.Title.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0) yield break;
 
-        var titles = Enumerable.Range(1, words.Length).Reverse().Select(n => string.Join(' ', words.Take(n))).ToList();
+        var titles = Enumerable.Range(1, words.Length).Reverse()
+            .Select(n => (Title: string.Join(' ', words.Take(n)), Dropped: words.Length - n))
+            .ToList();
 
-        foreach (var title in titles) yield return (title, parsed.Year);
+        foreach (var (title, dropped) in titles) yield return (title, parsed.Year, dropped);
 
         if (parsed.Year is not null)
         {
-            foreach (var title in titles) yield return (title, null);
+            foreach (var (title, dropped) in titles) yield return (title, null, dropped);
         }
     }
 
     /// <summary>
-    /// A movie that could be accepted is checked against its TMDB runtime, which can pull its score down.
-    /// Only candidates at or above the threshold matter, since the check never raises a score.
+    /// A movie that could be accepted is checked once against its TMDB runtime. A mismatch is stored on the
+    /// pool entry, so later attempts that return the same film cannot undo it. Only candidates whose base score
+    /// reaches the threshold matter, since the penalty never raises a score.
     /// </summary>
     private async Task VerifyMovieRuntimesAsync(ParsedMedia parsed, double? durationS, SearchState state, CancellationToken ct)
     {
         if (durationS is not > 0) return;
 
-        foreach (var scored in state.Pool.Values.ToList())
+        foreach (var entry in state.Pool.Values.ToList())
         {
-            var c = scored.Candidate;
-            if (c.Kind != TitleKind.Movie || scored.Score < ScoringWeights.AcceptThreshold) continue;
-            if (state.Details.ContainsKey((c.TmdbId, c.Kind))) continue;
+            var c = entry.Candidate;
+            var key = (c.TmdbId, c.Kind);
+            if (c.Kind != TitleKind.Movie || entry.BaseScore < ScoringWeights.AcceptThreshold) continue;
+            if (state.Details.ContainsKey(key)) continue;
 
             var details = await provider.GetTitleAsync(c.TmdbId, c.Kind, ct).ConfigureAwait(false);
-            state.Details[(c.TmdbId, c.Kind)] = details;
-            state.Pool[(c.TmdbId, c.Kind)] = new Scored(c, Score(parsed, parsed.Title, c, durationS, details.RuntimeMin));
+            state.Details[key] = details;
+
+            var mismatch = CandidateScorer.Score(parsed, c, durationS, details.RuntimeMin)
+                           < CandidateScorer.Score(parsed, c, null, null);
+            state.Pool[key] = entry with { DurationMismatch = mismatch };
         }
     }
 
     private async Task<IdentificationResult> DecideAsync(ParsedMedia parsed, SearchState state, CancellationToken ct)
     {
         var ranked = state.Ranked();
-        var top = ranked.Take(ReviewCandidateCount).Select(s => s.Candidate).ToList();
+        var top = ranked.Take(ReviewCandidateCount).Select(e => e.Candidate).ToList();
 
         if (ranked.Count == 0) return Review(0, top);
 
@@ -223,14 +268,14 @@ public sealed class Identifier(IMetadataProvider provider)
     /// For an episode year the file name carries the air date, which is usually not the show's start year,
     /// so a show whose year differs is scored as if the file had no year.
     /// </summary>
-    private static double Score(ParsedMedia parsed, string queryTitle, SearchCandidate c, double? durationS, int? runtimeMin)
+    private static double Score(ParsedMedia parsed, string queryTitle, SearchCandidate c)
     {
         var forCandidate = parsed with
         {
             Title = queryTitle,
             Year = parsed.Kind == MediaKind.Episode && parsed.Year != c.Year ? null : parsed.Year,
         };
-        return CandidateScorer.Score(forCandidate, c, durationS, runtimeMin);
+        return CandidateScorer.Score(forCandidate, c, null, null);
     }
 
     // ---- Result ----
@@ -259,7 +304,9 @@ public sealed class Identifier(IMetadataProvider provider)
         if (show.SeasonNumbers.Count > 0 && !show.SeasonNumbers.Contains(number)) return null;
 
         var season = await provider.GetSeasonAsync(show.TmdbId, number, ct).ConfigureAwait(false);
-        var specials = number != 0 && show.SeasonNumbers.Contains(0)
+
+        // The resolver reads season 0 only to match an episode title, so a file without one never needs it.
+        var specials = number != 0 && parsed.EpisodeTitles.Count > 0 && show.SeasonNumbers.Contains(0)
             ? await provider.GetSeasonAsync(show.TmdbId, 0, ct).ConfigureAwait(false)
             : null;
 
