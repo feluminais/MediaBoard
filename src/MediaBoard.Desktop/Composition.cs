@@ -156,6 +156,8 @@ public static class Composition
                 dialogs.OpenUrl);
         });
 
+        services.AddSingleton(sp => new PlayerExitPrompt(
+            sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<Dialogs>().AskClosePlayerAsync));
         services.AddSingleton(sp =>
         {
             var dialogs = sp.GetRequiredService<Dialogs>();

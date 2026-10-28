@@ -79,6 +79,60 @@ public sealed class Dialogs
         return await dialog.ShowDialog<bool>(Owner);
     }
 
+    /// <summary>
+    /// Asked on exit while a file plays: true for "Close it", false for "Leave it playing" (also Enter, Escape, and
+    /// no window).
+    /// </summary>
+    public async Task<bool> AskClosePlayerAsync(string player)
+    {
+        if (Owner is null) return false;
+
+        var dialog = new Window
+        {
+            Title = "MediaBoard",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        var leave = new Button { Content = "Leave it playing", Classes = { "accent" }, MinWidth = 88, IsDefault = true, IsCancel = true };
+        var close = new Button { Content = "Close it", MinWidth = 88 };
+        leave.Click += (_, _) => dialog.Close(false);
+        close.Click += (_, _) => dialog.Close(true);
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(24),
+            Spacing = 20,
+            Children =
+            {
+                new StackPanel
+                {
+                    Spacing = 6,
+                    Children =
+                    {
+                        new TextBlock { Text = $"{player} is still playing. Close it too?", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                        new TextBlock
+                        {
+                            Text = "If you leave it playing, MediaBoard won't save how far you get.",
+                            Classes = { "muted" },
+                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        },
+                    },
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { close, leave },
+                },
+            },
+        };
+
+        return await dialog.ShowDialog<bool>(Owner);
+    }
+
     /// <summary>Lists the files that would go to the Recycle Bin; true when the user pressed Delete.</summary>
     public async Task<bool> ConfirmDeleteAsync(DeletePreview preview)
     {
