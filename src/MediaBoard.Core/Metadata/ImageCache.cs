@@ -12,7 +12,7 @@ public sealed class ImageCache(HttpClient http, Connectivity connectivity, strin
 
     private static readonly char[] InvalidNameChars = Path.GetInvalidFileNameChars();
 
-    private readonly ConcurrentDictionary<string, Task<string?>> _downloads = new();
+    private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> _downloads = new();
     private readonly ConcurrentDictionary<string, bool> _failed = new();
 
     /// <summary>
@@ -32,28 +32,33 @@ public sealed class ImageCache(HttpClient http, Connectivity connectivity, strin
         if (File.Exists(path)) return path;
         if (!connectivity.IsOnline || _failed.ContainsKey(name)) return null;
 
-        // One download per file, shared by everyone who asks meanwhile. It does not take the first caller's
-        // token, so that caller giving up does not fail the others.
-        var download = _downloads.GetOrAdd(name, _ => DownloadAndForgetAsync(name, posterPath, width, path));
-        return await download.WaitAsync(ct).ConfigureAwait(false);
-    }
+        // One download per file, shared by everyone who asks meanwhile. Racing threads may each build an entry,
+        // but only the one stored wins, and only the winner starts the download (the entry is lazy, so a
+        // discarded one never runs). The download does not take the first caller's token, so that caller
+        // giving up does not fail the others.
+        var created = new Lazy<Task<string?>>(
+            () => DownloadAsync(name, posterPath, width, path), LazyThreadSafetyMode.ExecutionAndPublication);
+        var entry = _downloads.GetOrAdd(name, created);
+        if (ReferenceEquals(entry, created))
+        {
+            // Forget the entry once it is done, so a later miss (say, the file was deleted) downloads again.
+            // Removing by pair leaves any newer entry for the same name alone.
+            _ = entry.Value.ContinueWith(
+                _ => _downloads.TryRemove(new KeyValuePair<string, Lazy<Task<string?>>>(name, entry)),
+                TaskScheduler.Default);
+        }
 
-    private async Task<string?> DownloadAndForgetAsync(string name, string posterPath, int width, string path)
-    {
-        // Run off the caller's context, and never complete synchronously before GetOrAdd has stored the task.
-        await Task.Yield();
-        try
-        {
-            return await DownloadAsync(name, posterPath, width, path).ConfigureAwait(false);
-        }
-        finally
-        {
-            _downloads.TryRemove(name, out _);
-        }
+        return await entry.Value.WaitAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<string?> DownloadAsync(string name, string posterPath, int width, string path)
     {
+        // Run off the caller's context.
+        await Task.Yield();
+
+        // A caller can pass the first File.Exists check just before an earlier download lands.
+        if (File.Exists(path)) return path;
+
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

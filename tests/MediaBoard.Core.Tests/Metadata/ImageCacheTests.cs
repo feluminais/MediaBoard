@@ -178,6 +178,40 @@ public sealed class ImageCacheTests : IDisposable
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task ManyThreadsAskingAtOnce_DownloadEachImageOnce()
+    {
+        const int callersPerImage = 16;
+        const int images = 20;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new GatedHandler(release.Task, Image);
+        var cache = CacheWith(handler);
+        var go = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ready = 0;
+
+        // Every caller waits at the start line, then they all enter GetAsync together. The handler holds each
+        // download open until all of them have had time to get in, so a second download for the same image
+        // would show up as an extra call.
+        var callers = Enumerable.Range(0, images * callersPerImage).Select(i => Task.Run(async () =>
+        {
+            Interlocked.Increment(ref ready);
+            await go.Task;
+            return await cache.GetAsync($"/image{i % images}.jpg", 342, Ct);
+        }, Ct)).ToList();
+
+        while (Volatile.Read(ref ready) < callers.Count) await Task.Delay(1, Ct);
+        go.SetResult();
+        await Task.Delay(200, Ct);
+        release.SetResult();
+        var paths = await Task.WhenAll(callers);
+
+        Assert.Equal(images, handler.Calls);
+        Assert.All(paths, p => Assert.NotNull(p));
+        for (var i = 0; i < images; i++)
+            Assert.Single(paths.Where((_, index) => index % images == i).Distinct());
+        Assert.Equal(images, FilesInCacheDir().Length);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(500)]
