@@ -7,4 +7,7 @@ public sealed record AppSettings
     public string? DefaultPlayerId { get; init; }
 
     public string? CustomPlayerPath { get; init; }
+
+    /// <summary>Full path to ffprobe.exe; null looks "ffprobe" up on PATH.</summary>
+    public string? FfprobePath { get; init; }
 }
