@@ -109,6 +109,27 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Saving_WhenTheSettingsFileCannotBeRead_SavesNothing_AndSaysSo()
+    {
+        var store = Store;
+        store.Save(new AppSettings { TmdbKey = "old", DefaultPlayerId = "vlc" });
+        var vm = Create(store);
+
+        using (new FileStream(Path.Combine(_dir, "settings.json"), FileMode.Open, FileAccess.Read, FileShare.Delete))
+        {
+            vm.TmdbKey = "new";
+            vm.SaveKeyCommand.Execute(null);
+        }
+
+        Assert.Equal("Settings weren't saved because they couldn't be read. Restart MediaBoard and try again.", vm.KeyStatus);
+        var entry = _hub.Recent[^1];
+        Assert.Equal(ActivityLevel.Error, entry.Level);
+        Assert.StartsWith("Couldn't read settings: ", entry.Message);
+        Assert.Equal("Close any program that has settings.json open, then restart MediaBoard.", entry.Hint);
+        Assert.Equal(new AppSettings { TmdbKey = "old", DefaultPlayerId = "vlc" }, store.Load());
+    }
+
+    [AvaloniaFact]
     public void TmdbKey_IsMaskedUntilShown_AndNeverLogged()
     {
         var vm = Create();

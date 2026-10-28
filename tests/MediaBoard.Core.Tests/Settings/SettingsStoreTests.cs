@@ -44,6 +44,44 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Update_ChangesOneSetting_AndKeepsTheRest()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings { TmdbKey = "k-123", DefaultPlayerId = "vlc" });
+
+        store.Update(s => s with { DefaultPlayerId = "mpc-hc" });
+
+        Assert.Equal(new AppSettings { TmdbKey = "k-123", DefaultPlayerId = "mpc-hc" }, store.Load());
+    }
+
+    [Fact]
+    public void Update_WhenTheFileCannotBeRead_RefusesToSave_AndKeepsTheKey()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings { TmdbKey = "k-123", DefaultPlayerId = "vlc" });
+
+        // Another program holds the file without letting anyone read it (it may still be replaced).
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Delete))
+        {
+            Assert.Throws<SettingsUnreadableException>(() => store.Update(s => s with { DefaultPlayerId = "mpc-hc" }));
+        }
+
+        Assert.Equal(new AppSettings { TmdbKey = "k-123", DefaultPlayerId = "vlc" }, store.Load());
+    }
+
+    [Fact]
+    public void Update_OverACorruptFile_StartsFromDefaults()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(SettingsPath, "{ not json");
+        var store = new SettingsStore(SettingsPath);
+
+        store.Update(s => s with { TmdbKey = "k-123" });
+
+        Assert.Equal("k-123", store.Load().TmdbKey);
+    }
+
+    [Fact]
     public void SettingsStore_Save_RaisesChanged()
     {
         var store = new SettingsStore(SettingsPath);

@@ -22,7 +22,10 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly Func<Task<string?>> _browsePlayer;
     private readonly Action<string> _openUrl;
     private readonly BackgroundQuery _query;
+    private const string UnreadableMessage = "Settings weren't saved because they couldn't be read. Restart MediaBoard and try again.";
+
     private bool _applying;
+    private bool _readFailed;
 
     public SettingsViewModel(
         SettingsStore settings,
@@ -67,7 +70,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         var saved = Update(s => s with { TmdbKey = key.Length == 0 ? null : key });
 
         TmdbKey = key;
-        KeyStatus = !saved ? "Couldn't save the key. See the activity panel."
+        KeyStatus = _readFailed ? UnreadableMessage
+            : !saved ? "Couldn't save the key. See the activity panel."
             : key.Length == 0 ? "Key removed"
             : "Saved";
     }
@@ -183,13 +187,21 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     // ---- Saving ----
 
-    // Reads the file again, so a change made elsewhere is kept. False when the file can't be written.
+    // Reads the file again, so a change made elsewhere is kept. False when the file can't be read (then nothing is
+    // written: saving defaults over it would lose the key) or can't be written.
     private bool Update(Func<AppSettings, AppSettings> change)
     {
+        _readFailed = false;
         try
         {
-            _settings.Save(change(_settings.Load()));
+            _settings.Update(change);
             return true;
+        }
+        catch (SettingsUnreadableException e)
+        {
+            _readFailed = true;
+            _hub.Log(ActivityLevel.Error, $"Couldn't read settings: {e.Message}", "Close any program that has settings.json open, then restart MediaBoard.");
+            return false;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
