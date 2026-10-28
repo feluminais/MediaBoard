@@ -22,13 +22,13 @@ public sealed class MatchStore(LibraryDatabase db)
     /// <summary>
     /// Points the file at the title and episodes and marks it matched. Earlier links, provisional ones
     /// included, and its review candidates are replaced. A source other than "user" never replaces the
-    /// user's own match: the write is skipped and false is returned.
+    /// user's own match, nor a file the user marked "not a movie or show": the write is skipped and false is returned.
     /// </summary>
     public bool SetMatch(int fileId, int titleId, IReadOnlyList<int> episodeIds, double confidence, string source)
     {
         using var connection = db.Open();
         using var transaction = BeginWrite(connection);
-        if (source != UserSource && HasUserLink(connection, transaction, fileId)) return false;
+        if (source != UserSource && UserDecided(connection, transaction, fileId)) return false;
 
         WriteMatch(connection, transaction, fileId, titleId, episodeIds, confidence, source);
         transaction.Commit();
@@ -107,13 +107,14 @@ public sealed class MatchStore(LibraryDatabase db)
 
     /// <summary>
     /// Gives a file TMDB could not place a provisional title (confidence 0) and the status "offline", so it
-    /// stays playable and listed until the lookup can run again. Skipped (false) for a file with a user match.
+    /// stays playable and listed until the lookup can run again. Skipped (false) for a file with a user match or
+    /// one marked "not a movie or show".
     /// </summary>
     public bool SetProvisional(int fileId, int provisionalTitleId)
     {
         using var connection = db.Open();
         using var transaction = BeginWrite(connection);
-        if (HasUserLink(connection, transaction, fileId)) return false;
+        if (UserDecided(connection, transaction, fileId)) return false;
 
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, provisionalTitleId, 0, "auto");
@@ -126,13 +127,13 @@ public sealed class MatchStore(LibraryDatabase db)
     /// Stores the best five candidates (replacing earlier ones) and marks the file "review". With a
     /// provisional title the file keeps that title until the user decides. The candidates arrive best
     /// first; the stored score is that rank (1.0 for the best, 0.1 less for each place after it).
-    /// Skipped (false) for a file with a user match.
+    /// Skipped (false) for a file with a user match or one marked "not a movie or show".
     /// </summary>
     public bool SetReview(int fileId, IReadOnlyList<SearchCandidate> candidates, int? provisionalTitleId = null)
     {
         using var connection = db.Open();
         using var transaction = BeginWrite(connection);
-        if (HasUserLink(connection, transaction, fileId)) return false;
+        if (UserDecided(connection, transaction, fileId)) return false;
 
         ClearLinks(connection, transaction, fileId);
         if (provisionalTitleId is { } titleId) LinkTitle(connection, transaction, fileId, titleId, 0, "auto");
@@ -175,11 +176,11 @@ public sealed class MatchStore(LibraryDatabase db)
             "SELECT EXISTS (SELECT 1 FROM file_titles WHERE file_id = @fileId AND source = 'user')", new { fileId }) != 0;
     }
 
-    /// <summary>Puts a file the user matched back to "matched" after a rescan reset it.</summary>
+    /// <summary>Puts a file the user matched back to "matched" after a rescan reset it. A file marked "not a movie or show" since stays so.</summary>
     public void RestoreMatched(int fileId)
     {
         using var connection = db.Open();
-        connection.Execute("UPDATE files SET status = 'matched' WHERE id = @fileId", new { fileId });
+        connection.Execute("UPDATE files SET status = 'matched' WHERE id = @fileId AND status <> 'not_media'", new { fileId });
     }
 
     /// <summary>
@@ -214,6 +215,15 @@ public sealed class MatchStore(LibraryDatabase db)
         connection.ExecuteScalar<int>(
             "SELECT EXISTS (SELECT 1 FROM file_titles WHERE file_id = @fileId AND source = 'user')",
             new { fileId }, transaction) != 0;
+
+    /// <summary>
+    /// The user matched the file or marked it "not a movie or show", possibly while an identification pass was
+    /// working on an older read of it. Checked inside the write transaction, so the pass can't undo either.
+    /// </summary>
+    private static bool UserDecided(SqliteConnection connection, SqliteTransaction transaction, int fileId) =>
+        HasUserLink(connection, transaction, fileId)
+        || connection.ExecuteScalar<int>(
+            "SELECT EXISTS (SELECT 1 FROM files WHERE id = @fileId AND status = 'not_media')", new { fileId }, transaction) != 0;
 
     private static void ClearLinks(SqliteConnection connection, SqliteTransaction transaction, int fileId)
     {

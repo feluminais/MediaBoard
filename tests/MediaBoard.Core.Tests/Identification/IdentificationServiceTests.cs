@@ -518,6 +518,96 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.All(_files.ByFolder(_folder.Id), f => Assert.Equal("matched", f.Status));
     }
 
+    [Fact]
+    public async Task NotMedia_MarkedWhileTmdbIsAsked_IsKept()
+    {
+        KnowHeat();
+        _lib.File("Heat (1995).mkv");
+        await Scan();
+        var id = Row("Heat (1995).mkv").Id;
+        using var service = new IdentificationService(
+            _db, new HookedProvider(_tmdb, () => _matches.SetNotMedia(id)), _probe, _connectivity, _settings, _hub, _clock);
+
+        await service.RunPendingAsync(Ct);
+
+        Assert.Equal("not_media", Row("Heat (1995).mkv").Status);
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_titles WHERE file_id = @id", new { id }));
+    }
+
+    [Fact]
+    public async Task NotMedia_MarkedMidPass_IsKept_WhenTmdbGoesOffline()
+    {
+        _lib.File("Heat (1995).mkv");
+        _lib.File(@"Lost\Season 1\Lost.S01E02.mkv");
+        await Scan();
+        var lost = Row(@"Lost\Season 1\Lost.S01E02.mkv").Id;
+        using var service = new IdentificationService(
+            _db,
+            new HookedProvider(_tmdb, () =>
+            {
+                _matches.SetNotMedia(lost); // the user, while the pass asks TMDB about Heat
+                throw new MetadataUnavailableException(UnavailableReason.Offline, "TMDB is unreachable.");
+            }),
+            _probe, _connectivity, _settings, _hub, _clock);
+
+        await service.RunPendingAsync(Ct);
+
+        Assert.Equal("not_media", Row(@"Lost\Season 1\Lost.S01E02.mkv").Status);
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_titles WHERE file_id = @lost", new { lost }));
+    }
+
+    [Fact]
+    public async Task MatchStore_AutomaticWrites_SkipANotMediaFile()
+    {
+        _lib.File("Heat (1995).mkv");
+        await Scan();
+        var id = Row("Heat (1995).mkv").Id;
+        var title = _titles.UpsertProvisional("Heat", TitleKind.Movie, 1995);
+        _matches.SetNotMedia(id);
+
+        Assert.False(_matches.SetMatch(id, title, [], 0.9, "auto"));
+        Assert.False(_matches.SetProvisional(id, title));
+        Assert.False(_matches.SetReview(id, [FilmHit(949, "Heat", 1995)]));
+        _matches.RestoreMatched(id);
+
+        Assert.Equal("not_media", Row("Heat (1995).mkv").Status);
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_titles WHERE file_id = @id", new { id }));
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM review_candidates WHERE file_id = @id", new { id }));
+    }
+
+    /// <summary>Runs <c>onFirstCall</c> once, before the first search reaches the inner provider.</summary>
+    private sealed class HookedProvider(IMetadataProvider inner, Action onFirstCall) : IMetadataProvider
+    {
+        private int _called;
+
+        private void Hook()
+        {
+            if (Interlocked.Exchange(ref _called, 1) == 0) onFirstCall();
+        }
+
+        public Task<IReadOnlyList<SearchCandidate>> SearchAsync(string title, int? year, TitleKind kind, CancellationToken ct)
+        {
+            Hook();
+            return inner.SearchAsync(title, year, kind, ct);
+        }
+
+        public Task<IReadOnlyList<SearchCandidate>> SearchAnyAsync(string query, CancellationToken ct)
+        {
+            Hook();
+            return inner.SearchAnyAsync(query, ct);
+        }
+
+        public Task<(int TmdbId, TitleKind Kind)?> FindByImdbIdAsync(string imdbId, CancellationToken ct)
+        {
+            Hook();
+            return inner.FindByImdbIdAsync(imdbId, ct);
+        }
+
+        public Task<TitleDetails> GetTitleAsync(int tmdbId, TitleKind kind, CancellationToken ct) => inner.GetTitleAsync(tmdbId, kind, ct);
+
+        public Task<SeasonDetails> GetSeasonAsync(int showTmdbId, int season, CancellationToken ct) => inner.GetSeasonAsync(showTmdbId, season, ct);
+    }
+
     private sealed class StubProbe : IDurationProbe
     {
         private readonly object _gate = new();
