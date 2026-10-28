@@ -824,6 +824,18 @@ public class TitleViewModelTests
         dialog.Close();
     }
 
+    [AvaloniaFact]
+    public void FinishedPromptDialog_EnterAnswersNo()
+    {
+        var dialog = new FinishedPromptDialog("Klaus");
+        dialog.Show();
+
+        var byDefault = dialog.GetVisualDescendants().OfType<Button>().Single(b => b.IsDefault);
+
+        Assert.Equal("No", byDefault.Content);
+        dialog.Close();
+    }
+
     [AvaloniaTheory]
     [InlineData("Yes", true)]
     [InlineData("No", false)]
