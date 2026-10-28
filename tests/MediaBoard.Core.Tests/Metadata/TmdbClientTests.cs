@@ -374,25 +374,39 @@ public class TmdbClientTests
         Assert.Equal(KeyState.Ok, rig.Hub.Current.KeyState);
     }
 
-    [Fact]
-    public async Task TheKey_NeverAppearsInLogsOrExceptionMessages()
+    [Theory]
+    [InlineData(V3Key)] // sent as api_key= in the URL, so an echoed URL would carry it
+    [InlineData(BearerKey)]
+    public async Task TheKey_NeverAppearsInLogsOrExceptions(string key)
     {
-        var failures = new HttpMessageHandler[]
+        string? echoedUri = null;
+        var failures = new (string Name, Func<HttpMessageHandler> Handler)[]
         {
-            StubHandler.Status(HttpStatusCode.Unauthorized),
-            StubHandler.Status(HttpStatusCode.InternalServerError),
-            StubHandler.Status(HttpStatusCode.TooManyRequests),
-            new StubHandler((_, request) => throw new HttpRequestException($"Failed: {request.RequestUri}")),
+            ("network failure echoing the URL", () => new StubHandler((_, request) =>
+            {
+                echoedUri = request.RequestUri!.ToString();
+                throw new HttpRequestException($"Failed: {echoedUri}", new IOException($"inner: {echoedUri}"));
+            })),
+            ("401", () => StubHandler.Status(HttpStatusCode.Unauthorized)),
+            ("429 exhausted", () => StubHandler.Status(HttpStatusCode.TooManyRequests)),
+            ("500", () => StubHandler.Status(HttpStatusCode.InternalServerError)),
+            ("bad JSON", () => new StubHandler((_, _) => Json("<html>oops</html>"))),
         };
 
-        foreach (var handler in failures)
+        foreach (var (name, handler) in failures)
         {
-            var rig = Build(handler, BearerKey + V3Key);
+            var rig = Build(handler(), key);
             var ex = await Unavailable(() => rig.Client.SearchAsync("Heat", null, TitleKind.Movie, Ct));
 
-            Assert.DoesNotContain(V3Key, ex.ToString());
-            Assert.All(rig.Hub.Recent, e => Assert.DoesNotContain(V3Key, e.Message + e.Hint));
+            if (name.StartsWith("network", StringComparison.Ordinal) && key == V3Key)
+                Assert.Contains(key, echoedUri); // the echoed URL really carries a v3 key
+
+            Assert.True(!ex.Message.Contains(key, StringComparison.Ordinal), $"{name}: key in exception message");
+            Assert.True(!ex.ToString().Contains(key, StringComparison.Ordinal), $"{name}: key in exception ToString");
             Assert.NotEmpty(rig.Hub.Recent);
+            foreach (var entry in rig.Hub.Recent)
+                Assert.True(!(entry.Message + entry.Hint).Contains(key, StringComparison.Ordinal),
+                    $"{name}: key in activity log");
         }
     }
 
