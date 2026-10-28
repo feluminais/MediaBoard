@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -25,13 +24,10 @@ namespace MediaBoard.Core.Players.MpcHc;
 /// </remarks>
 public sealed class MpcHcSession : IPlayerSession
 {
-    private const string EarlyExitMessage = "MPC-HC closed right after starting";
+    private const string Name = "MPC-HC";
     private const string OpenFailedMessage = "MPC-HC could not open the file";
-    private const string CrashMessage = "MPC-HC stopped unexpectedly";
 
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan DefaultCloseTimeout = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan EarlyExitWindow = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan PositionReplyTimeout = TimeSpan.FromSeconds(2);
 
     // MPC-HC seeks to its own remembered position while opening, before it reports Loaded, so the app's seek
@@ -46,7 +42,7 @@ public sealed class MpcHcSession : IPlayerSession
     private readonly TimeSpan _closeTimeout;
 
     private readonly Lock _gate = new();
-    private readonly Lock _raiseGate = new();
+    private readonly EventPump _pump;
     private readonly Stopwatch _sinceStart = new();
 
     private IMpcTransport? _transport;
@@ -63,9 +59,6 @@ public sealed class MpcHcSession : IPlayerSession
     private Timer? _pollTimer;
     private int _polling;
     private TaskCompletionSource<TimeSpan>? _positionReply;
-    private volatile bool _finished;
-    private readonly ConcurrentQueue<PlaybackEvent> _outbox = new();
-    private int _delivering;
 
     /// <param name="player">MPC-HC as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="transportFactory">Creates the window MPC-HC talks to; called once by <see cref="StartAsync"/>.</param>
@@ -83,7 +76,8 @@ public sealed class MpcHcSession : IPlayerSession
         _transportFactory = transportFactory;
         _start = start;
         _pollInterval = pollInterval ?? DefaultPollInterval;
-        _closeTimeout = closeTimeout ?? DefaultCloseTimeout;
+        _closeTimeout = closeTimeout ?? PlayerLaunch.DefaultCloseTimeout;
+        _pump = new EventPump(Name, () => Event);
     }
 
     /// <summary>A session wired to a real message window and process.</summary>
@@ -128,20 +122,11 @@ public sealed class MpcHcSession : IPlayerSession
         startInfo.ArgumentList.Add("/new");
         startInfo.ArgumentList.Add(filePath);
 
-        IPlayerProcess process;
         _sinceStart.Start();
-        try
+        var process = PlayerLaunch.TryStart(_start, startInfo, Name, _player.ExePath, out var failure);
+        if (process is null)
         {
-            process = _start(startInfo);
-        }
-        catch (Win32Exception e) when (e.NativeErrorCode is 2 or 3)
-        {
-            Raise(new PlaybackEvent.Failed($"MPC-HC not found: {_player.ExePath}"));
-            return Task.CompletedTask;
-        }
-        catch (Exception e) when (e is Win32Exception or InvalidOperationException)
-        {
-            Raise(new PlaybackEvent.Failed($"MPC-HC could not start: {e.Message}"));
+            Raise(new PlaybackEvent.Failed(failure));
             return Task.CompletedTask;
         }
 
@@ -155,7 +140,7 @@ public sealed class MpcHcSession : IPlayerSession
         TaskCompletionSource<TimeSpan> reply;
         lock (_gate)
         {
-            if (_finished || _playerWindow == 0) return null;
+            if (_pump.IsFinished || _playerWindow == 0) return null;
             reply = _positionReply ??= new TaskCompletionSource<TimeSpan>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
@@ -207,30 +192,11 @@ public sealed class MpcHcSession : IPlayerSession
             _positionReply = null;
         }
 
-        lock (_raiseGate) _finished = true;
+        _pump.Stop();
         reply?.TrySetCanceled();
         if (timer is not null) await timer.DisposeAsync();
 
-        if (process is not null)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.CloseMainWindow();
-                    await Task.WhenAny(process.Exited, Task.Delay(_closeTimeout));
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                        await Task.WhenAny(process.Exited, Task.Delay(_closeTimeout));
-                    }
-                }
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
+        if (process is not null) await PlayerLaunch.CloseAsync(process, _closeTimeout);
 
         if (transport is not null)
         {
@@ -241,7 +207,7 @@ public sealed class MpcHcSession : IPlayerSession
 
     private void OnReceived(uint cmd, string payload)
     {
-        if (_finished) return;
+        if (_pump.IsFinished) return;
 
         switch (cmd)
         {
@@ -454,24 +420,14 @@ public sealed class MpcHcSession : IPlayerSession
 
     private void OnProcessExited()
     {
-        int exitCode;
-        try
-        {
-            exitCode = _process?.ExitCode ?? 0;
-        }
-        catch (InvalidOperationException)
-        {
-            exitCode = 0; // not available; treat as a normal exit
-        }
+        var exitCode = PlayerLaunch.ExitCodeOrZero(_process);
 
         PlaybackEvent exit;
         lock (_gate)
         {
             if (_disposed) return;
             // A CMD_DISCONNECT before the exit has already raised the final Closed, so a crash code after it is moot.
-            exit = _playerWindow == 0 && _sinceStart.Elapsed < EarlyExitWindow ? new PlaybackEvent.Failed(EarlyExitMessage)
-                : exitCode != 0 ? new PlaybackEvent.Failed(CrashMessage)
-                : new PlaybackEvent.Closed();
+            exit = PlayerLaunch.ExitEvent(Name, exitCode, answered: _playerWindow != 0, _sinceStart.Elapsed);
         }
 
         StopPolling();
@@ -490,7 +446,7 @@ public sealed class MpcHcSession : IPlayerSession
         nint target;
         lock (_gate)
         {
-            if (_finished || _disposed) return;
+            if (_pump.IsFinished || _disposed) return;
             (transport, target) = (_transport, _playerWindow);
         }
 
@@ -498,58 +454,5 @@ public sealed class MpcHcSession : IPlayerSession
         transport.Send(target, cmd, payload);
     }
 
-    /// <summary>
-    /// Queues the event in order and delivers it. Finality is decided under the lock; handlers run outside it,
-    /// so a handler that waits on another thread (say, one busy in <see cref="DisposeAsync"/>) cannot deadlock it.
-    /// </summary>
-    private void Raise(PlaybackEvent e)
-    {
-        lock (_raiseGate)
-        {
-            if (_finished) return;
-            if (e is PlaybackEvent.Closed or PlaybackEvent.Failed) _finished = true;
-            _outbox.Enqueue(e);
-        }
-
-        Deliver();
-    }
-
-    /// <summary>
-    /// One thread at a time delivers queued events in queue order. A thread that finds delivery in progress
-    /// leaves its event to that thread; a handler that raises again (through a reply) does not recurse.
-    /// A handler that throws is traced and delivery carries on, so the event it was handed to deliver (often the
-    /// final Closed or Failed) is never stranded, and no handler exception escapes <see cref="StartAsync"/>.
-    /// </summary>
-    private void Deliver()
-    {
-        while (!_outbox.IsEmpty && Interlocked.CompareExchange(ref _delivering, 1, 0) == 0)
-        {
-            try
-            {
-                while (_outbox.TryDequeue(out var e))
-                {
-                    if (_disposed)
-                    {
-                        _outbox.Clear();
-                        break;
-                    }
-
-                    try
-                    {
-                        Event?.Invoke(e);
-                    }
-                    catch (Exception ex)
-                    {
-                        Trace.TraceError($"MPC-HC session: a {e.GetType().Name} handler failed: {ex}");
-                    }
-                }
-            }
-            finally
-            {
-                // A full fence, so the IsEmpty check that follows cannot be reordered before the release: an event
-                // queued by a thread whose CompareExchange saw 1 is then always picked up here.
-                Interlocked.Exchange(ref _delivering, 0);
-            }
-        }
-    }
+    private void Raise(PlaybackEvent e) => _pump.Raise(e);
 }
