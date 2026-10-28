@@ -160,8 +160,10 @@ public sealed class FoldersViewModelTests : IDisposable
         await Settle(vm);
 
         Assert.Equal(2, _confirmations.Count);
-        Assert.Contains("Movies", _confirmations[0]);
-        Assert.Contains("never touched", _confirmations[0]);
+        Assert.Equal(
+            "Remove \"Movies\" from the library? Your files aren't touched, but MediaBoard forgets its watch progress and " +
+            "your edits, such as renames and hidden items. To keep those, use Disable instead, or Locate… if the folder moved.",
+            _confirmations[0]);
         Assert.Empty(_stack.Library.Folders());
         Assert.Empty(vm.Folders);
         Assert.True(vm.ShowEmpty);

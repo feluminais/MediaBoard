@@ -130,7 +130,9 @@ public sealed partial class FoldersViewModel : PageViewModel
     [RelayCommand]
     private Task RemoveAsync(FolderItem? item) => item is null ? Task.CompletedTask : ActAsync(async () =>
     {
-        var question = $"Remove \"{item.Name}\" from the library? This only removes it from MediaBoard. Your files are never touched.";
+        // Removing forgets the folder's rows, and with them its watch progress and overrides (FolderStore.Remove cascades).
+        var question = $"Remove \"{item.Name}\" from the library? Your files aren't touched, but MediaBoard forgets its watch progress and " +
+                       "your edits, such as renames and hidden items. To keep those, use Disable instead, or Locate… if the folder moved.";
         return await _confirm(question) ? await _actions.RemoveAsync(item.Id) : FolderOutcome.Done;
     });
 
