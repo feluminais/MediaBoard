@@ -1,0 +1,445 @@
+using MediaBoard.Core.Identification;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Parsing;
+using MediaBoard.Core.Tests.Support;
+
+namespace MediaBoard.Core.Tests.Identification;
+
+public class IdentifierTests : IDisposable
+{
+    private readonly FakeMetadataProvider _tmdb = new();
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-id-" + Guid.NewGuid().ToString("N"));
+
+    public IdentifierTests() => Directory.CreateDirectory(_dir);
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_dir, recursive: true); }
+        catch (IOException) { }
+    }
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private Task<IdentificationResult> Identify(ParsedMedia parsed, string? path = null, double? durationS = null) =>
+        new Identifier(_tmdb).IdentifyAsync(parsed, path ?? Path.Combine(_dir, "file.mkv"), durationS, Ct);
+
+    private static ParsedMedia Episode(string title, int? year = null, int season = 1, params int[] episodes) =>
+        new(MediaKind.Episode, title, year, season, episodes.Length == 0 ? [1] : episodes, [], title, null, null);
+
+    private static ParsedMedia Movie(string title, int? year = null, string? showFolder = null) =>
+        new(MediaKind.Movie, title, year, null, [], [], showFolder, null, null);
+
+    private static SearchCandidate Show(int id, string name, int? year, double popularity = 50) =>
+        new(id, TitleKind.Show, name, null, year, popularity, 8.0, null, null);
+
+    private static SearchCandidate Film(int id, string name, int? year, double popularity = 50) =>
+        new(id, TitleKind.Movie, name, null, year, popularity, 7.0, null, null);
+
+    private static TitleDetails ShowTitle(int id, string name, int? year, params int[] seasons) =>
+        new(id, TitleKind.Show, name, year, null, null, 8.0, null, 45, seasons);
+
+    private static TitleDetails FilmTitle(int id, string name, int? year, int? runtimeMin = 120) =>
+        new(id, TitleKind.Movie, name, year, null, null, 7.0, null, runtimeMin, []);
+
+    private static SeasonDetails Season(int season, params string[] names) =>
+        new(season, names.Select((name, i) => new EpisodeDetails(season, i + 1, name, 45, null)).ToList());
+
+    private string WriteNfo(string relativePath, string xml)
+    {
+        var path = Path.Combine(_dir, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, xml);
+        return path;
+    }
+
+    [Fact]
+    public async Task TmdbIdTag_MatchesWithoutSearch()
+    {
+        _tmdb.OnTitle(FilmTitle(603, "The Matrix", 1999));
+        var parsed = Movie("The Matrix", 1999) with { TmdbId = 603 };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(603, result.Title!.TmdbId);
+        Assert.Equal("id_tag", result.Source);
+        Assert.Equal(1.0, result.Confidence);
+        Assert.Empty(_tmdb.Searches);
+        Assert.Empty(_tmdb.ImdbLookups);
+    }
+
+    [Fact]
+    public async Task TmdbIdTag_KindFollowsParsedKind_AndEpisodesResolve()
+    {
+        _tmdb.OnTitle(ShowTitle(1399, "Game of Thrones", 2011, 1))
+            .OnSeason(1399, Season(1, "Winter Is Coming", "The Kingsroad"));
+        var parsed = Episode("Game of Thrones", null, 1, 2) with { TmdbId = 1399 };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(TitleKind.Show, result.Title!.Kind);
+        Assert.Equal([2], result.Episodes.Select(e => e.Number));
+        Assert.Empty(_tmdb.Searches);
+    }
+
+    [Fact]
+    public async Task ImdbIdTag_UsesFind()
+    {
+        _tmdb.OnImdb("tt0133093", 603, TitleKind.Movie).OnTitle(FilmTitle(603, "The Matrix", 1999));
+        var parsed = Movie("The Matrix", 1999) with { ImdbId = "tt0133093" };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(603, result.Title!.TmdbId);
+        Assert.Equal("id_tag", result.Source);
+        Assert.Equal(["tt0133093"], _tmdb.ImdbLookups);
+        Assert.Empty(_tmdb.Searches);
+    }
+
+    [Fact]
+    public async Task ImdbIdTag_UnknownToTmdb_FallsBackToSearch()
+    {
+        _tmdb.OnSearch("The Matrix", 1999, TitleKind.Movie, Film(603, "The Matrix", 1999))
+            .OnTitle(FilmTitle(603, "The Matrix", 1999));
+        var parsed = Movie("The Matrix", 1999) with { ImdbId = "tt9999999" };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal("auto", result.Source);
+    }
+
+    [Fact]
+    public async Task NfoId_IsUsed_FromFileNamedNfoNextToVideo()
+    {
+        WriteNfo(Path.Combine("Movies", "Heat.1995.nfo"), "<movie><tmdbid>949</tmdbid></movie>");
+        _tmdb.OnTitle(FilmTitle(949, "Heat", 1995));
+
+        var result = await Identify(Movie("Heat", 1995), Path.Combine(_dir, "Movies", "Heat.1995.mkv"));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(949, result.Title!.TmdbId);
+        Assert.Equal("id_tag", result.Source);
+        Assert.Empty(_tmdb.Searches);
+    }
+
+    [Fact]
+    public async Task NfoId_IsUsed_FromTvshowNfoInShowFolder()
+    {
+        WriteNfo(Path.Combine("Shows", "Brassic", "tvshow.nfo"), "<tvshow><uniqueid type=\"tmdb\">91239</uniqueid></tvshow>");
+        _tmdb.OnTitle(ShowTitle(91239, "Brassic", 2019, 1)).OnSeason(91239, Season(1, "Pilot", "Two"));
+
+        var result = await Identify(Episode("Brassic", null, 1, 1), Path.Combine(_dir, "Shows", "Brassic", "Season 1", "ep1.mkv"));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(91239, result.Title!.TmdbId);
+        Assert.Equal("id_tag", result.Source);
+        Assert.Empty(_tmdb.Searches);
+    }
+
+    [Fact]
+    public async Task NfoId_EpisodeNfoNextToFile_IsNotTakenAsTheShowId()
+    {
+        WriteNfo(Path.Combine("Shows", "Brassic", "ep1.nfo"), "<episodedetails><tmdbid>777</tmdbid></episodedetails>");
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 1)).OnSeason(91239, Season(1, "Pilot"));
+
+        var result = await Identify(Episode("Brassic", 2019), Path.Combine(_dir, "Shows", "Brassic", "ep1.mkv"));
+
+        Assert.Equal(91239, result.Title!.TmdbId);
+        Assert.Equal("auto", result.Source);
+    }
+
+    [Fact]
+    public async Task NameTag_WinsOverNfo()
+    {
+        WriteNfo("Heat.nfo", "<movie><tmdbid>111</tmdbid></movie>");
+        _tmdb.OnTitle(FilmTitle(949, "Heat", 1995));
+
+        var result = await Identify(Movie("Heat", 1995) with { TmdbId = 949 }, Path.Combine(_dir, "Heat.mkv"));
+
+        Assert.Equal(949, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task ClearWinner_IsMatched()
+    {
+        _tmdb.OnSearch("The Matrix", 1999, TitleKind.Movie,
+                Film(603, "The Matrix", 1999, 90), Film(604, "The Matrix Reloaded", 2003, 60))
+            .OnTitle(FilmTitle(603, "The Matrix", 1999));
+
+        var result = await Identify(Movie("The Matrix", 1999));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(603, result.Title!.TmdbId);
+        Assert.Equal("auto", result.Source);
+        Assert.InRange(result.Confidence, ScoringWeights.AcceptThreshold, 1.0);
+        Assert.Empty(result.Episodes);
+    }
+
+    [Fact]
+    public async Task CloseCall_GoesToReview_WithTopCandidates()
+    {
+        _tmdb.OnSearch("Dune", 2021, TitleKind.Movie,
+            Film(1, "Dune", 2021, 80), Film(2, "Dune", 2021, 70), Film(3, "Dune", 2021, 60),
+            Film(4, "Dune", 2021, 50), Film(5, "Dune", 2021, 40), Film(6, "Dune", 2021, 30), Film(7, "Dune", 2021, 20));
+
+        var result = await Identify(Movie("Dune", 2021));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Null(result.Title);
+        Assert.Equal(5, result.Candidates.Count);
+        Assert.Equal([1, 2, 3, 4, 5], result.Candidates.Select(c => c.TmdbId));
+        Assert.Equal("auto", result.Source);
+    }
+
+    [Fact]
+    public async Task LowScore_GoesToReview_AfterAllRetries()
+    {
+        _tmdb.OnSearch("Dune Part Two", 2024, TitleKind.Movie, Film(9, "Something Else Entirely", 1970));
+
+        var result = await Identify(Movie("Dune Part Two", 2024));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal([9], result.Candidates.Select(c => c.TmdbId));
+        Assert.True(result.Confidence < ScoringWeights.AcceptThreshold);
+    }
+
+    [Fact]
+    public async Task NoResults_ReviewWithNoCandidates()
+    {
+        var result = await Identify(Movie("Nothing Like It", 2001));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Empty(result.Candidates);
+        Assert.Equal(0, result.Confidence);
+    }
+
+    [Fact]
+    public async Task NoResults_RetriesShorterTitle_ThenWithoutYear()
+    {
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 1)).OnSeason(91239, Season(1, "Pilot"));
+
+        var result = await Identify(Episode("Brassic Season 1", 2019));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(91239, result.Title!.TmdbId);
+        Assert.Equal(
+            [("Brassic Season 1", (int?)2019), ("Brassic Season", 2019), ("Brassic", 2019)],
+            _tmdb.Searches.Select(s => (s.Title, s.Year)));
+    }
+
+    [Fact]
+    public async Task NoResults_RetriesWithoutYear_AfterShortTitlesWithYear()
+    {
+        _tmdb.OnSearch("Brassic Show", null, TitleKind.Show, Show(91239, "Brassic Show", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic Show", 2019, 1)).OnSeason(91239, Season(1, "Pilot"));
+
+        var result = await Identify(Episode("Brassic Show", 2020));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(
+            [("Brassic Show", (int?)2020), ("Brassic", 2020), ("Brassic Show", null)],
+            _tmdb.Searches.Select(s => (s.Title, s.Year)));
+    }
+
+    [Fact]
+    public async Task Search_StopsAtFirstAttemptThatAccepts()
+    {
+        _tmdb.OnSearch("The Matrix", 1999, TitleKind.Movie, Film(603, "The Matrix", 1999))
+            .OnTitle(FilmTitle(603, "The Matrix", 1999));
+
+        await Identify(Movie("The Matrix", 1999));
+
+        Assert.Single(_tmdb.Searches);
+    }
+
+    [Fact]
+    public async Task Review_CandidatesPoolAcrossAttempts_WithoutDuplicates()
+    {
+        _tmdb.OnSearch("Odd Name", 2000, TitleKind.Movie, Film(1, "Odd Thing", 1990))
+            .OnSearch("Odd", 2000, TitleKind.Movie, Film(1, "Odd Thing", 1990), Film(2, "Odds", 1991));
+
+        var result = await Identify(Movie("Odd Name", 2000));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal([1, 2], result.Candidates.Select(c => c.TmdbId).Order());
+    }
+
+    [Fact]
+    public async Task EpisodeUnresolved_GoesToReview()
+    {
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 1))
+            .OnSeason(91239, Season(1, "Pilot", "Two"));
+
+        var result = await Identify(Episode("Brassic", 2019, 1, 9));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Null(result.Title);
+        Assert.Empty(result.Episodes);
+        Assert.Equal(91239, result.Candidates[0].TmdbId);
+    }
+
+    [Fact]
+    public async Task EpisodeYearIsAHint_AirYearDoesNotBlockTheShow()
+    {
+        _tmdb.OnSearch("South Park", 2020, TitleKind.Show, Show(2190, "South Park", 1997))
+            .OnTitle(ShowTitle(2190, "South Park", 1997, 24)).OnSeason(2190, Season(24, "The Pandemic Special"));
+
+        var result = await Identify(Episode("South Park", 2020, 24, 1));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(2190, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task MovieYearIsStrict()
+    {
+        _tmdb.OnSearch("Dune", 1984, TitleKind.Movie, Film(2, "Dune", 2021, 5));
+
+        var result = await Identify(Movie("Dune", 1984));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+    }
+
+    [Fact]
+    public async Task Specials_AreMatchedByEpisodeTitle()
+    {
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 0, 1))
+            .OnSeason(91239, Season(1, "Pilot", "Two"))
+            .OnSeason(91239, Season(0, "Christmas Special"));
+        var parsed = Episode("Brassic", 2019, 1, 1) with { EpisodeTitles = ["Christmas Special"] };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(0, result.Episodes.Single().Season);
+        Assert.Equal([(91239, 1), (91239, 0)], _tmdb.SeasonFetches);
+    }
+
+    [Fact]
+    public async Task SeasonMissingFromShow_GoesToReview_WithoutFetchingIt()
+    {
+        _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))
+            .OnTitle(ShowTitle(91239, "Brassic", 2019, 1));
+
+        var result = await Identify(Episode("Brassic", 2019, 4, 1));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Empty(_tmdb.SeasonFetches);
+    }
+
+    [Fact]
+    public async Task MovieInShowFolder_SearchesMovies()
+    {
+        _tmdb.OnSearch("The Movie", 2012, TitleKind.Movie, Film(55, "The Movie", 2012))
+            .OnTitle(FilmTitle(55, "The Movie", 2012));
+
+        var result = await Identify(Movie("The Movie", 2012, showFolder: "Some Show"));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(TitleKind.Movie, result.Title!.Kind);
+        Assert.All(_tmdb.Searches, s => Assert.Equal(TitleKind.Movie, s.Kind));
+        Assert.Empty(_tmdb.SeasonFetches);
+    }
+
+    [Fact]
+    public async Task UnknownKind_SearchesBothAndKeepsTheBetter()
+    {
+        var parsed = new ParsedMedia(MediaKind.Unknown, "Heat", 1995, null, [], [], null, null, null);
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnSearch("Heat", 1995, TitleKind.Show, Show(5, "Warm Front", 1990, 1))
+            .OnTitle(FilmTitle(949, "Heat", 1995));
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(949, result.Title!.TmdbId);
+        Assert.Equal([TitleKind.Movie, TitleKind.Show], _tmdb.Searches.Select(s => s.Kind));
+    }
+
+    [Fact]
+    public async Task Movie_DurationFarFromRuntime_IsNotAccepted()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995, runtimeMin: 170));
+
+        var result = await Identify(Movie("Heat", 1995), durationS: 20 * 60);
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal(949, result.Candidates[0].TmdbId);
+    }
+
+    [Fact]
+    public async Task Movie_DurationCloseToRuntime_IsAccepted()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995, runtimeMin: 170));
+
+        var result = await Identify(Movie("Heat", 1995), durationS: 168 * 60);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Single(_tmdb.TitleFetches);
+    }
+
+    [Fact]
+    public async Task Movie_UnknownDuration_FetchesTheTitleOnlyOnce()
+    {
+        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
+            .OnTitle(FilmTitle(949, "Heat", 1995));
+
+        await Identify(Movie("Heat", 1995), durationS: null);
+
+        Assert.Single(_tmdb.TitleFetches);
+    }
+
+    [Theory]
+    [InlineData(UnavailableReason.Offline, IdentificationStatus.Offline)]
+    [InlineData(UnavailableReason.ServerError, IdentificationStatus.Offline)]
+    [InlineData(UnavailableReason.NoKey, IdentificationStatus.NoKey)]
+    [InlineData(UnavailableReason.KeyRejected, IdentificationStatus.KeyRejected)]
+    public async Task ProviderUnavailable_MapsToStatus(UnavailableReason reason, IdentificationStatus expected)
+    {
+        _tmdb.Unavailable = reason;
+
+        var result = await Identify(Movie("Heat", 1995));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Null(result.Title);
+        Assert.Empty(result.Candidates);
+    }
+
+    [Fact]
+    public async Task ProviderOffline_ReturnsOffline()
+    {
+        _tmdb.Unavailable = UnavailableReason.Offline;
+
+        var result = await Identify(Episode("Brassic", 2019));
+
+        Assert.Equal(IdentificationStatus.Offline, result.Status);
+    }
+
+    [Fact]
+    public async Task NoKey_ReturnsNoKey()
+    {
+        _tmdb.Unavailable = UnavailableReason.NoKey;
+
+        var result = await Identify(Movie("Heat", 1995) with { TmdbId = 949 });
+
+        Assert.Equal(IdentificationStatus.NoKey, result.Status);
+    }
+
+    [Fact]
+    public async Task Cancellation_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new Identifier(_tmdb).IdentifyAsync(Movie("Heat", 1995), Path.Combine(_dir, "a.mkv"), null, cts.Token));
+    }
+}
