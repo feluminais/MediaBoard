@@ -63,6 +63,24 @@ public class EpisodeResolverTests
         Assert.Equal([1, 2], Numbers(result));
     }
 
+
+    [Fact]
+    public void RangeWithSingleTitle_ReturnsWholeRange()
+    {
+        var result = EpisodeResolver.Resolve(Parsed(1, [1, 2], "Pilot"), Season(1, "Pilot", "Second", "Third"), null);
+
+        Assert.Equal([1, 2], Numbers(result));
+    }
+
+    [Fact]
+    public void RangeWithTitleOutsideRange_TitleWins()
+    {
+        var season = Season(1, "Pilot", "Second", "Third", "Fourth", "Fifth");
+
+        var result = EpisodeResolver.Resolve(Parsed(1, [1, 2], "Fifth"), season, null);
+
+        Assert.Equal([5], Numbers(result));
+    }
     [Fact]
     public void RangeMarker_AnyNumberMissing_ReturnsNull()
     {

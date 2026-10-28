@@ -23,8 +23,21 @@ public static class EpisodeResolver
         var byTitle = ResolveByTitles(parsed, pools);
         if (byTitle.Ambiguous) return null;
 
-        return byTitle.Episodes ?? ResolveByNumbers(parsed, season);
+        if (byTitle.Episodes is null) return ResolveByNumbers(parsed, season);
+
+        return KeepsWholeRange(byTitle.Episodes, parsed, season)
+            ? ResolveByNumbers(parsed, season)
+            : byTitle.Episodes;
     }
+
+    /// <summary>
+    /// A title that names only part of a parsed range ("S01E01-E02 Pilot") does not disagree with the numbers:
+    /// the file holds the whole range. True when every title match sits in the requested season, inside the
+    /// parsed numbers, and every parsed number exists in that season.
+    /// </summary>
+    private static bool KeepsWholeRange(IReadOnlyList<EpisodeDetails> matched, ParsedMedia parsed, SeasonDetails season) =>
+        matched.All(e => e.Season == season.Season && parsed.Episodes.Contains(e.Number))
+        && parsed.Episodes.All(n => season.Episodes.Any(e => e.Number == n));
 
     private static TitleResult ResolveByTitles(ParsedMedia parsed, SeasonDetails[] pools)
     {
