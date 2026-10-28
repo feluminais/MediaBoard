@@ -48,7 +48,8 @@ public sealed class FolderStore(LibraryDatabase db, TimeProvider? timeProvider =
         connection.Execute("UPDATE folders SET path = @path WHERE id = @id", new { id, path = Normalize(newPath) });
     }
 
-    private static string Normalize(string path)
+    /// <summary>The form paths are stored in: absolute, no trailing separator (except a drive root).</summary>
+    public static string Normalize(string path)
     {
         var full = System.IO.Path.GetFullPath(path);
         var root = System.IO.Path.GetPathRoot(full);

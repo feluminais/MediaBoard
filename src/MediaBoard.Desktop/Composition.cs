@@ -120,10 +120,45 @@ public static class Composition
         services.AddSingleton<IPlaybackService>(sp => sp.GetRequiredService<PlaybackService>());
 
         services.AddSingleton<AppHost>();
+        services.AddSingleton(sp => new FolderActions(
+            sp.GetRequiredService<FolderStore>(),
+            sp.GetRequiredService<LibraryWatcher>(),
+            sp.GetRequiredService<AppHost>(),
+            sp.GetRequiredService<LocalLibrary>(),
+            sp.GetRequiredService<ActivityHub>()));
+        services.AddSingleton<IFolderActions>(sp => sp.GetRequiredService<FolderActions>());
+
+        services.AddSingleton<Dialogs>();
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new FoldersViewModel(
+                sp.GetRequiredService<ILibrary>(),
+                sp.GetRequiredService<IFolderActions>(),
+                sp.GetRequiredService<ActivityHub>(),
+                dialogs.PickFolderAsync,
+                question => dialogs.ConfirmAsync(question, "Remove"));
+        });
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new SettingsViewModel(
+                sp.GetRequiredService<SettingsStore>(),
+                sp.GetRequiredService<PlayerDetector>(),
+                sp.GetRequiredService<ActivityHub>(),
+                dialogs.PickProgramAsync,
+                dialogs.OpenUrl);
+        });
 
         services.AddSingleton<StatusBarViewModel>();
         services.AddSingleton<ActivityPanelViewModel>();
-        services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton(sp => new MainWindowViewModel(
+            sp.GetRequiredService<ILibrary>(),
+            sp.GetRequiredService<StatusBarViewModel>(),
+            sp.GetRequiredService<ActivityPanelViewModel>(),
+            sp.GetRequiredService<ActivityHub>(),
+            sp.GetRequiredService<FoldersViewModel>(),
+            sp.GetRequiredService<SettingsViewModel>()));
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

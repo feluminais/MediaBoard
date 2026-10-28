@@ -17,6 +17,8 @@
             <TextBlock Text="No folders yet" FontSize="18" HorizontalAlignment="Center" />
             <Button Classes="accent" Content="Add a folder" HorizontalAlignment="Center"
                     Command="{Binding AddFolderCommand}" />
+            <Button Content="Add TMDB key" HorizontalAlignment="Center"
+                    IsVisible="{Binding ShowKeyPrompt}" Command="{Binding AddKeyCommand}" />
         </StackPanel>
 
         <StackPanel IsVisible="{Binding ShowRows}" Spacing="28">

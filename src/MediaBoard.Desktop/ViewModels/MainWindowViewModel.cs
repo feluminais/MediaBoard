@@ -45,10 +45,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly NavItem _reviewItem;
     private int _refreshQueued;
 
-    public MainWindowViewModel(ILibrary library, StatusBarViewModel statusBar, ActivityPanelViewModel activity, ActivityHub hub)
+    public MainWindowViewModel(
+        ILibrary library,
+        StatusBarViewModel statusBar,
+        ActivityPanelViewModel activity,
+        ActivityHub hub,
+        FoldersViewModel folders,
+        SettingsViewModel settings)
     {
         _library = library;
-        _home = new HomeViewModel(library, hub, () => Navigate(FoldersPage));
+        _home = new HomeViewModel(
+            library,
+            hub,
+            addFolder: () =>
+            {
+                Navigate(FoldersPage);
+                folders.AddFolderCommand.Execute(null); // the picker opens at once
+            },
+            addKey: () => Navigate(SettingsPage));
         _reviewCount = new BackgroundQuery(hub, "the review count");
         StatusBar = statusBar;
         Activity = activity;
@@ -59,8 +73,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             [MoviesPage] = new PlaceholderPageViewModel("Movies", "No movies yet"),
             [ShowsPage] = new PlaceholderPageViewModel("Shows", "No shows yet"),
             [ReviewPage] = new PlaceholderPageViewModel("Needs review", "Nothing to review"),
-            [FoldersPage] = new PlaceholderPageViewModel("Folders", "No folders yet"),
-            [SettingsPage] = new PlaceholderPageViewModel("Settings", "Nothing to set yet"),
+            [FoldersPage] = folders,
+            [SettingsPage] = settings,
         };
         _reviewItem = new NavItem(ReviewPage, "Needs review");
         NavItems =
@@ -109,6 +123,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         CurrentPage = target;
         foreach (var item in NavItems) item.IsSelected = item.Key == page;
+        target.Opened();
     }
 
     [RelayCommand]

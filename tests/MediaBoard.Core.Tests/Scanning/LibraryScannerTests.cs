@@ -437,6 +437,20 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task Forget_DropsAFolderFromTheUnavailableList()
+    {
+        _lib.File(@"Movies\Heat.1995.mkv");
+        await Scan();
+        await _scanner.ScanAsync(new LibraryFolder(_folder.Id, _lib.PathOf("Gone"), true), CancellationToken.None);
+        Assert.Equal(["Gone"], _hub.Current.UnavailableFolders);
+
+        _scanner.Forget(_folder.Id); // the folder was removed or switched off
+
+        Assert.Empty(_hub.Current.UnavailableFolders);
+        _scanner.Forget(_folder.Id); // forgetting twice is fine
+    }
+
+    [Fact]
     public async Task Scan_ReportsProgressToHub()
     {
         for (var i = 1; i <= 60; i++) _lib.File($@"Movies\Movie.{2000 + i}.mkv");

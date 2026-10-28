@@ -36,6 +36,17 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
     public Task<ScanResult> ScanAsync(LibraryFolder folder, CancellationToken ct) =>
         Task.Run(() => Scan(folder, ct), ct);
 
+    /// <summary>
+    /// Drops what the scanner remembers about a folder that was removed or switched off, so the status bar stops
+    /// listing it as unavailable.
+    /// </summary>
+    public void Forget(int folderId)
+    {
+        bool changed;
+        lock (_unavailableGate) changed = _unavailable.Remove(folderId);
+        if (changed) PublishUnavailable();
+    }
+
     private ScanResult Scan(LibraryFolder folder, CancellationToken ct)
     {
         var name = DisplayName(folder.Path);

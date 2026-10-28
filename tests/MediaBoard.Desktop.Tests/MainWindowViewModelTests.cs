@@ -14,10 +14,31 @@ public class MainWindowViewModelTests
     private readonly ActivityHub _hub = new();
     private readonly FakeLibrary _library = new();
 
+    private readonly string _settingsPath = Path.Combine(Path.GetTempPath(), $"mediaboard-shell-{Guid.NewGuid():N}.json");
+
     private MainWindowViewModel Create() =>
-        new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub);
+        new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub,
+            new FoldersViewModel(_library, new IdleFolderActions(), _hub, () => Task.FromResult<string?>(null), _ => Task.FromResult(true)),
+            new SettingsViewModel(
+                new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
+                new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
+                _hub, () => Task.FromResult<string?>(null), _ => { }));
 
     private static void Flush() => Dispatcher.UIThread.RunJobs();
+
+    // The pages only need something to call; nothing in these tests adds or removes a folder.
+    private sealed class IdleFolderActions : IFolderActions
+    {
+        public Task<FolderOutcome> AddAsync(string path) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> RemoveAsync(int folderId) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> SetEnabledAsync(int folderId, bool enabled) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> RepointAsync(int folderId, string newPath) => Task.FromResult(FolderOutcome.Done);
+
+        public Task WhenIdleAsync() => Task.CompletedTask;
+    }
 
     // Queries run on the thread pool; pump the UI thread until their results are applied.
     private static async Task WaitUntil(Func<bool> done)
@@ -110,7 +131,8 @@ public class MainWindowViewModelTests
 
         _library.RaiseChanged();
         Flush();
-        await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error));
+        // Three queries read the library and fail: the review count, Home and Folders.
+        await WaitUntil(() => _hub.Recent.Count(e => e.Level == ActivityLevel.Error) == 3);
 
         var error = _hub.Recent.First(e => e.Level == ActivityLevel.Error);
         Assert.Contains("database is locked", error.Message);
@@ -240,4 +262,97 @@ public class MainWindowViewModelTests
         Assert.True(home.ShowRows);
         Assert.False(home.ShowNoFolders);
     }
+
+    [AvaloniaFact]
+    public async Task FirstRun_Home_PromptsForFolderAndKey()
+    {
+        var vm = Create();
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => home.IsLoaded);
+
+        Assert.True(home.ShowNoFolders);
+        Assert.True(home.ShowKeyPrompt); // no key yet
+
+        home.AddKeyCommand.Execute(null);
+        Assert.Equal("Settings", Assert.IsAssignableFrom<PageViewModel>(vm.CurrentPage).Title);
+    }
+
+    [AvaloniaFact]
+    public async Task FirstRun_Home_HidesKeyPrompt_OnceThereIsAKey()
+    {
+        var vm = Create();
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => home.IsLoaded);
+        Assert.True(home.ShowKeyPrompt);
+
+        _hub.SetKeyState(KeyState.Ok);
+        await WaitUntil(() => !home.ShowKeyPrompt);
+
+        Assert.True(home.ShowNoFolders); // the folder prompt stays
+    }
+
+    [AvaloniaFact]
+    public async Task Home_AddFolderPrompt_OpensTheFoldersPage_AndAsksForAFolder()
+    {
+        var asked = 0;
+        var folders = new FoldersViewModel(_library, new IdleFolderActions(), _hub, () => { asked++; return Task.FromResult<string?>(null); }, _ => Task.FromResult(true));
+        var vm = new MainWindowViewModel(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub, folders,
+            new SettingsViewModel(
+                new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
+                new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
+                _hub, () => Task.FromResult<string?>(null), _ => { }));
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+
+        home.AddFolderCommand.Execute(null);
+        await WaitUntil(() => asked == 1);
+
+        Assert.Same(folders, vm.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task OpeningFolders_ReloadsTheList()
+    {
+        var vm = Create();
+        _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
+        var folders = Assert.IsType<FoldersViewModel>(vm.CurrentPage);
+        await WaitUntil(() => folders.Folders.Count == 1);
+
+        Assert.Equal(@"D:\Movies", folders.Folders[0].Path);
+    }
+
+    [AvaloniaFact]
+    public async Task FoldersAndSettings_PagesRenderInTheWindow()
+    {
+        _library.FolderRows.Add(new MediaBoard.Core.Library.FolderRow(1, @"D:\Movies", true, false, false, 3, ["GTA IV"]));
+        var vm = Create();
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
+        var folders = (FoldersViewModel)vm.CurrentPage;
+        await WaitUntil(() => folders.Folders.Count == 1);
+        Flush();
+        var texts = TextsOf(window);
+        Assert.Contains(@"D:\Movies", texts);
+        Assert.Contains("3 files", texts);
+        Assert.Contains("GTA IV", texts);
+        Assert.Contains("Ignored: no video", texts);
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.SettingsPage);
+        Flush();
+        texts = TextsOf(window);
+        Assert.Contains("TMDB key", texts);
+        Assert.Contains("This product uses the TMDB API but is not endorsed or certified by TMDB.", texts);
+        window.Close();
+    }
+
+    private static List<string?> TextsOf(Avalonia.Controls.Window window) =>
+        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
+            .OfType<Avalonia.Controls.TextBlock>().Select(t => t.Text).ToList();
 }

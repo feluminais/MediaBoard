@@ -16,6 +16,7 @@
                     <SolidColorBrush x:Key="MutedTextBrush" Color="#616161" />
                     <SolidColorBrush x:Key="WarningTextBrush" Color="#8A5300" />
                     <SolidColorBrush x:Key="ErrorTextBrush" Color="#B3261E" />
+                    <SolidColorBrush x:Key="LinkTextBrush" Color="#0B57D0" />
                     <SolidColorBrush x:Key="BadgeBrush" Color="#C25E00" />
                     <SolidColorBrush x:Key="OverlayBrush" Color="#66000000" />
                 </ResourceDictionary>
@@ -28,6 +29,7 @@
                     <SolidColorBrush x:Key="MutedTextBrush" Color="#A8A8A8" />
                     <SolidColorBrush x:Key="WarningTextBrush" Color="#F2B866" />
                     <SolidColorBrush x:Key="ErrorTextBrush" Color="#FF8A80" />
+                    <SolidColorBrush x:Key="LinkTextBrush" Color="#8AB4F8" />
                     <SolidColorBrush x:Key="BadgeBrush" Color="#C25E00" />
                     <SolidColorBrush x:Key="OverlayBrush" Color="#99000000" />
                 </ResourceDictionary>
@@ -44,6 +46,14 @@
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontSize" Value="24" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.textLink">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource LinkTextBrush}" />
+        </Style>
+        <Style Selector="Button.textLink:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="TextBlock.rowTitle">
             <Setter Property="FontSize" Value="18" />
