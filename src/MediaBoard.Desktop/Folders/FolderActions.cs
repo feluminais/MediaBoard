@@ -36,7 +36,8 @@ public interface IFolderActions
 /// <summary>
 /// Adds, removes, disables and re-points library folders. The database write comes first and the library is told
 /// at once, so the page shows the change; after that, off the UI thread, the folder is scanned (which records the
-/// scan, runs identification and tells the library again) and the watcher is refreshed. Removing or switching a
+/// scan and tells the library again), the watcher is refreshed, and only then identification starts as a step of its
+/// own that nothing waits on except <see cref="WhenIdleAsync"/>. Removing or switching a
 /// folder off first stops its scan and its watcher, so nothing writes rows for a folder that is going away.
 /// It never touches a folder on disk except to read it.
 /// </summary>
@@ -164,8 +165,12 @@ public sealed class FolderActions(
         try
         {
             if (previous is not null) await previous.ConfigureAwait(false); // never throws: it catches its own
-            await host.ScanFolderAsync(folder, ct).ConfigureAwait(false);
+            var scanned = await host.ScanFolderAsync(folder, ct).ConfigureAwait(false);
+
+            // Watch the folder first: identification can run for minutes, and it is not part of this run, so a
+            // remove or disable that cancels and awaits the scan never waits for it.
             watcher.Refresh();
+            if (scanned) Track(host.IdentifyPendingAsync());
         }
         catch (OperationCanceledException)
         {
@@ -189,7 +194,7 @@ public sealed class FolderActions(
 
     private void Track(Task task)
     {
-        _inFlight.Add(task); // the caller holds _gate
+        lock (_gate) _inFlight.Add(task);
         _ = task.ContinueWith(
             finished =>
             {

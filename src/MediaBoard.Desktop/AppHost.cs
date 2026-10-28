@@ -125,19 +125,23 @@ public sealed class AppHost(
     }
 
     /// <summary>
-    /// Scans one folder now, records the result, then identifies what the scan found and tells the pages. For a
-    /// folder the user just added, enabled or re-pointed. A failed scan is logged and shown on the status bar, not
-    /// thrown. Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> or the app closing cancels it.
+    /// Scans one folder now and records the result. For a folder the user just added, enabled or re-pointed. A failed
+    /// scan is logged and shown on the status bar, not thrown; identification is a separate step
+    /// (<see cref="IdentifyPendingAsync"/>), so a caller never waits on the library's whole identification queue.
+    /// Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> or the app closing cancels it.
     /// </summary>
-    public async Task ScanFolderAsync(LibraryFolder folder, CancellationToken ct)
+    /// <returns>True when the scan worked.</returns>
+    public async Task<bool> ScanFolderAsync(LibraryFolder folder, CancellationToken ct)
     {
-        bool scanned;
-        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _stopping.Token))
-            scanned = await ScanAsync(folder, linked.Token).ConfigureAwait(false);
-
-        // Identification covers every folder, so only closing the app cancels it, not this folder's token.
-        if (scanned) await IdentifyAsync(_stopping.Token).ConfigureAwait(false);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _stopping.Token);
+        return await ScanAsync(folder, linked.Token).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Identifies what is pending, then tells the pages. Covers every folder, so only closing the app cancels it.
+    /// The task ends when the whole queue is done, which can take minutes.
+    /// </summary>
+    public Task IdentifyPendingAsync() => IdentifyAsync(_stopping.Token);
 
     /// <summary>Forgets a removed or switched-off folder's failed scan and unavailable state, so the status bar stops naming it.</summary>
     public void ForgetFolder(int folderId)
@@ -158,6 +162,7 @@ public sealed class AppHost(
         {
             hub.Log(ActivityLevel.Error, $"Couldn't scan {folder.Path}: {e.Message}", "Restart MediaBoard to scan it again.");
             SetScanFailed(folder.Id, FolderName(folder.Path));
+            library.NotifyChanged(); // the Folders page shows the failure
             return false;
         }
 

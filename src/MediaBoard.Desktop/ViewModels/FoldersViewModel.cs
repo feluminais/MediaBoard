@@ -13,16 +13,18 @@ public sealed class FolderItem
 {
     public const string IgnoredLabel = "Ignored: no video";
 
-    public FolderItem(FolderRow row)
+    /// <param name="scanFailed">The folder's last scan threw (the status bar says so too).</param>
+    public FolderItem(FolderRow row, bool scanFailed = false)
     {
         Id = row.Id;
         Path = row.Path;
         IsEnabled = row.Enabled;
         IsUnavailable = row.Unavailable;
-        Name = LeafName(row.Path);
+        Name = NameOf(row.Path);
         Ignored = row.IgnoredFolders.Select(name => new IgnoredFolder(name, IgnoredLabel)).ToList();
         Summary = row.Unavailable
             ? "Unavailable. Reconnect the drive, or locate the folder."
+            : scanFailed ? "Scan failed"
             : !row.Enabled ? "Disabled"
             : row.FileCount switch { 0 => "No videos found", 1 => "1 file", var n => $"{n} files" };
     }
@@ -49,10 +51,11 @@ public sealed class FolderItem
 
     public bool HasIgnored => Ignored.Count > 0;
 
-    private static string LeafName(string path)
+    /// <summary>The last part of a path; a drive root has no name of its own, so it is the path.</summary>
+    public static string NameOf(string path)
     {
         var name = System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(path));
-        return string.IsNullOrEmpty(name) ? path : name; // a drive root has no name of its own
+        return string.IsNullOrEmpty(name) ? path : name;
     }
 }
 
@@ -111,7 +114,9 @@ public sealed partial class FoldersViewModel : PageViewModel
 
     public override Task RefreshAsync() => _query.RunAsync(_library.Folders, rows =>
     {
-        Folders = rows.Select(row => new FolderItem(row)).ToList();
+        var failed = _hub.Current.FailedScans;
+        // The status bar lists failed scans by folder name, so match on that.
+        Folders = rows.Select(row => new FolderItem(row, failed.Contains(FolderItem.NameOf(row.Path), StringComparer.OrdinalIgnoreCase))).ToList();
         IsLoaded = true;
     });
 

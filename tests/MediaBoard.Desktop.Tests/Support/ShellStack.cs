@@ -1,7 +1,9 @@
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Settings;
+using MediaBoard.Core.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,6 +40,8 @@ internal sealed class ShellStack : IDisposable
 
     public SettingsStore Settings => Services.GetRequiredService<SettingsStore>();
 
+    public LibraryWatcher Watcher => Services.GetRequiredService<LibraryWatcher>();
+
     public IFolderActions Actions => Services.GetRequiredService<IFolderActions>();
 
     /// <summary>Creates a folder with the given (empty) files, outside the data folder's own files. Names may hold subfolders.</summary>
@@ -52,6 +56,16 @@ internal sealed class ShellStack : IDisposable
         }
 
         return root;
+    }
+
+    /// <summary>Gives the scanned file a movie title, as a finished identification would.</summary>
+    public void LinkMovie(string folderPath, string relPath, string name, int tmdbId)
+    {
+        var folder = Services.GetRequiredService<FolderStore>().All().Single(f => f.Path == folderPath);
+        var file = Services.GetRequiredService<FileStore>().ByFolder(folder.Id).Single(f => f.RelPath == relPath);
+        var title = Services.GetRequiredService<TitleStore>().Upsert(
+            new TitleDetails(tmdbId, TitleKind.Movie, name, 1995, null, "About.", 7.0, $"/{tmdbId}.jpg", 100, []));
+        Assert.True(new MatchStore(Services.GetRequiredService<LibraryDatabase>()).SetMatch(file.Id, title, [], 1.0, "auto"));
     }
 
     public void Dispose()

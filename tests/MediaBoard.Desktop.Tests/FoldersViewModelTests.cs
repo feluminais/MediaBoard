@@ -1,6 +1,11 @@
 using Avalonia.Headless.XUnit;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
 using MediaBoard.Desktop.Tests.Support;
+using MediaBoard.Core.Storage;
 using MediaBoard.Desktop.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaBoard.Desktop.Tests;
 
@@ -165,13 +170,17 @@ public sealed class FoldersViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task Disable_KeepsTheFolderListed_AndEnableScansAgain()
+    public async Task Disable_KeepsTheFolderListed_HidesItsTitles_AndEnableBringsThemBack()
     {
         var root = _stack.MakeLibrary("Movies", "Heat (1995).mkv");
         var vm = await LoadedAsync();
         await AddAsync(vm, root);
         var item = Assert.Single(vm.Folders);
         Assert.Equal("Disable", item.ToggleLabel);
+        _stack.LinkMovie(root, "Heat (1995).mkv", "Heat", 949);
+        await vm.RefreshAsync();
+        Assert.NotEmpty(_stack.Library.Titles(TitleKind.Movie, TitleSort.Name, true));
+        Assert.NotEmpty(_stack.Library.RecentlyAdded(10));
 
         await vm.ToggleEnabledCommand.ExecuteAsync(item);
         await Settle(vm);
@@ -181,6 +190,8 @@ public sealed class FoldersViewModelTests : IDisposable
         Assert.Equal("Enable", off.ToggleLabel);
         Assert.Equal("Disabled", off.Summary);
         Assert.False(Assert.Single(_stack.Library.Folders()).Enabled);
+        Assert.Empty(_stack.Library.Titles(TitleKind.Movie, TitleSort.Name, true));
+        Assert.Empty(_stack.Library.RecentlyAdded(10));
 
         File.WriteAllBytes(Path.Combine(root, "Alien (1979).mkv"), []);
         await vm.ToggleEnabledCommand.ExecuteAsync(off);
@@ -189,6 +200,8 @@ public sealed class FoldersViewModelTests : IDisposable
         var row = Assert.Single(_stack.Library.Folders());
         Assert.True(row.Enabled);
         Assert.Equal(2, row.FileCount); // enabling scans at once
+        Assert.NotEmpty(_stack.Library.Titles(TitleKind.Movie, TitleSort.Name, true));
+        Assert.NotEmpty(_stack.Library.RecentlyAdded(10));
     }
 
     [AvaloniaFact]
@@ -263,6 +276,27 @@ public sealed class FoldersViewModelTests : IDisposable
         Assert.True(gone.ShowRepoint);
         Assert.Contains("Unavailable", gone.Summary);
         Assert.False(here.ShowRepoint);
+    }
+
+    [AvaloniaFact]
+    public async Task AddFolder_WhoseScanFails_ShowsScanFailedOnItsRow()
+    {
+        var root = _stack.MakeLibrary("Movies", "Heat (1995).mkv");
+        var vm = await LoadedAsync();
+        // Every insert into files fails, as a full disk would make it.
+        using (var connection = _stack.Services.GetRequiredService<LibraryDatabase>().Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "CREATE TRIGGER fail_scan BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;";
+            command.ExecuteNonQuery();
+        }
+
+        await AddAsync(vm, root);
+
+        var item = Assert.Single(vm.Folders);
+        Assert.Equal("Scan failed", item.Summary); // not "No videos found"
+        Assert.Equal(["Movies"], _stack.Hub.Current.FailedScans);
+        Assert.Contains(_stack.Hub.Recent, e => e.Level == ActivityLevel.Error && e.Message.Contains("disk I/O error"));
     }
 
     [AvaloniaFact]

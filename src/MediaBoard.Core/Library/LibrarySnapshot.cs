@@ -60,11 +60,13 @@ internal sealed class LibrarySnapshot
     private LibrarySnapshot(
         IReadOnlyList<LibraryFolder> folders,
         List<FileEntry> files,
+        Dictionary<int, int> fileCountByFolder,
         Dictionary<int, TitleRow> titles,
         Dictionary<(TargetKind, int), OverrideRow> overrides)
     {
         Folders = folders;
         Files = files;
+        FileCountByFolder = fileCountByFolder;
         _overrides = overrides;
         FilesById = files.ToDictionary(f => f.Id);
 
@@ -82,8 +84,15 @@ internal sealed class LibrarySnapshot
 
     public IReadOnlyList<LibraryFolder> Folders { get; }
 
-    /// <summary>Every file that is media (not marked "not a movie or show"), linked to a title or not.</summary>
+    /// <summary>
+    /// Every file that is media (not marked "not a movie or show"), linked to a title or not, in the folders that are
+    /// switched on. A disabled folder's files are not here, so none of the queries see them; progress and edits stay
+    /// in the database and everything is back when the folder is enabled.
+    /// </summary>
     public List<FileEntry> Files { get; }
+
+    /// <summary>Media files per folder, disabled folders included (the Folders page still counts them).</summary>
+    public Dictionary<int, int> FileCountByFolder { get; }
 
     public Dictionary<int, FileEntry> FilesById { get; }
 
@@ -130,6 +139,9 @@ internal sealed class LibrarySnapshot
                 TitleId = (int?)r.TitleId,
             })
             .ToList();
+        var fileCountByFolder = files.GroupBy(f => f.FolderId).ToDictionary(g => g.Key, g => g.Count());
+        var disabled = folders.Where(f => !f.Enabled).Select(f => f.Id).ToHashSet();
+        if (disabled.Count > 0) files = files.Where(f => !disabled.Contains(f.FolderId)).ToList();
         var byId = files.ToDictionary(f => f.Id);
 
         foreach (var row in connection.Query<ProgressDto>(
@@ -169,7 +181,7 @@ internal sealed class LibrarySnapshot
                 (int?)r.EndYear, r.Overview, r.Rating, r.PosterPath, null))
             .ToDictionary(t => t.Id);
 
-        return new LibrarySnapshot(folders, files, titles, overrides);
+        return new LibrarySnapshot(folders, files, fileCountByFolder, titles, overrides);
     }
 
     private static DateTime ParseTime(string text) =>

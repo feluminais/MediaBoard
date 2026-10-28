@@ -442,6 +442,109 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal(2, _library.Titles(TitleKind.Movie, TitleSort.Name, false).Count);
     }
 
+    // ---- Disabled folders ----
+
+    // The app tells the library after it switches a folder (the search list is rebuilt on that).
+    private void SetEnabled(int folderId, bool enabled)
+    {
+        _folders.SetEnabled(folderId, enabled);
+        _library.NotifyChanged();
+    }
+
+    [Fact]
+    public async Task DisabledFolder_LeavesTitlesRecentlyAddedAndSearch_AndComesBack()
+    {
+        var movie = MovieTitle("Heat", 1);
+        var show = ShowTitle("Lost", 2, 2);
+        await Linked("Heat.1995.mkv", movie);
+        await Linked(@"Lost\Lost.S01E01.mkv", show, (1, 1));
+        Assert.Equal(2, _library.RecentlyAdded(10).Count);
+
+        SetEnabled(_folder.Id, false);
+
+        Assert.Empty(_library.Titles(TitleKind.Movie, TitleSort.Name, false));
+        Assert.Empty(_library.Titles(TitleKind.Movie, TitleSort.Name, true)); // even with hidden items shown
+        Assert.Empty(_library.Titles(TitleKind.Show, TitleSort.Name, true));
+        Assert.Empty(_library.RecentlyAdded(10));
+        Assert.Empty(_library.SearchLocal("heat", 10));
+        Assert.Null(_library.Title(movie));
+
+        SetEnabled(_folder.Id, true);
+
+        Assert.Equal(["Heat"], _library.Titles(TitleKind.Movie, TitleSort.Name, false).Select(c => c.Name));
+        Assert.Equal(2, _library.RecentlyAdded(10).Count);
+        Assert.Single(_library.SearchLocal("heat", 10));
+    }
+
+    [Fact]
+    public async Task DisabledFolder_LeavesContinueWatching_AndNextEpisode_KeepingProgress()
+    {
+        var show = ShowTitle("Lost", 2, 3);
+        var e1 = await Linked(@"Lost\Lost.S01E01.mkv", show, (1, 1));
+        await Linked(@"Lost\Lost.S01E02.mkv", show, (1, 2));
+        Played(e1, 600, 2700, watched: false, hour: 10);
+        Assert.Equal(e1, Assert.Single(_library.ContinueWatching(10)).FileId);
+        Assert.Equal(e1, _library.NextEpisodeFileId(show));
+
+        SetEnabled(_folder.Id, false);
+
+        Assert.Empty(_library.ContinueWatching(10));
+        Assert.Null(_library.NextEpisodeFileId(show));
+
+        SetEnabled(_folder.Id, true);
+
+        var back = Assert.Single(_library.ContinueWatching(10));
+        Assert.Equal(e1, back.FileId);
+        Assert.Equal(600, back.PositionS); // the progress was kept
+        Assert.Equal(e1, _library.NextEpisodeFileId(show));
+    }
+
+    [Fact]
+    public async Task DisabledFolder_LeavesNeedsReview_AndItsCount()
+    {
+        _lib.File(@"Other\Other.2020.mkv", 4096);
+        _lib.File(@"Third\Third.2021.mkv", 4096);
+        await Scan();
+        foreach (var rel in new[] { @"Other\Other.2020.mkv", @"Third\Third.2021.mkv" })
+            _matches.SetReview(Row(rel).Id, [], _titles.UpsertProvisional("X", TitleKind.Movie, null));
+        Assert.Equal(2, _library.NeedsReviewCount());
+
+        SetEnabled(_folder.Id, false);
+
+        Assert.Equal(0, _library.NeedsReviewCount());
+        Assert.Empty(_library.NeedsReview());
+
+        SetEnabled(_folder.Id, true);
+
+        Assert.Equal(2, _library.NeedsReviewCount());
+        Assert.Equal(2, _library.NeedsReview().Count);
+    }
+
+    [Fact]
+    public async Task DisabledFolder_StaysListed_WithItsFileCount_AndOnlyItsOwnFilesLeaveASharedTitle()
+    {
+        var other = new TempLibrary();
+        _extraLibs.Add(other);
+        var folderB = _folders.Add(other.Root);
+        _lib.File(@"Mixed\Mixed.S01E01.mkv", 4096);
+        other.File(@"Mixed\Mixed.S01E02.mkv", 4096);
+        await Scan();
+        await _scanner.ScanAsync(folderB, Ct);
+        var mixed = ShowTitle("Mixed", 3, 2);
+        _matches.SetMatch(Row(@"Mixed\Mixed.S01E01.mkv").Id, mixed, _titles.EpisodeIds(mixed, [(1, 1)]), 1.0, "auto");
+        _matches.SetMatch(
+            _files.ByFolder(folderB.Id).Single().Id, mixed, _titles.EpisodeIds(mixed, [(1, 2)]), 1.0, "auto");
+
+        SetEnabled(folderB.Id, false);
+
+        var row = _library.Folders().Single(f => f.Id == folderB.Id);
+        Assert.False(row.Enabled);
+        Assert.Equal(1, row.FileCount);
+        var episodes = _library.Title(mixed)!.Seasons.SelectMany(s => s.Episodes).Where(e => e.FileId is not null).ToList();
+        Assert.Single(episodes); // only the enabled folder's episode has a file
+        Assert.Equal(["Mixed"], _library.Titles(TitleKind.Show, TitleSort.Name, false).Select(c => c.Name));
+    }
+
     // ---- Matching ----
 
     [Fact]

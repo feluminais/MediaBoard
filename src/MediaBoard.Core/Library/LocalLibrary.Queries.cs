@@ -113,7 +113,10 @@ public sealed partial class LocalLibrary
 
     // ---- Needs review and folders ----
 
-    /// <summary>One COUNT query: a file is hidden when it, or its folder, is (the same rule as the snapshot).</summary>
+    /// <summary>
+    /// One COUNT query: a file is left out when it, or its folder, is hidden, or its folder is disabled (the same
+    /// rules as the snapshot).
+    /// </summary>
     public int NeedsReviewCount()
     {
         using var connection = _db.Open();
@@ -121,6 +124,7 @@ public sealed partial class LocalLibrary
             """
             SELECT COUNT(*) FROM files f
             WHERE f.status = 'review'
+              AND NOT EXISTS (SELECT 1 FROM folders d WHERE d.id = f.folder_id AND d.enabled = 0)
               AND NOT EXISTS (SELECT 1 FROM overrides o WHERE o.hidden = 1
                               AND ((o.target_kind = 'file' AND o.target_id = f.id)
                                 OR (o.target_kind = 'folder' AND o.target_id = f.folder_id)))
@@ -157,7 +161,7 @@ public sealed partial class LocalLibrary
     public IReadOnlyList<FolderRow> Folders()
     {
         var snapshot = LibrarySnapshot.Load(_db);
-        var counts = snapshot.Files.GroupBy(f => f.FolderId).ToDictionary(g => g.Key, g => g.Count());
+        var counts = snapshot.FileCountByFolder;
         return snapshot.Folders.Select(folder =>
         {
             var scan = _scans.GetValueOrDefault(folder.Id);
