@@ -1,9 +1,13 @@
 using Dapper;
 using MediaBoard.Core.Identification;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Parsing;
 using Microsoft.Data.Sqlite;
 
 namespace MediaBoard.Core.Storage;
+
+/// <summary>A show folder and parsed title whose episodes belong to one title.</summary>
+public sealed record MatchRule(int FolderId, string ShowFolder, string ParsedTitle);
 
 /// <summary>
 /// Which title and episodes each file is, the review candidates for files nobody could place, and the
@@ -26,6 +30,63 @@ public sealed class MatchStore(LibraryDatabase db)
         using var transaction = BeginWrite(connection);
         if (source != UserSource && HasUserLink(connection, transaction, fileId)) return false;
 
+        WriteMatch(connection, transaction, fileId, titleId, episodeIds, confidence, source);
+        transaction.Commit();
+        return true;
+    }
+
+    /// <summary>
+    /// The user's own choice for one file, in one transaction: the match, the rule for its show folder and
+    /// parsed title (when given), and the other files that rule covers and that wait in "review" or "offline"
+    /// (episodes of that folder and show with no user match of their own), set back to "pending" so the next
+    /// identification run applies the rule to them. Returns how many files were set back.
+    /// </summary>
+    public int SetUserMatch(int fileId, int titleId, IReadOnlyList<int> episodeIds, MatchRule? rule)
+    {
+        using var connection = db.Open();
+        using var transaction = BeginWrite(connection);
+        WriteMatch(connection, transaction, fileId, titleId, episodeIds, 1.0, UserSource);
+        if (rule is null)
+        {
+            transaction.Commit();
+            return 0;
+        }
+
+        var key = TitleNormalizer.Normalize(rule.ParsedTitle);
+        connection.Execute(
+            """
+            INSERT INTO match_rules(folder_id, show_folder, parsed_title, title_id)
+            VALUES (@FolderId, @ShowFolder, @key, @titleId)
+            ON CONFLICT(folder_id, show_folder, parsed_title) DO UPDATE SET title_id = excluded.title_id
+            """,
+            new { rule.FolderId, rule.ShowFolder, key, titleId }, transaction);
+
+        var requeued = 0;
+        var waiting = connection.Query<WaitingRow>(
+            """
+            SELECT id, parsed_json AS ParsedJson FROM files
+            WHERE folder_id = @FolderId AND id <> @fileId AND status IN ('review', 'offline')
+              AND NOT EXISTS (SELECT 1 FROM file_titles WHERE file_id = files.id AND source = 'user')
+            """,
+            new { rule.FolderId, fileId }, transaction).ToList();
+        foreach (var row in waiting)
+        {
+            var parsed = ParsedJson.Deserialize(row.ParsedJson);
+            if (parsed.Kind != MediaKind.Episode || parsed.ShowFolder != rule.ShowFolder
+                || TitleNormalizer.Normalize(parsed.Title) != key) continue;
+
+            SetStatus(connection, transaction, (int)row.Id, "pending");
+            requeued++;
+        }
+
+        transaction.Commit();
+        return requeued;
+    }
+
+    private static void WriteMatch(
+        SqliteConnection connection, SqliteTransaction transaction, int fileId, int titleId,
+        IReadOnlyList<int> episodeIds, double confidence, string source)
+    {
         ClearLinks(connection, transaction, fileId);
         LinkTitle(connection, transaction, fileId, titleId, confidence, source);
         foreach (var episodeId in episodeIds)
@@ -36,8 +97,12 @@ public sealed class MatchStore(LibraryDatabase db)
         }
 
         SetStatus(connection, transaction, fileId, "matched");
-        transaction.Commit();
-        return true;
+    }
+
+    private sealed class WaitingRow
+    {
+        public long Id { get; set; }
+        public string ParsedJson { get; set; } = "";
     }
 
     /// <summary>

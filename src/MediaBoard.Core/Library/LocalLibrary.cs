@@ -12,7 +12,8 @@ namespace MediaBoard.Core.Library;
 /// LocalLibrary.Queries.cs.
 /// <para>
 /// Edits only write to the database. <see cref="DeleteFromDiskAsync"/> is the one call that touches files, and it
-/// sends them to the Recycle Bin through the injected action. Their rows are removed from the library at once
+/// sends them to the Recycle Bin through the injected function (a file Windows would delete for good, or that
+/// could not be moved, stays and is reported). Their rows are removed from the library at once
 /// rather than left for the next scan to mark missing, so the title is gone as soon as the user confirms.
 /// </para>
 /// <para>
@@ -24,7 +25,8 @@ public sealed partial class LocalLibrary : ILibrary
 {
     private readonly LibraryDatabase _db;
     private readonly IMetadataProvider _provider;
-    private readonly Action<string> _sendToRecycleBin;
+    private readonly Func<string, RecycleResult> _sendToRecycleBin;
+    private readonly Func<string, DriveType> _driveTypeOf;
     private readonly FileStore _files;
     private readonly FolderStore _folders;
     private readonly TitleStore _titles;
@@ -36,12 +38,14 @@ public sealed partial class LocalLibrary : ILibrary
     public LocalLibrary(
         LibraryDatabase db,
         IMetadataProvider provider,
-        Action<string>? sendToRecycleBin = null,
-        TimeProvider? timeProvider = null)
+        Func<string, RecycleResult>? sendToRecycleBin = null,
+        TimeProvider? timeProvider = null,
+        Func<string, DriveType>? driveTypeOf = null)
     {
         _db = db;
         _provider = provider;
         _sendToRecycleBin = sendToRecycleBin ?? RecycleBin.Send;
+        _driveTypeOf = driveTypeOf ?? DriveTypeOf;
         _files = new FileStore(db);
         _folders = new FolderStore(db, timeProvider);
         _titles = new TitleStore(db, timeProvider);
@@ -102,8 +106,9 @@ public sealed partial class LocalLibrary : ILibrary
 
     /// <summary>
     /// Everything TMDB has to say is fetched first and stored after, so a failed lookup leaves the file as it was.
-    /// An episode gets a rule for its show folder and parsed title, which identification applies to the other
-    /// files of that folder; a movie, or a file outside a show folder, gets none.
+    /// An episode gets a rule for its show folder and parsed title; the match, the rule and the other files of
+    /// that show waiting in review or offline (set back to pending) are written in one transaction, and the next
+    /// identification run applies the rule to those files. A movie, or a file outside a show folder, gets no rule.
     /// </summary>
     public async Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct)
     {
@@ -118,13 +123,12 @@ public sealed partial class LocalLibrary : ILibrary
         var titleId = _titles.Upsert(details);
         foreach (var season in seasons) _titles.UpsertEpisodes(titleId, season);
         var episodeIds = _titles.EpisodeIds(titleId, episodes.Select(e => (e.Season, e.Number)));
-        _matches.SetMatch(fileId, titleId, episodeIds, 1.0, "user");
 
-        if (kind == TitleKind.Show && parsed.Kind == MediaKind.Episode
-            && !string.IsNullOrEmpty(parsed.ShowFolder) && !string.IsNullOrWhiteSpace(parsed.Title))
-        {
-            _matches.AddRule(file.FolderId, parsed.ShowFolder, parsed.Title, titleId);
-        }
+        var rule = kind == TitleKind.Show && parsed.Kind == MediaKind.Episode
+                   && !string.IsNullOrEmpty(parsed.ShowFolder) && !string.IsNullOrWhiteSpace(parsed.Title)
+            ? new MatchRule(file.FolderId, parsed.ShowFolder, parsed.Title)
+            : null;
+        _matches.SetUserMatch(fileId, titleId, episodeIds, rule);
 
         _titles.DeleteOrphanProvisional();
         RaiseChanged();
@@ -182,7 +186,7 @@ public sealed partial class LocalLibrary : ILibrary
         var files = new List<DeleteFile>();
         foreach (var file in snapshot.FilesByTitle[titleId].Where(f => !f.Missing).OrderBy(f => f.RelPath, StringComparer.OrdinalIgnoreCase))
         {
-            if (InsideLibrary(folders, file.FolderId, file.RelPath) is { } path) files.Add(new DeleteFile(file.Id, path, file.Size));
+            if (InsideLibrary(folders, file.FolderId, file.RelPath) is { } path) files.Add(new DeleteFile(file.Id, path, file.Size, _driveTypeOf(path) != DriveType.Fixed));
         }
 
         return new DeletePreview(titleId, snapshot.TitleName(title), files);
@@ -224,9 +228,20 @@ public sealed partial class LocalLibrary : ILibrary
                     continue;
                 }
 
-                _sendToRecycleBin(path);
-                deleted.Add(path);
-                gone.Add(file.Id);
+                var result = _sendToRecycleBin(path);
+                switch (result.Outcome)
+                {
+                    case RecycleOutcome.Recycled:
+                        deleted.Add(path);
+                        gone.Add(file.Id);
+                        break;
+                    case RecycleOutcome.Declined:
+                        failed.Add(new DeleteFailure(path, "Not deleted: this file cannot go to the Recycle Bin and you chose not to delete it for good.", Declined: true));
+                        break;
+                    default:
+                        failed.Add(new DeleteFailure(path, result.Detail ?? "Windows could not move the file to the Recycle Bin."));
+                        break;
+                }
             }
             catch (Exception e)
             {
@@ -255,6 +270,23 @@ public sealed partial class LocalLibrary : ILibrary
     }
 
     // ---- Helpers ----
+
+    /// <summary>UNC paths have no drive letter; they and anything Windows cannot classify count as not fixed.</summary>
+    private static DriveType DriveTypeOf(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(root)) return DriveType.Unknown;
+        if (root.StartsWith(@"\\", StringComparison.Ordinal)) return DriveType.Network;
+
+        try
+        {
+            return new DriveInfo(root).DriveType;
+        }
+        catch (ArgumentException)
+        {
+            return DriveType.Unknown;
+        }
+    }
 
     private MediaFileRow RequireFile(int fileId) =>
         _files.Get(fileId) ?? throw new ArgumentException($"There is no file with id {fileId}.", nameof(fileId));

@@ -5,7 +5,10 @@ using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Parsing;
+using MediaBoard.Core.Probing;
 using MediaBoard.Core.Scanning;
+using MediaBoard.Core.Settings;
+using MediaBoard.Core.Identification;
 using MediaBoard.Core.Storage;
 using MediaBoard.Core.Tests.Support;
 using Microsoft.Data.Sqlite;
@@ -27,6 +30,7 @@ public sealed class LocalLibraryTests : IDisposable
     private readonly LibraryScanner _scanner;
     private readonly LibraryFolder _folder;
     private readonly List<string> _recycled = [];
+    private DriveType _driveType = DriveType.Fixed;
     private readonly LocalLibrary _library;
     private int _changed;
 
@@ -40,7 +44,7 @@ public sealed class LocalLibraryTests : IDisposable
         _matches = new MatchStore(_db);
         _scanner = new LibraryScanner(_db, new ActivityHub(_clock), _clock);
         _folder = _folders.Add(_lib.Root);
-        _library = new LocalLibrary(_db, _tmdb, _recycled.Add, _clock);
+        _library = new LocalLibrary(_db, _tmdb, Recycle, _clock, _ => _driveType);
         _library.Changed += () => _changed++;
     }
 
@@ -51,6 +55,13 @@ public sealed class LocalLibraryTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
         foreach (var lib in _extraLibs) lib.Dispose();
         _lib.Dispose();
+    }
+
+    /// <summary>The injected Recycle Bin: records the call and does not touch the file.</summary>
+    private RecycleResult Recycle(string path)
+    {
+        _recycled.Add(path);
+        return RecycleResult.Recycled;
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -468,6 +479,68 @@ public sealed class LocalLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task FixMatch_RuleReachesReviewSiblings_OnTheNextIdentificationRun()
+    {
+        var rels = new[]
+        {
+            @"Mystery\Season 1\Mystery.S01E01.mkv", @"Mystery\Season 1\Mystery.S01E02.mkv", @"Mystery\Season 1\Mystery.S01E03.mkv",
+        };
+        foreach (var rel in rels) _lib.File(rel, 4096);
+        _lib.File(@"Other\Season 1\Mystery.S01E01.mkv", 4096);
+        _lib.File(@"Mystery\Mystery (2001).mkv", 4096);
+        await Scan();
+        var guesses = new[] { new SearchCandidate(1, TitleKind.Show, "Wrong", null, 2001, 1, 5, null, null) };
+        foreach (var rel in rels.Append(@"Other\Season 1\Mystery.S01E01.mkv").Append(@"Mystery\Mystery (2001).mkv"))
+            _matches.SetReview(Row(rel).Id, guesses, _titles.UpsertProvisional("Mystery", TitleKind.Show, null));
+        _tmdb.OnTitle(new TitleDetails(777, TitleKind.Show, "The Real Show", 2012, null, "Real.", 8.1, "/real.jpg", 40, [1]))
+            .OnSeason(777, new SeasonDetails(1, [
+                new EpisodeDetails(1, 1, "First", 40, null),
+                new EpisodeDetails(1, 2, "Second", 40, null),
+                new EpisodeDetails(1, 3, "Third", 40, null)]));
+
+        await _library.FixMatchAsync(Row(rels[0]).Id, 777, TitleKind.Show, Ct);
+
+        Assert.Equal("matched", Row(rels[0]).Status);
+        Assert.Equal("pending", Row(rels[1]).Status);
+        Assert.Equal("pending", Row(rels[2]).Status);
+        // Another show folder, and a loose file with the same title, are not covered by the rule.
+        Assert.Equal("review", Row(@"Other\Season 1\Mystery.S01E01.mkv").Status);
+        Assert.Equal("review", Row(@"Mystery\Mystery (2001).mkv").Status);
+
+        _tmdb.Searches.Clear();
+        _tmdb.TitleFetches.Clear();
+        _tmdb.SeasonFetches.Clear();
+        var settings = new SettingsStore(Path.Combine(_dir, "settings.json"));
+        settings.Save(new AppSettings { TmdbKey = "key" });
+        var hub = new ActivityHub(_clock);
+        using var connectivity = new Connectivity(_ => Task.FromResult(true), _clock, hub);
+        using var identification = new IdentificationService(_db, _tmdb, new NoProbe(), connectivity, settings, hub, _clock);
+        await identification.RunPendingAsync(Ct);
+
+        var realId = _titles.ByTmdb(777, TitleKind.Show)!.Id;
+        foreach (var (rel, name) in new[] { (rels[1], "Second"), (rels[2], "Third") })
+        {
+            var id = Row(rel).Id;
+            Assert.Equal("matched", Row(rel).Status);
+            Assert.Equal("rule", Scalar<string>("SELECT source FROM file_titles WHERE file_id = @id", new { id }));
+            Assert.Equal(realId, Scalar<int>("SELECT title_id FROM file_titles WHERE file_id = @id", new { id }));
+            Assert.Equal(
+                name,
+                Scalar<string>(
+                    "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id", new { id }));
+        }
+
+        // The rule answered for them: TMDB was never searched for the show.
+        Assert.Empty(_tmdb.Searches);
+        Assert.Equal(3, _library.Title(realId)!.Seasons.Single().Episodes.Count(e => e.FileId is not null));
+    }
+
+    private sealed class NoProbe : IDurationProbe
+    {
+        public Task<double?> GetDurationSecondsAsync(string path, CancellationToken ct) => Task.FromResult<double?>(null);
+    }
+
+    [Fact]
     public async Task FixMatch_Movie_AddsNoRule()
     {
         _lib.File(@"Pack\Season 1\Pack.S01E01.mkv", 4096);
@@ -531,6 +604,45 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM titles WHERE id = @provisional", new { provisional }));
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_titles WHERE file_id = @id", new { id = bonus.Id }));
         Assert.Empty(_library.NeedsReview());
+    }
+
+    [Fact]
+    public async Task NotMedia_SurvivesARescanThatReparsesTheFile()
+    {
+        _lib.File(@"Show\Show_01_[1080p].mp4", 4096);
+        await Scan();
+        var file = Row(@"Show\Show_01_[1080p].mp4");
+        _matches.SetProvisional(file.Id, _titles.UpsertProvisional("Show", TitleKind.Movie, null));
+        _library.MarkNotMedia(file.Id);
+
+        // Siblings arrive, so the bare number now reads as an episode and the parse changes.
+        _lib.File(@"Show\Show_02_[1080p].mp4", 4096);
+        _lib.File(@"Show\Show_03_[1080p].mp4", 4096);
+        await Scan();
+
+        Assert.Equal(MediaKind.Episode, Row(@"Show\Show_01_[1080p].mp4").Parsed.Kind);
+        Assert.Equal("not_media", Row(@"Show\Show_01_[1080p].mp4").Status);
+        Assert.Empty(_library.Titles(TitleKind.Movie, TitleSort.Name, false));
+        Assert.Empty(_library.Titles(TitleKind.Show, TitleSort.Name, false));
+    }
+
+    [Fact]
+    public async Task NotMedia_SurvivesAChangedFileThatReparsesDifferently()
+    {
+        _lib.File(@"Extras\bonus.mkv", 4096);
+        await Scan();
+        var file = Row(@"Extras\bonus.mkv");
+        _library.MarkNotMedia(file.Id);
+        Sql("UPDATE files SET parsed_json = '{\"stale\":true}' WHERE id = @id", new { id = file.Id });
+
+        _lib.Resize(@"Extras\bonus.mkv", 8192);
+        await Scan();
+
+        var after = Row(@"Extras\bonus.mkv");
+        Assert.Equal(8192, after.Size);
+        Assert.Equal("bonus", after.Parsed.Title);
+        Assert.Equal("not_media", after.Status);
+        Assert.Empty(_library.Titles(TitleKind.Movie, TitleSort.Name, false));
     }
 
     [Fact]
@@ -855,7 +967,7 @@ public sealed class LocalLibraryTests : IDisposable
         var good = await Linked(@"good.mkv", movie);
         var locked = await Linked(@"locked.mkv", movie);
         var library = new LocalLibrary(
-            _db, _tmdb, path => { if (path.EndsWith("locked.mkv")) throw new IOException("In use."); }, _clock);
+            _db, _tmdb, path => path.EndsWith("locked.mkv") ? throw new IOException("In use.") : RecycleResult.Recycled, _clock);
 
         var result = await library.DeleteFromDiskAsync(library.PreviewDelete(movie));
 
@@ -866,6 +978,65 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM files WHERE id = @good", new { good }));
         Assert.Equal(1, Scalar<int>("SELECT COUNT(*) FROM files WHERE id = @locked", new { locked }));
         Assert.NotNull(library.Title(movie));
+    }
+
+    [Fact]
+    public async Task DeleteFromDisk_DeclinedFile_StaysInLibraryAndIsReported()
+    {
+        var movie = MovieTitle("Heat", 949);
+        var small = await Linked(@"small.mkv", movie);
+        var huge = await Linked(@"huge.mkv", movie);
+        Played(huge, 100, 7000, false, 10);
+        // Windows would delete this one for good (too big for the bin) and the answer to its question was no.
+        var library = new LocalLibrary(
+            _db, _tmdb, path => path.EndsWith("huge.mkv") ? RecycleResult.Declined : RecycleResult.Recycled, _clock);
+
+        var result = await library.DeleteFromDiskAsync(library.PreviewDelete(movie));
+
+        Assert.Equal([_lib.PathOf("small.mkv")], result.Deleted);
+        var failure = Assert.Single(result.Failed);
+        Assert.True(failure.Declined);
+        Assert.Equal(_lib.PathOf("huge.mkv"), failure.Path);
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM files WHERE id = @small", new { small }));
+        Assert.Equal(1, Scalar<int>("SELECT COUNT(*) FROM files WHERE id = @huge", new { huge }));
+        Assert.Equal(1, Scalar<int>("SELECT COUNT(*) FROM progress WHERE file_id = @huge", new { huge }));
+        Assert.NotNull(library.Title(movie));
+    }
+
+    [Fact]
+    public async Task DeleteFromDisk_FailedOutcome_StaysInLibraryWithTheReason()
+    {
+        var movie = MovieTitle("Heat", 949);
+        var file = await Linked(@"heat.mkv", movie);
+        var library = new LocalLibrary(
+            _db, _tmdb, _ => new RecycleResult(RecycleOutcome.Failed, "Windows could not move it."), _clock);
+
+        var result = await library.DeleteFromDiskAsync(library.PreviewDelete(movie));
+
+        Assert.Empty(result.Deleted);
+        var failure = Assert.Single(result.Failed);
+        Assert.False(failure.Declined);
+        Assert.Equal("Windows could not move it.", failure.Reason);
+        Assert.Equal(1, Scalar<int>("SELECT COUNT(*) FROM files WHERE id = @file", new { file }));
+    }
+
+    [Fact]
+    public async Task PreviewDelete_FlagsFilesNotOnAFixedDrive()
+    {
+        var movie = MovieTitle("Heat", 949);
+        await Linked(@"heat.mkv", movie);
+
+        var local = _library.PreviewDelete(movie);
+        Assert.False(Assert.Single(local.Files).MayDeletePermanently);
+        Assert.False(local.AnyMayDeletePermanently);
+
+        _driveType = DriveType.Network;
+        var network = _library.PreviewDelete(movie);
+        Assert.True(Assert.Single(network.Files).MayDeletePermanently);
+        Assert.True(network.AnyMayDeletePermanently);
+
+        _driveType = DriveType.Removable;
+        Assert.True(_library.PreviewDelete(movie).AnyMayDeletePermanently);
     }
 
     [Fact]

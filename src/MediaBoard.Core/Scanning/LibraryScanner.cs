@@ -210,7 +210,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
     /// <summary>
     /// A file's parse depends on its siblings (a bare "Show_01" is an episode only when other numbered files sit
     /// next to it), so when a directory's set of video names changed, every file in it is parsed again.
-    /// Only a different result is written. The status goes back to pending unless the user matched the file.
+    /// Only a different result is written. The status goes back to pending unless the user matched the file or marked it not a movie or show.
     /// </summary>
     private static int ReparseChangedDirectories(
         SqliteConnection connection,
@@ -252,7 +252,8 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
             Execute(connection, transaction,
                 """
                 UPDATE files SET parsed_json = @json,
-                                 status = CASE WHEN EXISTS (SELECT 1 FROM file_titles WHERE file_id = files.id AND source = 'user')
+                                 status = CASE WHEN status = 'not_media'
+                                                 OR EXISTS (SELECT 1 FROM file_titles WHERE file_id = files.id AND source = 'user')
                                                THEN status ELSE 'pending' END
                 WHERE id = @id
                 """,
@@ -300,7 +301,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
         Execute(connection, transaction,
             """
             UPDATE files SET rel_path = @relPath, size = @size, mtime = @mtime, missing = 0, parsed_json = @json,
-                             status = CASE WHEN @reset = 1 THEN 'pending' ELSE status END
+                             status = CASE WHEN @reset = 1 AND status <> 'not_media' THEN 'pending' ELSE status END
             WHERE id = @id
             """,
             new { id, relPath, size = file.Size, mtime = file.Mtime, json, reset = parseChanged ? 1 : 0 });

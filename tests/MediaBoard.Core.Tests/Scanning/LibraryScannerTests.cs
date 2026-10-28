@@ -274,6 +274,42 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task DirectoryChange_KeepsNotMediaFileNotMedia()
+    {
+        _lib.File(@"Show\Show_01_[1080p].mp4");
+        await Scan();
+        var id = Row(@"Show\Show_01_[1080p].mp4").Id;
+        SetStatus(id, "not_media");
+
+        _lib.File(@"Show\Show_02_[1080p].mp4");
+        _lib.File(@"Show\Show_03_[1080p].mp4");
+        await Scan();
+
+        var kept = Row(@"Show\Show_01_[1080p].mp4");
+        Assert.Equal(MediaKind.Episode, kept.Parsed.Kind);
+        Assert.Equal("not_media", kept.Status);
+        Assert.Equal("pending", Row(@"Show\Show_02_[1080p].mp4").Status);
+    }
+
+    [Fact]
+    public async Task ChangedSize_KeepsNotMediaFileNotMedia()
+    {
+        _lib.File(@"Movies\Heat.1995.mkv");
+        await Scan();
+        var before = Row(@"Movies\Heat.1995.mkv");
+        using (var conn = _db.Open())
+            conn.Execute("UPDATE files SET status = 'not_media', parsed_json = @Json WHERE id = @Id",
+                new { before.Id, Json = "{\"stale\":true}" });
+
+        _lib.Resize(@"Movies\Heat.1995.mkv", TempLibrary.DefaultSize + 1024);
+        await Scan();
+
+        var after = Row(@"Movies\Heat.1995.mkv");
+        Assert.Equal("Heat", after.Parsed.Title);
+        Assert.Equal("not_media", after.Status);
+    }
+
+    [Fact]
     public async Task UnchangedDirectories_AreNotReparsed()
     {
         _lib.File(@"Show\Show_01_[1080p].mp4");

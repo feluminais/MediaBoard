@@ -112,16 +112,24 @@ public sealed record FolderRow(
     int FileCount,
     IReadOnlyList<string> IgnoredFolders);
 
-public sealed record DeleteFile(int FileId, string Path, long Size);
+/// <param name="MayDeletePermanently">
+/// The file is not on a fixed local disk (network or removable drive), where Windows may delete for good instead of
+/// using the Recycle Bin. The confirmation should say so.
+/// </param>
+public sealed record DeleteFile(int FileId, string Path, long Size, bool MayDeletePermanently = false);
 
 public sealed record DeletePreview(int TitleId, string TitleName, IReadOnlyList<DeleteFile> Files)
 {
     public long TotalSize => Files.Sum(f => f.Size);
+
+    public bool AnyMayDeletePermanently => Files.Any(f => f.MayDeletePermanently);
 }
 
-public sealed record DeleteFailure(string Path, string Reason);
+/// <param name="Declined">Windows asked whether to delete the file for good (no Recycle Bin for it) and the answer was no.</param>
+public sealed record DeleteFailure(string Path, string Reason, bool Declined = false);
 
 /// <param name="Deleted">Paths sent to the Recycle Bin. Their rows are removed from the library at once.</param>
+/// <param name="Failed">Files that stayed where they were, and why. Their rows stay in the library.</param>
 public sealed record DeleteResult(IReadOnlyList<string> Deleted, IReadOnlyList<DeleteFailure> Failed);
 
 /// <summary>Overrides point at one id, so a season (which has no row of its own) gets one made of its title and number.</summary>
