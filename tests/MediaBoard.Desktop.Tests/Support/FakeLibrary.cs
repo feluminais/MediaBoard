@@ -13,6 +13,16 @@ internal sealed class FakeLibrary : ILibrary
 
     public List<TitleCard> Recent { get; } = [];
 
+    public List<ContinueItem> Continue { get; } = [];
+
+    /// <summary>The titles of both kinds; <see cref="Titles"/> filters and sorts them the way the real library does.</summary>
+    public List<TitleCard> TitleCards { get; } = [];
+
+    /// <summary>The limit of each ContinueWatching and RecentlyAdded call, in order.</summary>
+    public List<(string Query, int Limit)> Limits { get; } = [];
+
+    public List<(TitleKind Kind, TitleSort Sort, bool IncludeHidden)> TitleQueries { get; } = [];
+
     /// <summary>Runs on the querying thread at the start of each read query, with its name: a test can block or throw.</summary>
     public Action<string>? OnQuery { get; set; }
 
@@ -22,22 +32,42 @@ internal sealed class FakeLibrary : ILibrary
 
     public static FolderRow Folder(int id, string path) => new(id, path, true, false, false, 0, []);
 
+    public static TitleCard Card(int id, string name, TitleKind kind = TitleKind.Movie, int? year = 2000, string? poster = null,
+        DateTime? added = null, bool hidden = false, bool offline = false) =>
+        new(id, kind, name, year, null, poster, null, offline, hidden, false, added ?? new DateTime(2026, 1, 1).AddMinutes(id));
+
+    public static ContinueItem Resume(int titleId, string name, string? episode = null, string? poster = null, double position = 600, double duration = 6000) =>
+        new(titleId, titleId * 10, TitleKind.Movie, name, episode, null, poster, position, duration, false, false, new DateTime(2026, 2, 1).AddMinutes(titleId));
+
     public static ReviewItem ReviewFile(int fileId, string name) =>
         new(fileId, name, name, name, null, MediaKind.Movie, null, [], false, []);
 
     public IReadOnlyList<ContinueItem> ContinueWatching(int limit)
     {
         OnQuery?.Invoke(nameof(ContinueWatching));
-        return [];
+        lock (Limits) Limits.Add((nameof(ContinueWatching), limit));
+        return Continue.OrderByDescending(i => i.LastPlayed).Take(limit).ToList();
     }
 
     public IReadOnlyList<TitleCard> RecentlyAdded(int limit)
     {
         OnQuery?.Invoke(nameof(RecentlyAdded));
-        return Recent.Take(limit).ToList();
+        lock (Limits) Limits.Add((nameof(RecentlyAdded), limit));
+        return Recent.OrderByDescending(c => c.DateAdded).Take(limit).ToList();
     }
 
-    public IReadOnlyList<TitleCard> Titles(TitleKind kind, TitleSort sort, bool includeHidden) => [];
+    public IReadOnlyList<TitleCard> Titles(TitleKind kind, TitleSort sort, bool includeHidden)
+    {
+        OnQuery?.Invoke(nameof(Titles));
+        lock (TitleQueries) TitleQueries.Add((kind, sort, includeHidden));
+        var cards = TitleCards.Where(c => c.Kind == kind && (includeHidden || !c.Hidden));
+        return (sort switch
+        {
+            TitleSort.Year => cards.OrderByDescending(c => c.Year ?? int.MinValue).ThenBy(c => c.Name, StringComparer.Ordinal),
+            TitleSort.DateAdded => cards.OrderByDescending(c => c.DateAdded).ThenBy(c => c.Name, StringComparer.Ordinal),
+            _ => cards.OrderBy(c => c.Name, StringComparer.Ordinal),
+        }).ToList();
+    }
 
     public TitleDetailsView? Title(int titleId) => null;
 

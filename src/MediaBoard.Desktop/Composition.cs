@@ -68,6 +68,12 @@ public static class Composition
         services.AddSingleton(sp => new ImageCache(
             sp.GetRequiredService<HttpClient>(), sp.GetRequiredService<Connectivity>(), paths.Images));
 
+        services.AddSingleton(sp =>
+        {
+            var images = sp.GetRequiredService<ImageCache>();
+            return new PosterLoader(images.GetAsync);
+        });
+
         services.AddSingleton(sp => new FolderStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => new FileStore(sp.GetRequiredService<LibraryDatabase>()));
         services.AddSingleton(sp => new ProgressStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
@@ -158,7 +164,9 @@ public static class Composition
             sp.GetRequiredService<ActivityPanelViewModel>(),
             sp.GetRequiredService<ActivityHub>(),
             sp.GetRequiredService<FoldersViewModel>(),
-            sp.GetRequiredService<SettingsViewModel>()));
+            sp.GetRequiredService<SettingsViewModel>(),
+            sp.GetRequiredService<PosterLoader>(),
+            sp.GetRequiredService<IPlaybackService>()));
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

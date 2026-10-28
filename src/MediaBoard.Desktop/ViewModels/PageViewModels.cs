@@ -21,6 +21,12 @@ public abstract class PageViewModel(string title) : ObservableObject
     public virtual void Opened()
     {
     }
+
+    /// <summary>
+    /// Whether a library change reloads the page while another page is open. A page that reloads in <see cref="Opened"/>
+    /// anyway and is costly to load (a grid of thousands) says no.
+    /// </summary>
+    public virtual bool RefreshesWhileHidden => true;
 }
 
 /// <summary>A page later tasks fill in; until then it only says why it is empty.</summary>
@@ -28,6 +34,12 @@ public sealed class PlaceholderPageViewModel(string title, string emptyText) : P
 {
     public string EmptyText { get; } = emptyText;
 }
+
+/// <summary>What the poster pages can ask the shell to do. All run on the UI thread and return at once.</summary>
+/// <param name="OpenTitle">Opens the title page.</param>
+/// <param name="PlayFile">Resumes a file in the player.</param>
+/// <param name="OpenList">Opens the full list behind a Home row.</param>
+public sealed record PageActions(Action<int> OpenTitle, Action<int> PlayFile, Action<ListKind> OpenList);
 
 /// <summary>
 /// Home: the "Continue watching" and "Recently added" rows, the first-run prompts when there is no folder ("Add a
@@ -38,16 +50,21 @@ public sealed partial class HomeViewModel : PageViewModel
     public const int RowLimit = 20;
 
     private readonly ILibrary _library;
+    private readonly PosterLoader _posters;
+    private readonly PageActions _actions;
     private readonly Action _addFolder;
     private readonly Action _addKey;
     private readonly ActivityHub _hub;
     private readonly BackgroundQuery _query;
+    private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
 
-    public HomeViewModel(ILibrary library, ActivityHub hub, Action addFolder, Action addKey)
+    public HomeViewModel(ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions, Action addFolder, Action addKey)
         : base("Home")
     {
         _library = library;
         _hub = hub;
+        _posters = posters;
+        _actions = actions;
         _addFolder = addFolder;
         _addKey = addKey;
         _query = new BackgroundQuery(hub, "Home");
@@ -84,11 +101,11 @@ public sealed partial class HomeViewModel : PageViewModel
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NothingInProgress))]
-    public partial IReadOnlyList<ContinueItem> ContinueWatching { get; private set; } = [];
+    public partial IReadOnlyList<PosterCardViewModel> ContinueWatching { get; private set; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NothingAdded))]
-    public partial IReadOnlyList<TitleCard> RecentlyAdded { get; private set; } = [];
+    public partial IReadOnlyList<PosterCardViewModel> RecentlyAdded { get; private set; } = [];
 
     public bool NothingInProgress => ContinueWatching.Count == 0;
 
@@ -100,22 +117,40 @@ public sealed partial class HomeViewModel : PageViewModel
     [RelayCommand]
     private void AddKey() => _addKey();
 
+    /// <summary>The arrow next to "Continue watching": every in-progress item.</summary>
+    [RelayCommand]
+    private void OpenContinueAll() => _actions.OpenList(ListKind.ContinueWatching);
+
+    /// <summary>The arrow next to "Recently added": the whole library, newest first.</summary>
+    [RelayCommand]
+    private void OpenRecentAll() => _actions.OpenList(ListKind.RecentlyAdded);
+
     private void SyncKey() => HasNoKey = _hub.Current.KeyState == KeyState.Missing;
 
-    public override Task RefreshAsync() => _query.RunAsync(Load, data =>
+    public override Task RefreshAsync()
     {
-        HasNoFolders = data.NoFolders;
-        ContinueWatching = data.ContinueWatching;
-        RecentlyAdded = data.RecentlyAdded;
-        IsLoaded = true;
-    });
-
-    // Thread pool. Folders() checks each folder's path, which can take seconds on a sleeping or network drive.
-    private HomeData Load()
-    {
-        if (_library.Folders().Count == 0) return new HomeData(true, [], []);
-        return new HomeData(false, _library.ContinueWatching(RowLimit), _library.RecentlyAdded(RowLimit));
+        var known = _known;
+        return _query.RunAsync(() => Load(known), data =>
+        {
+            HasNoFolders = data.NoFolders;
+            if (!PosterCards.SameCards(ContinueWatching, data.ContinueWatching)) ContinueWatching = data.ContinueWatching;
+            if (!PosterCards.SameCards(RecentlyAdded, data.RecentlyAdded)) RecentlyAdded = data.RecentlyAdded;
+            _known = PosterCards.Index(data.ContinueWatching.Concat(data.RecentlyAdded));
+            IsLoaded = true;
+        });
     }
 
-    private sealed record HomeData(bool NoFolders, IReadOnlyList<ContinueItem> ContinueWatching, IReadOnlyList<TitleCard> RecentlyAdded);
+    // Thread pool. Folders() checks each folder's path, which can take seconds on a sleeping or network drive.
+    private HomeData Load(IReadOnlyDictionary<string, PosterCardViewModel> known)
+    {
+        if (_library.Folders().Count == 0) return new HomeData(true, [], []);
+
+        var playing = PosterCards.Build(_library.ContinueWatching(RowLimit), known,
+            item => PosterCardViewModel.For(item, _posters, card => _actions.PlayFile(card.FileId!.Value)));
+        var added = PosterCards.Build(_library.RecentlyAdded(RowLimit), known,
+            card => PosterCardViewModel.For(card, _posters, c => _actions.OpenTitle(c.TitleId)));
+        return new HomeData(false, playing, added);
+    }
+
+    private sealed record HomeData(bool NoFolders, IReadOnlyList<PosterCardViewModel> ContinueWatching, IReadOnlyList<PosterCardViewModel> RecentlyAdded);
 }

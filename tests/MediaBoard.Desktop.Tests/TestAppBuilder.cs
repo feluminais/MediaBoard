@@ -10,5 +10,6 @@ namespace MediaBoard.Desktop.Tests;
 public class TestAppBuilder
 {
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>()
-        .UseHeadless(new AvaloniaHeadlessPlatformOptions());
+        .UseSkia() // real image decoding, for the PosterImage tests
+        .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 }

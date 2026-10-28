@@ -1,0 +1,27 @@
+<views:PosterHost xmlns="https://github.com/avaloniaui"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+                  xmlns:views="using:MediaBoard.Desktop.Views"
+                  xmlns:controls="using:MediaBoard.Desktop.Controls"
+                  x:Class="MediaBoard.Desktop.Views.PosterRow"
+                  x:DataType="vm:PosterCardViewModel">
+    <Button Classes="card" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding OpenCommand}">
+        <DockPanel Classes.dimmed="{Binding IsDimmed}" Margin="0,4">
+            <Panel DockPanel.Dock="Left" Width="48" Height="72" Margin="0,0,16,0">
+                <Border Classes="frame" CornerRadius="4" ClipToBounds="True">
+                    <controls:PosterImage LocalPath="{Binding PosterLocalPath}" DecodeWidth="96" />
+                </Border>
+            </Panel>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="muted" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding HasSubtitle}" />
+                <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding HasDetail}" />
+                <ProgressBar Height="4" MinHeight="0" Minimum="0" Maximum="1" MaxWidth="240" HorizontalAlignment="Left"
+                             Value="{Binding Progress}" IsVisible="{Binding HasProgress}" Margin="0,4,0,0" />
+            </StackPanel>
+        </DockPanel>
+    </Button>
+</views:PosterHost>

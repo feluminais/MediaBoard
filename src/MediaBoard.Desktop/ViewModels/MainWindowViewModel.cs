@@ -4,6 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Playback;
 
 namespace MediaBoard.Desktop.ViewModels;
 
@@ -39,6 +41,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public const string SettingsPage = "Settings";
 
     private readonly ILibrary _library;
+    private readonly ActivityHub _hub;
+    private readonly PosterLoader _posters;
+    private readonly IPlaybackService _playback;
+    private readonly PageActions _actions;
     private readonly HomeViewModel _home;
     private readonly BackgroundQuery _reviewCount;
     private readonly Dictionary<string, PageViewModel> _pages;
@@ -51,12 +57,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ActivityPanelViewModel activity,
         ActivityHub hub,
         FoldersViewModel folders,
-        SettingsViewModel settings)
+        SettingsViewModel settings,
+        PosterLoader posters,
+        IPlaybackService playback)
     {
         _library = library;
+        _hub = hub;
+        _posters = posters;
+        _playback = playback;
+        _actions = new PageActions(OpenTitle, PlayFile, OpenList);
         _home = new HomeViewModel(
             library,
             hub,
+            posters,
+            _actions,
             addFolder: () =>
             {
                 Navigate(FoldersPage);
@@ -70,8 +84,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _pages = new Dictionary<string, PageViewModel>
         {
             [HomePage] = _home,
-            [MoviesPage] = new PlaceholderPageViewModel("Movies", "No movies yet"),
-            [ShowsPage] = new PlaceholderPageViewModel("Shows", "No shows yet"),
+            [MoviesPage] = new TitleGridViewModel(TitleKind.Movie, library, hub, posters, _actions),
+            [ShowsPage] = new TitleGridViewModel(TitleKind.Show, library, hub, posters, _actions),
             [ReviewPage] = new PlaceholderPageViewModel("Needs review", "Nothing to review"),
             [FoldersPage] = folders,
             [SettingsPage] = settings,
@@ -108,6 +122,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     public partial int ReviewCount { get; private set; }
 
+    /// <summary>The title whose page was opened last; null until one was.</summary>
+    public int? OpenTitleId { get; private set; }
+
     /// <summary>The Ctrl+F palette is open.</summary>
     [ObservableProperty]
     public partial bool IsSearchOpen { get; set; }
@@ -124,6 +141,34 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = target;
         foreach (var item in NavItems) item.IsSelected = item.Key == page;
         target.Opened();
+    }
+
+    // Task 24 replaces the placeholder with the title page.
+    private void OpenTitle(int titleId)
+    {
+        OpenTitleId = titleId;
+        CurrentPage = new PlaceholderPageViewModel("Title", "Details coming soon");
+    }
+
+    // The player is started on the thread pool: finding the player and the file can touch a slow drive.
+    private void PlayFile(int fileId) => _ = Task.Run(async () =>
+    {
+        try
+        {
+            await _playback.PlayAsync(fileId, fromStart: false, CancellationToken.None);
+        }
+        catch (Exception e)
+        {
+            _hub.Log(ActivityLevel.Error, $"Couldn't start playback: {e.Message}");
+        }
+    });
+
+    // A Home row's arrow. The list reads the library once it is open and again whenever the library changes.
+    private void OpenList(ListKind kind)
+    {
+        var list = new ListViewModel(kind, _library, _hub, _posters, _actions);
+        CurrentPage = list;
+        _ = list.RefreshAsync();
     }
 
     [RelayCommand]
@@ -151,7 +196,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void Refresh()
     {
         _ = _reviewCount.RunAsync(_library.NeedsReviewCount, count => ReviewCount = count);
-        foreach (var page in _pages.Values) _ = page.RefreshAsync();
+        foreach (var page in _pages.Values)
+        {
+            if (page.RefreshesWhileHidden || ReferenceEquals(page, CurrentPage)) _ = page.RefreshAsync();
+        }
+
+        if (CurrentPage is PageViewModel open && !_pages.Values.Contains(open)) _ = open.RefreshAsync(); // a list or title page
     }
 
     // A library that can't be opened shows on Home and opens the activity panel, where the details are.

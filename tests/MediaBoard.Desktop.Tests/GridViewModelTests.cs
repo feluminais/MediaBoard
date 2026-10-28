@@ -1,0 +1,198 @@
+using Avalonia.Controls;
+using Avalonia.Headless.XUnit;
+using Avalonia.Layout;
+using Avalonia.VisualTree;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Desktop.Tests.Support;
+using MediaBoard.Desktop.ViewModels;
+using MediaBoard.Desktop.Views;
+
+namespace MediaBoard.Desktop.Tests;
+
+public class GridViewModelTests
+{
+    private readonly ActivityHub _hub = new();
+    private readonly FakeLibrary _library = new();
+    private readonly List<int> _opened = [];
+
+    private TitleGridViewModel Create(TitleKind kind = TitleKind.Movie) =>
+        new(kind, _library, _hub, Posters.None(), new PageActions(_opened.Add, _ => { }, _ => { }));
+
+    private async Task<TitleGridViewModel> Loaded(TitleKind kind = TitleKind.Movie)
+    {
+        var grid = Create(kind);
+        await grid.RefreshAsync();
+        return grid;
+    }
+
+    [AvaloniaFact]
+    public void Grid_UsesVirtualizingPanel()
+    {
+        var grid = Create();
+        var view = new GridView { DataContext = grid };
+        new Window { Width = 1000, Height = 700, Content = view }.Show();
+
+        var cards = view.GetVisualDescendants().OfType<ItemsRepeater>().Single();
+
+        // Only the cards in view are built: a UniformGridLayout is a VirtualizingLayout.
+        Assert.IsAssignableFrom<VirtualizingLayout>(cards.Layout);
+        Assert.NotNull(cards.FindAncestorOfType<ScrollViewer>()); // the viewport that decides what gets built
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_BuildsOnlyTheVisibleCards()
+    {
+        for (var i = 0; i < 5000; i++) _library.TitleCards.Add(FakeLibrary.Card(i, $"Film {i:0000}"));
+        var grid = await Loaded();
+        var view = new GridView { DataContext = grid };
+        var window = new Window { Width = 1000, Height = 700, Content = view };
+        window.Show();
+        Ui.Flush();
+        window.UpdateLayout();
+
+        var built = view.GetVisualDescendants().OfType<PosterCard>().Count();
+
+        Assert.InRange(built, 1, 120);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_ListsTheKindItIsFor()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        _library.TitleCards.Add(FakeLibrary.Card(2, "Arcane", TitleKind.Show));
+
+        var shows = await Loaded(TitleKind.Show);
+
+        Assert.Equal("Shows", shows.Title);
+        Assert.Equal(["Arcane"], shows.Items.Select(i => i.Name));
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_SortAndFilter()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Heat", year: 1995, added: new DateTime(2026, 3, 1)));
+        _library.TitleCards.Add(FakeLibrary.Card(2, "Coco", year: 2017, added: new DateTime(2026, 1, 1)));
+        _library.TitleCards.Add(FakeLibrary.Card(3, "Alien", year: 1979, added: new DateTime(2026, 2, 1)));
+        _library.TitleCards.Add(FakeLibrary.Card(4, "Hidden Figures", year: 2016, hidden: true));
+        var grid = await Loaded();
+        Assert.Equal(["Alien", "Coco", "Heat"], grid.Items.Select(i => i.Name)); // by name, hidden left out
+        Assert.Equal(["Name", "Year", "Date added"], grid.SortOptions.Select(o => o.Label));
+
+        grid.SelectedSort = grid.SortOptions.Single(o => o.Sort == TitleSort.Year);
+        await Ui.WaitUntil(() => grid.Items[0].Name == "Coco");
+        Assert.Equal(["Coco", "Heat", "Alien"], grid.Items.Select(i => i.Name));
+        Assert.Contains(_library.TitleQueries, q => q.Sort == TitleSort.Year);
+
+        grid.SelectedSort = grid.SortOptions.Single(o => o.Sort == TitleSort.DateAdded);
+        await Ui.WaitUntil(() => grid.Items[0].Name == "Heat");
+        Assert.Equal(["Heat", "Alien", "Coco"], grid.Items.Select(i => i.Name));
+
+        grid.FilterText = " CO ";
+        Assert.Equal(["Coco"], grid.Items.Select(i => i.Name)); // instant, in memory
+        var queries = _library.TitleQueries.Count;
+        grid.FilterText = "";
+        Assert.Equal(3, grid.Items.Count);
+        Assert.Equal(queries, _library.TitleQueries.Count);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_ShowHidden_IncludesHiddenTitles()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        _library.TitleCards.Add(FakeLibrary.Card(2, "Hidden Figures", hidden: true));
+        var grid = await Loaded();
+        Assert.Single(grid.Items);
+
+        grid.ShowHidden = true;
+        await Ui.WaitUntil(() => grid.Items.Count == 2);
+
+        Assert.True(_library.TitleQueries[^1].IncludeHidden);
+        Assert.True(grid.Items.Single(i => i.Name == "Hidden Figures").IsDimmed);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_Empty_SaysWhy()
+    {
+        var movies = await Loaded();
+        Assert.True(movies.ShowEmpty);
+        Assert.Equal("No movies yet", movies.EmptyTitle);
+        Assert.Equal("Add a folder that has movies.", movies.EmptyHint);
+
+        var shows = await Loaded(TitleKind.Show);
+        Assert.Equal("No shows yet", shows.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_NothingShownBeforeTheFirstLoad()
+    {
+        var grid = Create();
+
+        Assert.False(grid.ShowEmpty);
+        await grid.RefreshAsync();
+        Assert.True(grid.ShowEmpty);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_FilterWithNoMatch_SaysSo()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        var grid = await Loaded();
+        Assert.False(grid.ShowEmpty);
+
+        grid.FilterText = "zzz";
+
+        Assert.True(grid.ShowEmpty);
+        Assert.Equal("Nothing matches", grid.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_ClickingACard_OpensTheTitle()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(9, "Coco"));
+        var grid = await Loaded();
+
+        grid.Items[0].OpenCommand.Execute(null);
+
+        Assert.Equal([9], _opened);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_SameLibrary_KeepsItsCards()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        var grid = await Loaded();
+        var items = grid.Items;
+
+        await grid.RefreshAsync();
+
+        Assert.Same(items, grid.Items); // nothing changed, so the grid is not rebuilt
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_PicksUpNewTitles_WhenTheLibraryChanges()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        var grid = await Loaded();
+        var coco = grid.Items[0];
+        _library.TitleCards.Add(FakeLibrary.Card(2, "Heat"));
+
+        await grid.RefreshAsync();
+
+        Assert.Equal(["Coco", "Heat"], grid.Items.Select(i => i.Name));
+        Assert.Same(coco, grid.Items[0]); // the unchanged card is reused
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_OpeningThePage_LoadsIt()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        var grid = Create();
+
+        grid.Opened();
+        await Ui.WaitUntil(() => grid.IsLoaded);
+
+        Assert.Single(grid.Items);
+    }
+}

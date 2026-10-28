@@ -19,6 +19,7 @@
                     <SolidColorBrush x:Key="LinkTextBrush" Color="#0B57D0" />
                     <SolidColorBrush x:Key="BadgeBrush" Color="#C25E00" />
                     <SolidColorBrush x:Key="OverlayBrush" Color="#66000000" />
+                    <SolidColorBrush x:Key="PosterPlaceholderBrush" Color="#DDDDDD" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="SidebarBrush" Color="#202020" />
@@ -32,6 +33,7 @@
                     <SolidColorBrush x:Key="LinkTextBrush" Color="#8AB4F8" />
                     <SolidColorBrush x:Key="BadgeBrush" Color="#C25E00" />
                     <SolidColorBrush x:Key="OverlayBrush" Color="#99000000" />
+                    <SolidColorBrush x:Key="PosterPlaceholderBrush" Color="#3A3A3A" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
@@ -58,6 +60,33 @@
         <Style Selector="TextBlock.rowTitle">
             <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <!-- Poster cards: a flat button, a ring on hover, faded when hidden or missing. -->
+        <Style Selector="Button.card">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+        </Style>
+        <Style Selector="Button.card:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.card Border.frame">
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.card:pointerover Border.frame">
+            <Setter Property="BorderBrush" Value="{DynamicResource LinkTextBrush}" />
+        </Style>
+        <Style Selector="StackPanel.dimmed, DockPanel.dimmed">
+            <Setter Property="Opacity" Value="0.5" />
+        </Style>
+        <Style Selector="Button.openAll">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="Foreground" Value="{DynamicResource LinkTextBrush}" />
         </Style>
     </Application.Styles>
 </Application>

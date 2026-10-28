@@ -1,0 +1,24 @@
+<views:PosterHost xmlns="https://github.com/avaloniaui"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+                  xmlns:views="using:MediaBoard.Desktop.Views"
+                  xmlns:controls="using:MediaBoard.Desktop.Controls"
+                  x:Class="MediaBoard.Desktop.Views.PosterCard"
+                  x:DataType="vm:PosterCardViewModel"
+                  Width="160">
+    <Button Classes="card" Command="{Binding OpenCommand}">
+        <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
+            <Panel Width="160" Height="240">
+                <Border Classes="frame" CornerRadius="6" ClipToBounds="True">
+                    <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="240" />
+                </Border>
+                <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"
+                             Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
+            </Panel>
+            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding Name}" />
+            <TextBlock Classes="muted" Text="{Binding Subtitle}" FontSize="12" TextTrimming="CharacterEllipsis"
+                       IsVisible="{Binding HasSubtitle}" />
+        </StackPanel>
+    </Button>
+</views:PosterHost>
