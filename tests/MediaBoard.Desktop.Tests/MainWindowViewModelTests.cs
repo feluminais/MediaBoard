@@ -23,7 +23,7 @@ public class MainWindowViewModelTests
                 new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
                 new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
                 _hub, () => Task.FromResult<string?>(null), _ => { }),
-            Posters.None(), new FakePlayback());
+            Posters.None(), new Titles(_library, _hub).Services());
 
     private static void Flush() => Dispatcher.UIThread.RunJobs();
 
@@ -306,7 +306,7 @@ public class MainWindowViewModelTests
                 new MediaBoard.Core.Settings.SettingsStore(_settingsPath),
                 new MediaBoard.Core.Players.PlayerDetector(_ => false, () => [], _hub),
                 _hub, () => Task.FromResult<string?>(null), _ => { }),
-            Posters.None(), new FakePlayback());
+            Posters.None(), new Titles(_library, _hub).Services());
         var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
 
         home.AddFolderCommand.Execute(null);

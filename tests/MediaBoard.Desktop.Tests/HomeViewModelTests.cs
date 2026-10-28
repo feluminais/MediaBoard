@@ -31,7 +31,7 @@ public class HomeViewModelTests : IDisposable
                 new SettingsStore(_settingsPath),
                 new PlayerDetector(_ => false, () => [], _hub),
                 _hub, () => Task.FromResult<string?>(null), _ => { }),
-            Posters.Local(_asked), _playback);
+            Posters.Local(_asked), new Titles(_library, _hub, _playback) { Posters = Posters.Local(_asked) }.Services());
 
     private async Task<(MainWindowViewModel Shell, HomeViewModel Home)> LoadedHome()
     {
@@ -133,7 +133,69 @@ public class HomeViewModelTests : IDisposable
         home.RecentlyAdded[0].OpenCommand.Execute(null);
 
         Assert.Equal(7, shell.OpenTitleId);
-        Assert.IsType<PlaceholderPageViewModel>(shell.CurrentPage); // Task 24 builds the real page
+        Assert.IsType<TitleViewModel>(shell.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task TitlePage_BackReturnsToTheWholePageItCameFrom()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+        Assert.Equal("Coco", page.Header.Name);
+
+        page.BackCommand.Execute(null);
+
+        Assert.Same(home, shell.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task TitlePage_RefreshesWhenTheLibraryChanges()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco, renamed");
+        await Task.Run(_library.RaiseChanged);
+        Ui.Flush();
+
+        await Ui.WaitUntil(() => page.Header.Name == "Coco, renamed");
+    }
+
+    [AvaloniaFact]
+    public async Task OnlineTitle_OpensFromTheShell_AndBackWorks()
+    {
+        var (shell, home) = await LoadedHome();
+
+        shell.OpenOnlineTitle(603, MediaBoard.Core.Metadata.TitleKind.Movie);
+
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        Assert.True(page.IsOnline);
+        page.BackCommand.Execute(null);
+        Assert.Same(home, shell.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task Sidebar_DropsTheTitlePage_AndBackFromNothingGoesHome()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+        Assert.IsType<TitleGridViewModel>(shell.CurrentPage);
+
+        shell.OpenOnlineTitle(1, MediaBoard.Core.Metadata.TitleKind.Show);
+        Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        ((TitleViewModel)shell.CurrentPage).BackCommand.Execute(null);
+        Assert.IsType<TitleGridViewModel>(shell.CurrentPage); // not the Home page opened before the sidebar click
     }
 
     [AvaloniaFact]

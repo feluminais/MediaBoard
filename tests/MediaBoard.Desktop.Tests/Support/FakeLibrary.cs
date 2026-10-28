@@ -69,7 +69,48 @@ internal sealed class FakeLibrary : ILibrary
         }).ToList();
     }
 
-    public TitleDetailsView? Title(int titleId) => null;
+    /// <summary>The title pages, by title id. <see cref="Title"/> answers from here.</summary>
+    public Dictionary<int, TitleDetailsView> Details { get; } = [];
+
+    /// <summary>What <see cref="NextEpisodeFileId"/> answers, by title id.</summary>
+    public Dictionary<int, int?> Next { get; } = [];
+
+    /// <summary>Every edit the page made, as "rename:Episode:7:Pilot", "hidden:Title:1:True", "watched:12:True", "fix:12:603:Movie", "delete".</summary>
+    public List<string> Edits { get; } = [];
+
+    public DeletePreview? Preview { get; set; }
+
+    public DeleteResult DeleteResult { get; set; } = new([], []);
+
+    /// <summary>Runs inside <see cref="FixMatchAsync"/> before it records the call: a test can throw.</summary>
+    public Action? OnFixMatch { get; set; }
+
+    public TitleDetailsView? Title(int titleId)
+    {
+        OnQuery?.Invoke(nameof(Title));
+        return Details.GetValueOrDefault(titleId);
+    }
+
+    public static TitleDetailsView Movie(int id, string name, double position = 0, bool watched = false, bool missing = false, int fileId = 0) =>
+        new(id, TitleKind.Movie, name, 100 + id, 1999, null, "About " + name, 7.4, "/p.jpg", false, false, missing, [],
+            [new FileView(fileId == 0 ? id * 10 : fileId, name + ".mkv", name + ".mkv", false, watched, position, 6000, missing)]);
+
+    public static EpisodeRow Episode(int id, int season, int number, string name, int? fileId, bool watched = false, double position = 0,
+        bool missing = false, bool hidden = false) =>
+        new(id, season, number, name, null, 45, hidden, fileId, watched, position, position > 0 ? 2700 : 0, missing);
+
+    public static TitleDetailsView Show(int id, string name, params SeasonView[] seasons) =>
+        new(id, TitleKind.Show, name, 100 + id, 2015, 2022, "About " + name, 8.4, "/p.jpg", false, false,
+            seasons.SelectMany(s => s.Episodes).All(e => e.FileId is null || e.Missing), seasons, []);
+
+    public static SeasonView Season(int titleId, int number, params EpisodeRow[] episodes) =>
+        new(LibraryIds.Season(titleId, number), number, number == 0 ? "Specials" : $"Season {number}", false, episodes);
+
+    private void Edit(string log, Func<TitleDetailsView, TitleDetailsView> change)
+    {
+        lock (Edits) Edits.Add(log);
+        foreach (var (id, details) in Details.ToList()) Details[id] = change(details);
+    }
 
     public IReadOnlyList<ReviewItem> NeedsReview() => Review.ToList();
 
@@ -87,21 +128,65 @@ internal sealed class FakeLibrary : ILibrary
         return FolderRows.ToList();
     }
 
-    public IReadOnlyList<TitleCard> SearchLocal(string query, int limit) => [];
+    public Func<string, IReadOnlyList<TitleCard>> LocalSearch { get; set; } = _ => [];
 
-    public int? NextEpisodeFileId(int titleId) => null;
+    public IReadOnlyList<TitleCard> SearchLocal(string query, int limit) => LocalSearch(query);
 
-    public void Rename(TargetKind kind, int id, string? displayName) => throw new NotSupportedException();
+    public int? NextEpisodeFileId(int titleId) => Next.GetValueOrDefault(titleId);
 
-    public void SetHidden(TargetKind kind, int id, bool hidden) => throw new NotSupportedException();
+    public void Rename(TargetKind kind, int id, string? displayName) => Edit($"rename:{kind}:{id}:{displayName}", d => kind switch
+    {
+        TargetKind.Title => d.TitleId == id ? d with { Name = displayName ?? "Original" } : d,
+        TargetKind.Season => d with { Seasons = d.Seasons.Select(s => s.Id == id ? s with { Name = displayName ?? $"Season {s.Number}" } : s).ToList() },
+        TargetKind.Episode => d with
+        {
+            Seasons = d.Seasons.Select(s => s with { Episodes = s.Episodes.Select(e => e.EpisodeId == id ? e with { Name = displayName ?? "Original" } : e).ToList() }).ToList(),
+        },
+        _ => d,
+    });
 
-    public void SetWatched(int fileId, bool watched) => throw new NotSupportedException();
+    public void SetHidden(TargetKind kind, int id, bool hidden)
+    {
+        Edit($"hidden:{kind}:{id}:{hidden}", d => kind switch
+        {
+            TargetKind.Title => d.TitleId == id ? d with { Hidden = hidden } : d,
+            TargetKind.Season => d with { Seasons = d.Seasons.Select(s => s.Id == id ? s with { Hidden = hidden } : s).ToList() },
+            TargetKind.Episode => d with
+            {
+                Seasons = d.Seasons.Select(s => s with { Episodes = s.Episodes.Select(e => e.EpisodeId == id ? e with { Hidden = hidden } : e).ToList() }).ToList(),
+            },
+            _ => d,
+        });
+        if (kind == TargetKind.Title)
+        {
+            var index = TitleCards.FindIndex(c => c.TitleId == id);
+            if (index >= 0) TitleCards[index] = TitleCards[index] with { Hidden = hidden };
+        }
+    }
 
-    public Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct) => throw new NotSupportedException();
+    public void SetWatched(int fileId, bool watched) => Edit($"watched:{fileId}:{watched}", d => d with
+    {
+        Seasons = d.Seasons.Select(s => s with
+        {
+            Episodes = s.Episodes.Select(e => e.FileId == fileId ? e with { Watched = watched, PositionS = watched ? e.PositionS : 0 } : e).ToList(),
+        }).ToList(),
+        Files = d.Files.Select(f => f.FileId == fileId ? f with { Watched = watched, PositionS = watched ? f.PositionS : 0 } : f).ToList(),
+    });
+
+    public Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct)
+    {
+        OnFixMatch?.Invoke();
+        lock (Edits) Edits.Add($"fix:{fileId}:{tmdbId}:{kind}");
+        return Task.CompletedTask;
+    }
 
     public void MarkNotMedia(int fileId) => throw new NotSupportedException();
 
-    public DeletePreview PreviewDelete(int titleId) => throw new NotSupportedException();
+    public DeletePreview PreviewDelete(int titleId) => Preview ?? new DeletePreview(titleId, "", []);
 
-    public Task<DeleteResult> DeleteFromDiskAsync(DeletePreview preview) => throw new NotSupportedException();
+    public Task<DeleteResult> DeleteFromDiskAsync(DeletePreview preview)
+    {
+        lock (Edits) Edits.Add("delete");
+        return Task.FromResult(DeleteResult);
+    }
 }

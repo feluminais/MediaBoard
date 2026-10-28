@@ -156,6 +156,28 @@ public static class Composition
                 dialogs.OpenUrl);
         });
 
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new PlaybackLauncher(sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<ActivityHub>(), dialogs.AskFinishedAsync);
+        });
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            var detector = sp.GetRequiredService<PlayerDetector>();
+            var settings = sp.GetRequiredService<SettingsStore>();
+            var host = sp.GetRequiredService<AppHost>();
+            return new TitleServices(
+                sp.GetRequiredService<ILibrary>(),
+                sp.GetRequiredService<ISearchService>(),
+                sp.GetRequiredService<ActivityHub>(),
+                sp.GetRequiredService<PosterLoader>(),
+                sp.GetRequiredService<PlaybackLauncher>(),
+                () => detector.Resolve(settings.Load())?.Name,
+                dialogs.ConfirmDeleteAsync,
+                () => Task.Run(host.IdentifyPendingAsync));
+        });
+
         services.AddSingleton<StatusBarViewModel>();
         services.AddSingleton<ActivityPanelViewModel>();
         services.AddSingleton(sp => new MainWindowViewModel(
@@ -166,7 +188,7 @@ public static class Composition
             sp.GetRequiredService<FoldersViewModel>(),
             sp.GetRequiredService<SettingsViewModel>(),
             sp.GetRequiredService<PosterLoader>(),
-            sp.GetRequiredService<IPlaybackService>()));
+            sp.GetRequiredService<TitleServices>()));
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

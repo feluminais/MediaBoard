@@ -25,6 +25,9 @@
         <DataTemplate DataType="vm:ListViewModel">
             <views:ListView />
         </DataTemplate>
+        <DataTemplate DataType="vm:TitleViewModel">
+            <views:TitleView />
+        </DataTemplate>
         <DataTemplate DataType="vm:FoldersViewModel">
             <views:FoldersView />
         </DataTemplate>

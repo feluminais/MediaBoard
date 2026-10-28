@@ -1,6 +1,9 @@
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Playback;
 using MediaBoard.Desktop.ViewModels;
 
@@ -19,20 +22,26 @@ internal sealed class FakePlayback : IPlaybackService
         }
     }
 
-    public event Action<string>? AskFinished
-    {
-        add { }
-        remove { }
-    }
+    public event Action<string>? AskFinished;
+
+    /// <summary>The ids passed to <see cref="AnswerFinished"/>, with the answer.</summary>
+    public List<(int FileId, bool Finished)> Answers { get; } = [];
+
+    /// <summary>When set, PlayAsync waits for it: a test can keep a start "in progress".</summary>
+    public Task? PlayGate { get; set; }
+
+    /// <summary>Raised on the calling thread; the real service raises it on a player thread.</summary>
+    public void RaiseAskFinished(string title) => AskFinished?.Invoke(title);
 
     public Task PlayAsync(int fileId, bool fromStart, CancellationToken ct)
     {
         lock (_played) _played.Add((fileId, fromStart, Environment.CurrentManagedThreadId));
-        return Task.CompletedTask;
+        return PlayGate ?? Task.CompletedTask;
     }
 
     public void AnswerFinished(int fileId, bool finished)
     {
+        lock (Answers) Answers.Add((fileId, finished));
     }
 }
 
@@ -64,4 +73,77 @@ internal static class Posters
         bitmap.Save(path, new PngBitmapEncoderOptions());
         return path;
     }
+}
+
+/// <summary>An <see cref="ISearchService"/> that answers from lists the test sets.</summary>
+internal sealed class FakeSearch : ISearchService
+{
+    public List<SearchCandidate> Candidates { get; } = [];
+
+    public OnlineState State { get; set; } = OnlineState.Ok;
+
+    public TitleDetails? Details { get; set; }
+
+    public List<string> Queries { get; } = [];
+
+    public Task<SearchResults> SearchAsync(string query, CancellationToken ct)
+    {
+        lock (Queries) Queries.Add(query);
+        var online = State == OnlineState.Ok ? Candidates.Select(c => new OnlineResult(c, null)).ToList() : [];
+        return Task.FromResult(new SearchResults([], online, State));
+    }
+
+    public Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct) => Task.FromResult(Details);
+
+    public IReadOnlyList<PaletteCommand> Commands(string filter) => [];
+}
+
+/// <summary>Builds the title page's collaborators for a test; every seam is a field the test can read or replace.</summary>
+internal sealed class Titles
+{
+    public Titles(FakeLibrary library, ActivityHub hub, FakePlayback? playback = null)
+    {
+        Library = library;
+        Hub = hub;
+        Playback = playback ?? new FakePlayback();
+        Search = new FakeSearch();
+    }
+
+    public FakeLibrary Library { get; }
+
+    public ActivityHub Hub { get; }
+
+    public FakePlayback Playback { get; }
+
+    public FakeSearch Search { get; }
+
+    public PosterLoader Posters { get; set; } = Support.Posters.None();
+
+    public string? Player { get; set; } = "MPC-HC";
+
+    public Func<DeletePreview, Task<bool>> ConfirmDelete { get; set; } = _ => Task.FromResult(true);
+
+    public Func<string, Task<bool?>> AskFinished { get; set; } = _ => Task.FromResult<bool?>(null);
+
+    public int Identified { get; private set; }
+
+    public int SettingsOpened { get; private set; }
+
+    public int WentBack { get; private set; }
+
+    public List<int> Replaced { get; } = [];
+
+    public PlaybackLauncher Launcher => _launcher ??= new PlaybackLauncher(Playback, Hub, title => AskFinished(title));
+
+    private PlaybackLauncher? _launcher;
+
+    public TitleServices Services() => new(
+        Library, Search, Hub, Posters, Launcher, () => Player, preview => ConfirmDelete(preview),
+        () => { Identified++; return Task.CompletedTask; });
+
+    public TitleNavigation Navigation() => new(() => WentBack++, () => SettingsOpened++, Replaced.Add);
+
+    public TitleViewModel Page(int titleId) => new(titleId, Services(), Navigation());
+
+    public TitleViewModel OnlinePage(int tmdbId, TitleKind kind) => TitleViewModel.Online(tmdbId, kind, Services(), Navigation());
 }

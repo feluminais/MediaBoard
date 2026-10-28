@@ -43,7 +43,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ILibrary _library;
     private readonly ActivityHub _hub;
     private readonly PosterLoader _posters;
-    private readonly IPlaybackService _playback;
+    private readonly TitleServices _titles;
+    private readonly TitleNavigation _titleNavigation;
+    private readonly Stack<PageViewModel> _back = [];
     private readonly PageActions _actions;
     private readonly HomeViewModel _home;
     private readonly BackgroundQuery _reviewCount;
@@ -59,12 +61,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         FoldersViewModel folders,
         SettingsViewModel settings,
         PosterLoader posters,
-        IPlaybackService playback)
+        TitleServices titles)
     {
         _library = library;
         _hub = hub;
         _posters = posters;
-        _playback = playback;
+        _titles = titles;
+        _titleNavigation = new TitleNavigation(GoBack, () => Navigate(SettingsPage), ReplaceTitle);
         _actions = new PageActions(OpenTitle, PlayFile, OpenList);
         _home = new HomeViewModel(
             library,
@@ -138,30 +141,58 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (!_pages.TryGetValue(page, out var target)) return;
 
+        _back.Clear();
         CurrentPage = target;
         foreach (var item in NavItems) item.IsSelected = item.Key == page;
         target.Opened();
     }
 
-    // Task 24 replaces the placeholder with the title page.
+    // The page that was open stays on a stack; Back on the title page returns to it.
     private void OpenTitle(int titleId)
     {
+        if (CurrentPage is PageViewModel current) _back.Push(current);
+        ShowTitle(titleId);
+    }
+
+    /// <summary>Opens the page of a TMDB title that is not in the library (an online search result).</summary>
+    public void OpenOnlineTitle(int tmdbId, TitleKind kind)
+    {
+        if (CurrentPage is PageViewModel current) _back.Push(current);
+        Show(TitleViewModel.Online(tmdbId, kind, _titles, _titleNavigation));
+    }
+
+    private void ReplaceTitle(int titleId) => ShowTitle(titleId);
+
+    private void ShowTitle(int titleId)
+    {
         OpenTitleId = titleId;
-        CurrentPage = new PlaceholderPageViewModel("Title", "Details coming soon");
+        Show(new TitleViewModel(titleId, _titles, _titleNavigation));
+    }
+
+    // The page loads once it is open and again whenever the library changes.
+    private void Show(TitleViewModel page)
+    {
+        CurrentPage = page;
+        _ = page.RefreshAsync();
+    }
+
+    private void GoBack()
+    {
+        if (!_back.TryPop(out var page))
+        {
+            Navigate(HomePage);
+            return;
+        }
+
+        CurrentPage = page;
+
+        // The grids and Home may have changed behind the title page (a hidden title, a renamed one).
+        if (_pages.ContainsValue(page)) page.Opened();
+        else _ = page.RefreshAsync();
     }
 
     // The player is started on the thread pool: finding the player and the file can touch a slow drive.
-    private void PlayFile(int fileId) => _ = Task.Run(async () =>
-    {
-        try
-        {
-            await _playback.PlayAsync(fileId, fromStart: false, CancellationToken.None);
-        }
-        catch (Exception e)
-        {
-            _hub.Log(ActivityLevel.Error, $"Couldn't start playback: {e.Message}");
-        }
-    });
+    private void PlayFile(int fileId) => _ = _titles.Launcher.PlayAsync(fileId);
 
     // A Home row's arrow. The list reads the library once it is open and again whenever the library changes.
     private void OpenList(ListKind kind)

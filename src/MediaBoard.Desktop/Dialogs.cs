@@ -3,11 +3,13 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using MediaBoard.Core.Library;
+using MediaBoard.Desktop.Views;
 
 namespace MediaBoard.Desktop;
 
 /// <summary>
-/// The system dialogs the pages need: folder and program pickers, a yes or no question, and the default browser.
+/// The system dialogs the pages need: folder and program pickers, yes or no questions (including the delete confirmation and "did you finish?"), and the default browser.
 /// The main window sets <see cref="Owner"/> once it exists; until then (and in tests) every dialog answers "no".
 /// </summary>
 public sealed class Dialogs
@@ -75,6 +77,22 @@ public sealed class Dialogs
         };
 
         return await dialog.ShowDialog<bool>(Owner);
+    }
+
+    /// <summary>Lists the files that would go to the Recycle Bin; true when the user pressed Delete.</summary>
+    public async Task<bool> ConfirmDeleteAsync(DeletePreview preview)
+    {
+        if (Owner is null) return false;
+
+        return await new ConfirmDeleteDialog(preview).ShowDialog<bool>(Owner);
+    }
+
+    /// <summary>"Did you finish ...?": true for Yes, false for No, null when the user closed it without answering.</summary>
+    public async Task<bool?> AskFinishedAsync(string title)
+    {
+        if (Owner is null) return null;
+
+        return await new FinishedPromptDialog(title).ShowDialog<bool?>(Owner);
     }
 
     /// <summary>Opens a web address in the default browser. Only https addresses.</summary>
