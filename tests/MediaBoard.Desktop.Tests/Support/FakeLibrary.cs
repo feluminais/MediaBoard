@@ -112,7 +112,11 @@ internal sealed class FakeLibrary : ILibrary
         foreach (var (id, details) in Details.ToList()) Details[id] = change(details);
     }
 
-    public IReadOnlyList<ReviewItem> NeedsReview() => Review.ToList();
+    public IReadOnlyList<ReviewItem> NeedsReview()
+    {
+        OnQuery?.Invoke(nameof(NeedsReview));
+        lock (Review) return Review.ToList();
+    }
 
     // The count is read before the hook runs, so a blocked query returns what was true when it started.
     public int NeedsReviewCount()
@@ -183,6 +187,7 @@ internal sealed class FakeLibrary : ILibrary
     {
         OnFixMatch?.Invoke(fileId);
         lock (Edits) Edits.Add($"fix:{fileId}:{tmdbId}:{kind}");
+        lock (Review) Review.RemoveAll(r => r.FileId == fileId); // only the file itself: the rule for its siblings is the real library's job
 
         var destinationId = MatchedTitleId(tmdbId);
         foreach (var (id, source) in Details.ToList())
@@ -215,6 +220,7 @@ internal sealed class FakeLibrary : ILibrary
     public void MarkNotMedia(int fileId)
     {
         lock (Edits) Edits.Add($"notmedia:{fileId}");
+        lock (Review) Review.RemoveAll(r => r.FileId == fileId);
     }
 
     public DeletePreview PreviewDelete(int titleId) => Preview ?? new DeletePreview(titleId, "", []);

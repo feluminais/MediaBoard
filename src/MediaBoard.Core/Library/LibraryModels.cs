@@ -89,6 +89,7 @@ public sealed record FileView(
 public sealed record ReviewCandidate(int TmdbId, TitleKind Kind, string Name, int? Year);
 
 /// <param name="Candidates">The best TMDB matches found for the file, best first.</param>
+/// <param name="ShowFolder">Relative path of the show root folder for an episode inside one; null otherwise. A pick for one file covers the others of that folder.</param>
 public sealed record ReviewItem(
     int FileId,
     string FileName,
@@ -99,7 +100,8 @@ public sealed record ReviewItem(
     int? Season,
     IReadOnlyList<int> Episodes,
     bool Missing,
-    IReadOnlyList<ReviewCandidate> Candidates);
+    IReadOnlyList<ReviewCandidate> Candidates,
+    string? ShowFolder = null);
 
 /// <param name="Unavailable">The folder could not be read (a drive that is not connected).</param>
 /// <param name="IgnoredFolders">Top-level folders with no video below them ("Ignored: no video"), as relative paths.</param>

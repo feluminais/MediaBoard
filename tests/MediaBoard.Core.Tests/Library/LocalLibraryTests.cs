@@ -823,6 +823,8 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal("Fargo.S01E01.mkv", item.FileName);
         Assert.Equal("Fargo", item.ParsedTitle);
         Assert.Equal(MediaKind.Episode, item.Kind);
+        Assert.Equal(@"Fargo Season 1", item.ShowFolder);
+        Assert.Null(items.Single(i => i.FileId == other.Id).ShowFolder);
         Assert.Equal([60622, 275], item.Candidates.Select(c => c.TmdbId));
         Assert.Equal(TitleKind.Movie, item.Candidates[1].Kind);
         Assert.Empty(items.Single(i => i.FileId == other.Id).Candidates);

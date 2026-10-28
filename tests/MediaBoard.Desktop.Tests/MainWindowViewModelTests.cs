@@ -72,6 +72,24 @@ public class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task OpeningNeedsReview_LoadsThePage_AndAChangeReloadsIt()
+    {
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        var vm = Create();
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.ReviewPage);
+        var page = Assert.IsType<ReviewViewModel>(vm.CurrentPage);
+        await WaitUntil(() => page.IsLoaded);
+        Assert.Equal([1], page.Groups.SelectMany(g => g.Rows).Select(r => r.FileId));
+
+        _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
+        _library.RaiseChanged(); // a scan or identification run
+        Flush();
+
+        await WaitUntil(() => page.Groups.SelectMany(g => g.Rows).Count() == 2);
+    }
+
+    [AvaloniaFact]
     public async Task Refresh_ReturnsAtOnce_WhileAQueryBlocks()
     {
         using var gate = new ManualResetEventSlim();

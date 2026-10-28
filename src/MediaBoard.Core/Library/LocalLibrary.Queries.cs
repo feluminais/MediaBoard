@@ -154,7 +154,7 @@ public sealed partial class LocalLibrary
             .OrderBy(f => f.RelPath, StringComparer.OrdinalIgnoreCase)
             .Select(f => new ReviewItem(
                 f.Id, Path.GetFileName(f.RelPath), f.RelPath, f.Parsed.Title, f.Parsed.Year, f.Parsed.Kind, f.Parsed.Season,
-                f.Parsed.Episodes, f.Missing, candidates.GetValueOrDefault(f.Id) ?? []))
+                f.Parsed.Episodes, f.Missing, candidates.GetValueOrDefault(f.Id) ?? [], f.Parsed.ShowFolder))
             .ToList();
     }
 

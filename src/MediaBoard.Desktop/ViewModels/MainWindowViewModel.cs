@@ -89,7 +89,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             [HomePage] = _home,
             [MoviesPage] = new TitleGridViewModel(TitleKind.Movie, library, hub, posters, _actions),
             [ShowsPage] = new TitleGridViewModel(TitleKind.Show, library, hub, posters, _actions),
-            [ReviewPage] = new PlaceholderPageViewModel("Needs review", "Nothing to review"),
+            [ReviewPage] = new ReviewViewModel(titles),
             [FoldersPage] = folders,
             [SettingsPage] = settings,
         };

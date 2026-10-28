@@ -29,12 +29,6 @@ public abstract class PageViewModel(string title) : ObservableObject
     public virtual bool RefreshesWhileHidden => true;
 }
 
-/// <summary>A page later tasks fill in; until then it only says why it is empty.</summary>
-public sealed class PlaceholderPageViewModel(string title, string emptyText) : PageViewModel(title)
-{
-    public string EmptyText { get; } = emptyText;
-}
-
 /// <summary>What the poster pages can ask the shell to do. All run on the UI thread and return at once.</summary>
 /// <param name="OpenTitle">Opens the title page.</param>
 /// <param name="PlayFile">Resumes a file in the player.</param>

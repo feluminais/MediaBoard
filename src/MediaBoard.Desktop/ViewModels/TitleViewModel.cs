@@ -415,13 +415,7 @@ public sealed partial class TitleViewModel : PageViewModel
         Picker = new FixMatchPickerViewModel(_s.Search, _s.Hub, Header.Name, _kind, PickMatchAsync, () => Picker = null);
     }
 
-    private string? ConnectionProblem() => _s.Hub.Current switch
-    {
-        { KeyState: KeyState.Missing } => "Add a TMDB key in Settings",
-        { KeyState: KeyState.Rejected } => "TMDB rejected the key. Check it in Settings.",
-        { Online: false } => "Connect to the internet to fix this match",
-        _ => null,
-    };
+    private string? ConnectionProblem() => MatchProblems.Of(_s.Hub.Current);
 
     // The library fixes one file at a time, so every file of the title is moved, one after the other. The first
     // failure stops the run; what already moved stays moved, and the page says how many did.
@@ -446,13 +440,7 @@ public sealed partial class TitleViewModel : PageViewModel
         }
         catch (MetadataUnavailableException e)
         {
-            problem = e.Reason switch
-            {
-                UnavailableReason.NoKey => "Add a TMDB key in Settings",
-                UnavailableReason.KeyRejected => "TMDB rejected the key. Check it in Settings.",
-                UnavailableReason.Offline => "Connect to the internet to fix this match",
-                _ => "TMDB isn't answering. Try again later.",
-            };
+            problem = MatchProblems.Of(e.Reason);
         }
         catch (Exception e)
         {

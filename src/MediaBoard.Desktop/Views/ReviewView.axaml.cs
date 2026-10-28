@@ -2,9 +2,9 @@ using Avalonia.Controls;
 
 namespace MediaBoard.Desktop.Views;
 
-public partial class PlaceholderPageView : UserControl
+public partial class ReviewView : UserControl
 {
-    public PlaceholderPageView()
+    public ReviewView()
     {
         InitializeComponent();
     }

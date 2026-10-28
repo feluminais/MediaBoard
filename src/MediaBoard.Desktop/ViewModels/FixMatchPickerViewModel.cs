@@ -17,11 +17,14 @@ public sealed class MatchChoice(SearchCandidate candidate)
     public string Name => Candidate.Name;
 
     /// <summary>"2019 · Movie · 8.1": year, kind and rating, whichever TMDB knows.</summary>
-    public string Detail { get; } = string.Join(" · ", new[]
+    public string Detail { get; } = DetailOf(candidate.Year, candidate.Kind, candidate.Rating);
+
+    /// <summary>The same line for any title: the picker's results and the candidates on the Needs review page.</summary>
+    public static string DetailOf(int? year, TitleKind kind, double? rating) => string.Join(" · ", new[]
     {
-        candidate.Year?.ToString(CultureInfo.InvariantCulture),
-        candidate.Kind == TitleKind.Movie ? "Movie" : "Show",
-        candidate.Rating is { } rating ? rating.ToString("0.0", CultureInfo.InvariantCulture) : null,
+        year?.ToString(CultureInfo.InvariantCulture),
+        kind == TitleKind.Movie ? "Movie" : "Show",
+        rating is { } stars ? stars.ToString("0.0", CultureInfo.InvariantCulture) : null,
     }.Where(part => part is not null));
 }
 

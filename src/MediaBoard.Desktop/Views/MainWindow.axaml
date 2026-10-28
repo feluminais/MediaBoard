@@ -34,8 +34,8 @@
         <DataTemplate DataType="vm:SettingsViewModel">
             <views:SettingsView />
         </DataTemplate>
-        <DataTemplate DataType="vm:PlaceholderPageViewModel">
-            <views:PlaceholderPageView />
+        <DataTemplate DataType="vm:ReviewViewModel">
+            <views:ReviewView />
         </DataTemplate>
     </Window.DataTemplates>
 
