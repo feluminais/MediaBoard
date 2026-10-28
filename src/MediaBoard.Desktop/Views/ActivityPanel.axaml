@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             x:Class="MediaBoard.Desktop.Views.ActivityPanel"
+             x:DataType="vm:ActivityPanelViewModel">
+    <UserControl.Styles>
+        <Style Selector="TextBlock.error">
+            <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.warning">
+            <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="{DynamicResource PanelBrush}"
+            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0">
+        <Grid RowDefinitions="Auto,*">
+            <TextBlock Text="Activity" FontWeight="SemiBold" Margin="12,8" />
+            <TextBlock Grid.Row="1" Classes="muted" Text="No activity yet" Margin="12,0"
+                       IsVisible="{Binding IsEmpty}" />
+            <ScrollViewer Grid.Row="1">
+                <ItemsControl ItemsSource="{Binding Entries}" Margin="12,0,12,8">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ActivityItem">
+                            <Grid ColumnDefinitions="52,*" Margin="0,3">
+                                <TextBlock Classes="muted" Text="{Binding Time}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                                               Classes.error="{Binding IsError}"
+                                               Classes.warning="{Binding IsWarning}" />
+                                    <TextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" FontSize="12"
+                                               IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

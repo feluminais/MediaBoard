@@ -95,6 +95,28 @@ public class ActivityHubTests
     }
 
     [Fact]
+    public void ActivityHub_RaisesEntryLogged_OutsideItsLock()
+    {
+        var hub = new ActivityHub();
+        var raised = new List<ActivityEntry>();
+        IReadOnlyList<ActivityEntry>? seenInHandler = null;
+        hub.EntryLogged += entry =>
+        {
+            raised.Add(entry);
+            // Reading the hub from another thread inside the handler would deadlock if the lock were still held.
+            seenInHandler = Task.Run(() => hub.Recent).Wait(TimeSpan.FromSeconds(5)) ? hub.Recent : null;
+        };
+
+        hub.Log(ActivityLevel.Error, "Folder unavailable: Shows", "Connect the drive");
+
+        var entry = Assert.Single(raised);
+        Assert.Equal("Folder unavailable: Shows", entry.Message);
+        Assert.Equal("Connect the drive", entry.Hint);
+        Assert.NotNull(seenInHandler);
+        Assert.Same(entry, Assert.Single(seenInHandler));
+    }
+
+    [Fact]
     public async Task ActivityHub_IsThreadSafe()
     {
         var hub = new ActivityHub();

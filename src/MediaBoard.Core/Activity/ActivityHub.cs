@@ -17,6 +17,9 @@ public sealed class ActivityHub
 
     public event Action<StatusSnapshot>? StatusChanged;
 
+    /// <summary>Raised on the logging thread, outside the lock, after the entry was added to <see cref="Recent"/>.</summary>
+    public event Action<ActivityEntry>? EntryLogged;
+
     public StatusSnapshot Current
     {
         get { lock (_gate) return _current; }
@@ -59,6 +62,8 @@ public sealed class ActivityHub
             _recent.Enqueue(entry);
             while (_recent.Count > MaxEntries) _recent.Dequeue();
         }
+
+        EntryLogged?.Invoke(entry);
     }
 
     private void Update(Func<StatusSnapshot, StatusSnapshot> change)

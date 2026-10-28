@@ -1,0 +1,157 @@
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Identification;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Playback;
+using MediaBoard.Core.Scanning;
+using MediaBoard.Core.Settings;
+using MediaBoard.Core.Storage;
+
+namespace MediaBoard.Desktop;
+
+/// <summary>
+/// Runs the app's background work. <see cref="Start"/> returns at once; everything slow happens on the thread pool,
+/// so the window shows before the database is open or any scan has finished. Startup order: database, connectivity,
+/// identification (which picks up files left pending last time), a scan of each enabled folder followed by an
+/// identification run, the watcher, then one metadata refresh. <see cref="StopAsync"/> undoes it in reverse.
+/// </summary>
+public sealed class AppHost(
+    ActivityHub hub,
+    SettingsStore settings,
+    LibraryDatabase db,
+    Connectivity connectivity,
+    FolderStore folders,
+    LibraryScanner scanner,
+    LibraryWatcher watcher,
+    IdentificationService identification,
+    MetadataRefresher refresher,
+    LocalLibrary library,
+    PlaybackService playback)
+{
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly object _keyGate = new();
+    private string? _lastKey;
+    private Task _startup = Task.CompletedTask;
+    private int _lastPending;
+
+    /// <summary>The background startup; completes when the first scans, identification and refresh are done.</summary>
+    public Task Startup => _startup;
+
+    /// <summary>Call once, from the UI thread, after the window was created.</summary>
+    public void Start()
+    {
+        // The hub starts out "key missing" and "offline"; show what is known now instead of waiting for TMDB.
+        SyncKeyState(settings.Load().TmdbKey);
+        hub.SetOnline(connectivity.IsOnline);
+
+        settings.Changed += OnSettingsChanged;
+        hub.StatusChanged += OnStatusChanged;
+        watcher.Rescanned += OnRescanned;
+
+        _startup = Task.Run(() => RunStartupAsync(_stopping.Token));
+    }
+
+    /// <summary>
+    /// Stops the background work in reverse order of <see cref="Start"/>: the open player first (it saves the
+    /// position), then startup, watcher, identification and connectivity. The watcher can take up to 30 s, so the
+    /// caller bounds the wait. The HTTP client is left to the service provider.
+    /// </summary>
+    public async Task StopAsync()
+    {
+        settings.Changed -= OnSettingsChanged;
+        hub.StatusChanged -= OnStatusChanged;
+        watcher.Rescanned -= OnRescanned;
+        await _stopping.CancelAsync().ConfigureAwait(false);
+
+        await playback.DisposeAsync().ConfigureAwait(false);
+        await _startup.ConfigureAwait(false); // never throws: RunStartupAsync catches everything
+        watcher.Dispose();
+        identification.Dispose();
+        connectivity.Dispose();
+    }
+
+    private async Task RunStartupAsync(CancellationToken ct)
+    {
+        try
+        {
+            db.Open().Dispose(); // creates or upgrades the database here rather than on the UI thread
+            library.NotifyChanged(); // the pages can read it now
+
+            connectivity.Start();
+            identification.Start();
+
+            foreach (var folder in folders.All().Where(f => f.Enabled))
+            {
+                ct.ThrowIfCancellationRequested();
+                await ScanAsync(folder, ct).ConfigureAwait(false);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            watcher.Start();
+
+            // A run started by identification.Start() is not tied to ct, so stop waiting for it on close.
+            await identification.WhenIdleAsync().WaitAsync(ct).ConfigureAwait(false);
+            await refresher.RefreshStaleAsync(ct).ConfigureAwait(false);
+            library.NotifyChanged();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Closing.
+        }
+        catch (Exception e)
+        {
+            hub.Log(ActivityLevel.Error, $"Library update stopped: {e.Message}", "Restart MediaBoard to try again.");
+        }
+    }
+
+    private async Task ScanAsync(LibraryFolder folder, CancellationToken ct)
+    {
+        try
+        {
+            var result = await scanner.ScanAsync(folder, ct).ConfigureAwait(false);
+            library.RecordScan(folder.Id, result);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            hub.Log(ActivityLevel.Error, $"Couldn't scan {folder.Path}: {e.Message}", "Restart MediaBoard to scan it again.");
+            return;
+        }
+
+        _ = IdentifyAsync(ct);
+    }
+
+    private async Task IdentifyAsync(CancellationToken ct)
+    {
+        await identification.RunPendingAsync(ct).ConfigureAwait(false);
+        library.NotifyChanged();
+    }
+
+    // A watcher rescan only reports the folder id, so there is no result for RecordScan.
+    private void OnRescanned(int folderId)
+    {
+        library.NotifyChanged();
+        _ = IdentifyAsync(_stopping.Token);
+    }
+
+    // Identification also runs by itself when the connection returns or the key changes. When its queue empties,
+    // the library has new matches to show.
+    private void OnStatusChanged(StatusSnapshot status)
+    {
+        var previous = Interlocked.Exchange(ref _lastPending, status.PendingIdentification);
+        if (previous > 0 && status.PendingIdentification == 0) library.NotifyChanged();
+    }
+
+    private void OnSettingsChanged(AppSettings changed) => SyncKeyState(changed.TmdbKey);
+
+    // A new key is assumed to work until TMDB says otherwise; TmdbClient reports Rejected on its first 401.
+    private void SyncKeyState(string? key)
+    {
+        key = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+        lock (_keyGate)
+        {
+            if (key is null) hub.SetKeyState(KeyState.Missing);
+            else if (key != _lastKey || hub.Current.KeyState == KeyState.Missing) hub.SetKeyState(KeyState.Ok);
+            _lastKey = key;
+        }
+    }
+}

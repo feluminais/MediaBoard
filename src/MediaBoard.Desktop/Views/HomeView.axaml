@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             xmlns:lib="using:MediaBoard.Core.Library"
+             x:Class="MediaBoard.Desktop.Views.HomeView"
+             x:DataType="vm:HomeViewModel">
+    <!-- Task 22 replaces the rows with poster rows. -->
+    <Panel>
+        <StackPanel IsVisible="{Binding HasNoFolders}" Spacing="12"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock Text="No folders yet" FontSize="18" HorizontalAlignment="Center" />
+            <Button Classes="accent" Content="Add a folder" HorizontalAlignment="Center"
+                    Command="{Binding AddFolderCommand}" />
+        </StackPanel>
+
+        <StackPanel IsVisible="{Binding HasFolders}" Spacing="28">
+            <StackPanel Spacing="8">
+                <TextBlock Classes="rowTitle" Text="Continue watching" />
+                <TextBlock Classes="muted" Text="Nothing in progress" IsVisible="{Binding NothingInProgress}" />
+                <ItemsControl ItemsSource="{Binding ContinueWatching}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="16" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="lib:ContinueItem">
+                            <TextBlock Text="{Binding TitleName}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Spacing="8">
+                <TextBlock Classes="rowTitle" Text="Recently added" />
+                <TextBlock Classes="muted" Text="Nothing added yet" IsVisible="{Binding NothingAdded}" />
+                <ItemsControl ItemsSource="{Binding RecentlyAdded}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="16" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="lib:TitleCard">
+                            <TextBlock Text="{Binding Name}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+    </Panel>
+</UserControl>

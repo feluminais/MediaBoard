@@ -1,0 +1,142 @@
+using System.Net;
+using System.Net.Http.Headers;
+using MediaBoard.Core;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Identification;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Metadata.Tmdb;
+using MediaBoard.Core.Playback;
+using MediaBoard.Core.Players;
+using MediaBoard.Core.Probing;
+using MediaBoard.Core.Scanning;
+using MediaBoard.Core.Settings;
+using MediaBoard.Core.Storage;
+using MediaBoard.Desktop.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MediaBoard.Desktop;
+
+/// <summary>Where the app keeps its data. <see cref="Default"/> follows <see cref="AppPaths"/> (and so MEDIABOARD_DATA_DIR).</summary>
+public sealed record DataPaths(string Database, string Settings, string Images)
+{
+    public static DataPaths Default => new(AppPaths.DatabasePath, AppPaths.SettingsPath, AppPaths.ImagesDir);
+}
+
+/// <summary>
+/// Builds the service graph. Every Core service is a singleton; building and resolving starts nothing (no scan, no
+/// network): <see cref="AppHost.Start"/> does that. Dispose the provider with <c>DisposeAsync</c>, because
+/// <see cref="PlaybackService"/> is only async-disposable.
+/// </summary>
+public static class Composition
+{
+    private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
+
+    public static ServiceProvider Build() => Build(DataPaths.Default);
+
+    public static ServiceProvider Build(DataPaths paths)
+    {
+        var services = new ServiceCollection();
+
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(sp => new ActivityHub(sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(_ => new SettingsStore(paths.Settings));
+        services.AddSingleton(_ => new LibraryDatabase(paths.Database));
+
+        // One client for TMDB, the connectivity probe and images. It is created by hand, not through
+        // IHttpClientFactory, whose default logging would write request URLs (with api_key) to the log.
+        services.AddSingleton(_ => CreateHttpClient());
+
+        services.AddSingleton(sp => new Connectivity(
+            Connectivity.TmdbProbe(sp.GetRequiredService<HttpClient>()),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ActivityHub>()));
+
+        // One TmdbClient: its request pacing is per instance.
+        services.AddSingleton(sp =>
+        {
+            var settings = sp.GetRequiredService<SettingsStore>();
+            return new TmdbClient(
+                sp.GetRequiredService<HttpClient>(),
+                () => settings.Load().TmdbKey,
+                sp.GetRequiredService<ActivityHub>(),
+                sp.GetRequiredService<TimeProvider>());
+        });
+        services.AddSingleton<IMetadataProvider>(sp => sp.GetRequiredService<TmdbClient>());
+        services.AddSingleton(sp => new ImageCache(
+            sp.GetRequiredService<HttpClient>(), sp.GetRequiredService<Connectivity>(), paths.Images));
+
+        services.AddSingleton(sp => new FolderStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new FileStore(sp.GetRequiredService<LibraryDatabase>()));
+        services.AddSingleton(sp => new ProgressStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new TitleStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+
+        services.AddSingleton(sp => new LibraryScanner(
+            sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<ActivityHub>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new LibraryWatcher(
+            sp.GetRequiredService<LibraryScanner>(), sp.GetRequiredService<FolderStore>(), sp.GetRequiredService<ActivityHub>()));
+
+        services.AddSingleton<IDurationProbe>(sp =>
+        {
+            var settings = sp.GetRequiredService<SettingsStore>();
+            return new FfprobeDurationProbe(() => settings.Load().FfprobePath, sp.GetRequiredService<ActivityHub>());
+        });
+        services.AddSingleton(sp => new IdentificationService(
+            sp.GetRequiredService<LibraryDatabase>(),
+            sp.GetRequiredService<IMetadataProvider>(),
+            sp.GetRequiredService<IDurationProbe>(),
+            sp.GetRequiredService<Connectivity>(),
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<ActivityHub>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new MetadataRefresher(
+            sp.GetRequiredService<IMetadataProvider>(),
+            sp.GetRequiredService<TitleStore>(),
+            sp.GetRequiredService<Connectivity>(),
+            sp.GetRequiredService<ActivityHub>(),
+            sp.GetRequiredService<TimeProvider>()));
+
+        services.AddSingleton(sp => new LocalLibrary(
+            sp.GetRequiredService<LibraryDatabase>(),
+            sp.GetRequiredService<IMetadataProvider>(),
+            timeProvider: sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<ILibrary>(sp => sp.GetRequiredService<LocalLibrary>());
+        services.AddSingleton<ISearchService>(sp => new SearchService(
+            sp.GetRequiredService<ILibrary>(),
+            sp.GetRequiredService<IMetadataProvider>(),
+            sp.GetRequiredService<Connectivity>(),
+            sp.GetRequiredService<TitleStore>()));
+
+        services.AddSingleton(sp => PlayerDetector.CreateDefault(sp.GetRequiredService<ActivityHub>()));
+        services.AddSingleton(sp => new PlaybackService(
+            sp.GetRequiredService<FileStore>(),
+            sp.GetRequiredService<ProgressStore>(),
+            sp.GetRequiredService<PlayerDetector>(),
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<ActivityHub>(),
+            PlayerSessionFactory.Create));
+        services.AddSingleton<IPlaybackService>(sp => sp.GetRequiredService<PlaybackService>());
+
+        services.AddSingleton<AppHost>();
+
+        services.AddSingleton<StatusBarViewModel>();
+        services.AddSingleton<ActivityPanelViewModel>();
+        services.AddSingleton<MainWindowViewModel>();
+
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var http = new HttpClient(new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        })
+        {
+            Timeout = HttpTimeout,
+        };
+        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MediaBoard", "1.0"));
+        return http;
+    }
+}
