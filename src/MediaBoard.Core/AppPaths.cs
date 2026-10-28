@@ -23,4 +23,7 @@ public static class AppPaths
     public static string ImagesDir => Path.Combine(DataDir, "images");
 
     public static string SettingsPath => Path.Combine(DataDir, "settings.json");
+
+    /// <summary>Where unhandled exceptions are written, for a bug report.</summary>
+    public static string ErrorLogPath => Path.Combine(DataDir, "error.log");
 }

@@ -27,6 +27,7 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             _services = Composition.Build();
+            _services.GetRequiredService<ErrorReporter>().Install();
             var window = new MainWindow { DataContext = _services.GetRequiredService<MainWindowViewModel>() };
             _services.GetRequiredService<Dialogs>().Owner = window;
             desktop.MainWindow = window;

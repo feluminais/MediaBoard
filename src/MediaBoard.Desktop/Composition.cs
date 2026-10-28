@@ -18,9 +18,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace MediaBoard.Desktop;
 
 /// <summary>Where the app keeps its data. <see cref="Default"/> follows <see cref="AppPaths"/> (and so MEDIABOARD_DATA_DIR).</summary>
-public sealed record DataPaths(string Database, string Settings, string Images)
+/// <param name="ErrorLog">Where unhandled exceptions go; next to the settings file when not given.</param>
+public sealed record DataPaths(string Database, string Settings, string Images, string? ErrorLog = null)
 {
-    public static DataPaths Default => new(AppPaths.DatabasePath, AppPaths.SettingsPath, AppPaths.ImagesDir);
+    public static DataPaths Default => new(AppPaths.DatabasePath, AppPaths.SettingsPath, AppPaths.ImagesDir, AppPaths.ErrorLogPath);
 }
 
 /// <summary>
@@ -43,6 +44,14 @@ public static class Composition
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(sp => new ActivityHub(sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(_ => new SettingsStore(paths.Settings));
+        services.AddSingleton(sp =>
+        {
+            var settings = sp.GetRequiredService<SettingsStore>();
+            return new ErrorReporter(
+                sp.GetRequiredService<ActivityHub>(),
+                paths.ErrorLog ?? Path.Combine(Path.GetDirectoryName(paths.Settings) ?? ".", "error.log"),
+                () => settings.Load().TmdbKey);
+        });
         services.AddSingleton(_ => new LibraryDatabase(paths.Database));
 
         // One client for TMDB, the connectivity probe and images. It is created by hand, not through

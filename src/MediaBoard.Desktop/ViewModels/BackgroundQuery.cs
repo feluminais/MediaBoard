@@ -8,7 +8,8 @@ namespace MediaBoard.Desktop.ViewModels;
 /// (a large library, or a folder on a drive that takes seconds to answer) never freezes the window. Give each view
 /// model its own instance for each thing it loads; a newer <see cref="RunAsync{T}"/> on the same instance makes the
 /// older result stale, and a stale result is dropped. A failed query is logged once with a hint (a repeat of the
-/// same failure is not logged again until a query succeeds) and never reaches the dispatcher as an exception.
+/// same failure is not logged again until a query succeeds) and never reaches the dispatcher as an exception. An
+/// apply step that throws is logged the same way, since callers do not await the task.
 /// </summary>
 public sealed class BackgroundQuery(ActivityHub hub, string what)
 {
@@ -41,6 +42,13 @@ public sealed class BackgroundQuery(ActivityHub hub, string what)
 
         if (generation != _generation) return;
         _lastFailure = null;
-        apply(result);
+        try
+        {
+            apply(result);
+        }
+        catch (Exception e)
+        {
+            hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", FailureHint);
+        }
     }
 }

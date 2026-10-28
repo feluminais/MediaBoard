@@ -12,6 +12,7 @@ public class AppPathsTests
         try
         {
             Assert.Equal(Path.Combine(temp, "library.db"), AppPaths.DatabasePath);
+            Assert.Equal(Path.Combine(temp, "error.log"), AppPaths.ErrorLogPath);
             Assert.True(Directory.Exists(temp));
         }
         finally
