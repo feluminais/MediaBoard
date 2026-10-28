@@ -26,7 +26,8 @@ public sealed class AppHost(
     IdentificationService identification,
     MetadataRefresher refresher,
     LocalLibrary library,
-    PlaybackService playback)
+    PlaybackService playback,
+    FolderRecheck recheck)
 {
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _keyGate = new();
@@ -34,6 +35,7 @@ public sealed class AppHost(
     private string? _lastKey;
     private Task _startup = Task.CompletedTask;
     private int _lastPending;
+    private ITimer? _recheckTimer;
 
     /// <summary>The background startup; completes when the first scans, identification and refresh are done.</summary>
     public Task Startup => _startup;
@@ -65,6 +67,7 @@ public sealed class AppHost(
         watcher.Rescanned -= OnRescanned;
         playback.ProgressChanged -= OnProgressChanged;
         await _stopping.CancelAsync().ConfigureAwait(false);
+        if (_recheckTimer is { } timer) await timer.DisposeAsync().ConfigureAwait(false);
 
         await playback.DisposeAsync().ConfigureAwait(false);
         await _startup.ConfigureAwait(false); // never throws: RunStartupAsync catches everything
@@ -91,6 +94,7 @@ public sealed class AppHost(
 
             ct.ThrowIfCancellationRequested();
             watcher.Start();
+            _recheckTimer = recheck.Clock.CreateTimer(_ => OnRecheckDue(), null, recheck.Interval, Timeout.InfiniteTimeSpan);
 
             // A run started by identification.Start() is not tied to ct, so stop waiting for it on close.
             await identification.WhenIdleAsync().WaitAsync(ct).ConfigureAwait(false);
@@ -205,6 +209,46 @@ public sealed class AppHost(
         SetScanFailed(folderId, null);
         library.NotifyChanged();
         _ = IdentifyAsync(_stopping.Token);
+    }
+
+    // Off the timer's thread; the timer is re-armed once a check is done, so checks never overlap.
+    private void OnRecheckDue() => _ = Task.Run(async () =>
+    {
+        try
+        {
+            await RecheckFoldersAsync(_stopping.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception e)
+        {
+            hub.Log(ActivityLevel.Error, $"Couldn't check the folders: {e.Message}", "Restart MediaBoard to try again.");
+        }
+
+        if (!_stopping.IsCancellationRequested) _recheckTimer?.Change(recheck.Interval, Timeout.InfiniteTimeSpan);
+    });
+
+    /// <summary>
+    /// An unavailable folder that exists again (the drive was plugged back in) is scanned and identified. The
+    /// watcher is refreshed every time, so it picks up such a folder and replaces a watcher that broke.
+    /// </summary>
+    private async Task RecheckFoldersAsync(CancellationToken ct)
+    {
+        var unavailable = scanner.UnavailableFolderIds();
+        var back = folders.All().Where(f => f.Enabled && unavailable.Contains(f.Id) && Directory.Exists(f.Path)).ToList();
+        foreach (var folder in back)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!await ScanAsync(folder, ct).ConfigureAwait(false)) continue;
+
+            hub.Log(ActivityLevel.Info, $"Folder available again: {FolderName(folder.Path)}");
+            library.NotifyChanged();
+            _ = IdentifyAsync(ct);
+        }
+
+        watcher.Refresh();
     }
 
     // Watched marks and resume positions show on Home, the grids and the title page.

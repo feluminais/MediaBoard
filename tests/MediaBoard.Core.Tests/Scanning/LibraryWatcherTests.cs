@@ -226,6 +226,23 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task FolderThatVanishedAndCameBack_IsWatchedAgainAfterRefresh()
+    {
+        var folder = _folders.Add(_lib.Root);
+        _watcher.Start();
+        var lost = NextRescan();
+        Directory.Delete(_lib.Root, recursive: true); // the watcher reports an error and rescans
+        await Within(lost, Deadline);
+
+        Directory.CreateDirectory(_lib.Root);
+        _watcher.Refresh();
+        var rescan = NextRescan();
+        _lib.File(@"Movies\Heat.1995.mkv");
+
+        Assert.Equal(folder.Id, await Within(rescan, Deadline));
+    }
+
+    [Fact]
     public void MissingFolder_IsSkipped()
     {
         var gone = Path.Combine(Path.GetTempPath(), "mediaboard-gone-" + Guid.NewGuid().ToString("N"));

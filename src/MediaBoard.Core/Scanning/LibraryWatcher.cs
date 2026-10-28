@@ -51,7 +51,8 @@ public sealed class LibraryWatcher : IDisposable
 
     /// <summary>
     /// Re-reads the folder list and adds or drops watchers to match: call it after a folder was added, removed,
-    /// enabled, disabled or repointed. Does nothing before <see cref="Start"/>.
+    /// enabled, disabled or repointed, or came back after being unavailable. A watcher that reported an error is
+    /// replaced when its folder exists. Does nothing before <see cref="Start"/>.
     /// </summary>
     public void Refresh()
     {
@@ -67,7 +68,8 @@ public sealed class LibraryWatcher : IDisposable
 
             foreach (var (id, watch) in _watches.ToArray())
             {
-                if (wanted.TryGetValue(id, out var folder) && watch.Folder.Path == folder.Path) continue;
+                // A watcher that reported an error may be dead (its folder vanished); a fresh one replaces it.
+                if (wanted.TryGetValue(id, out var folder) && watch.Folder.Path == folder.Path && !watch.Broken) continue;
                 _watches.Remove(id);
                 watch.Closed = true;
                 dropped.Add(watch);
@@ -148,6 +150,7 @@ public sealed class LibraryWatcher : IDisposable
             fsw.Error += (_, e) =>
             {
                 // The buffer overflowed or the folder vanished: individual events are lost, so rescan it all.
+                created.Broken = true;
                 _hub.Log(ActivityLevel.Warning,
                     $"Lost track of changes in {Path.GetFileName(folder.Path)}; rescanning it.",
                     e.GetException().Message);
@@ -273,6 +276,7 @@ public sealed class LibraryWatcher : IDisposable
         public Timer? Timer { get; set; }
         public Task? Running { get; set; }
         public volatile bool Closed;
+        public volatile bool Broken;
         public bool Scanning { get; set; }
         public bool Pending { get; set; }
     }

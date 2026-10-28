@@ -33,6 +33,12 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
     private readonly object _unavailableGate = new();
     private readonly Dictionary<int, string> _unavailable = [];
 
+    /// <summary>The folders whose last scan found them missing or unreadable.</summary>
+    public IReadOnlyList<int> UnavailableFolderIds()
+    {
+        lock (_unavailableGate) return _unavailable.Keys.ToList();
+    }
+
     public Task<ScanResult> ScanAsync(LibraryFolder folder, CancellationToken ct) =>
         Task.Run(() => Scan(folder, ct), ct);
 

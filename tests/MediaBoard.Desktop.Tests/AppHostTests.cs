@@ -5,6 +5,7 @@ using MediaBoard.Core.Library;
 using MediaBoard.Core.Playback;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Storage;
+using MediaBoard.Desktop.Tests.Support;
 using MediaBoard.Desktop.ViewModels;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,10 +41,11 @@ public sealed class AppHostTests : IDisposable
             throw new HttpRequestException("Tests don't use the network.");
     }
 
-    private ServiceProvider Build(string databasePath) => Composition.Build(
+    private ServiceProvider Build(string databasePath, TimeProvider? folderClock = null) => Composition.Build(
         new DataPaths(databasePath, Path.Combine(_dir, "settings.json"), Path.Combine(_dir, "images")),
         services =>
         {
+            if (folderClock is not null) services.AddSingleton(new FolderRecheck(folderClock, FolderRecheck.DefaultInterval));
             services.AddSingleton(_ => new HttpClient(new NoNetwork()));
             services.AddSingleton(sp => new Connectivity(
                 _ => Task.FromResult(false), TimeProvider.System, sp.GetRequiredService<ActivityHub>()));
@@ -112,6 +114,33 @@ public sealed class AppHostTests : IDisposable
 
             Assert.Equal(1, changes);
             return Task.CompletedTask;
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task FolderThatComesBack_IsScannedAndWatchedAgain()
+    {
+        var clock = new ManualClock();
+        var movies = Path.Combine(_dir, "Movies"); // not there yet: the drive is unplugged
+        var services = Build(Path.Combine(_dir, "library.db"), clock);
+        services.GetRequiredService<FolderStore>().Add(movies);
+
+        await RunAsync(services, async vm =>
+        {
+            var hub = services.GetRequiredService<ActivityHub>();
+            var files = services.GetRequiredService<FileStore>();
+            var folderId = services.GetRequiredService<FolderStore>().All().Single().Id;
+            Assert.Equal(["Movies"], hub.Current.UnavailableFolders);
+
+            Directory.CreateDirectory(movies);
+            await File.WriteAllBytesAsync(Path.Combine(movies, "Heat.1995.mkv"), new byte[4096]);
+            clock.Advance(FolderRecheck.DefaultInterval);
+
+            await Ui.WaitUntil(() => hub.Current.UnavailableFolders.Count == 0 && files.ByFolder(folderId).Count == 1);
+
+            // The watcher picked the folder up too.
+            await File.WriteAllBytesAsync(Path.Combine(movies, "Alien.1979.mkv"), new byte[4096]);
+            await Ui.WaitUntil(() => files.ByFolder(folderId).Count == 2);
         });
     }
 

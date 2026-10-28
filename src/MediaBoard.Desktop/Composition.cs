@@ -125,6 +125,7 @@ public static class Composition
             PlayerSessionFactory.Create));
         services.AddSingleton<IPlaybackService>(sp => sp.GetRequiredService<PlaybackService>());
 
+        services.AddSingleton(FolderRecheck.Default);
         services.AddSingleton<AppHost>();
         services.AddSingleton(sp => new FolderActions(
             sp.GetRequiredService<FolderStore>(),
