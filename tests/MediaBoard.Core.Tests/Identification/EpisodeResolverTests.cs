@@ -311,14 +311,47 @@ public class EpisodeResolverTests
     }
 
     [Fact]
-    public async Task Segments_OneOnTheNumber_TheOthersAreLinkedToo()
+    public async Task Segments_TitleAgreeingWithTheNumber_KeepsIt()
     {
         var six = SeasonWith(6, (1, "Krabby Road"));
         var seven = SeasonWith(7, (1, "Tentacle-Vision"), (2, "Growth Spout"));
 
         var result = await ResolveAsync(Parsed(7, [1], "Tentacle-Vision & Krabby Road"), six, seven);
 
-        Assert.Equal([(6, 1), (7, 1)], Keys(result));
+        Assert.Equal([(7, 1)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_CommaInATitleThatAgrees_IsNoSplit()
+    {
+        var one = SeasonWith(1, (1, "Hello"), (2, "Goodbye"));
+        var two = SeasonWith(2, (3, "Hello, Goodbye, Amen"));
+
+        var result = await ResolveAsync(Parsed(2, [3], "Hello, Goodbye"), one, two);
+
+        Assert.Equal([(2, 3)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_AmpersandInATitleThatAgrees_IsNoSplit()
+    {
+        var one = SeasonWith(1, (2, "Fire"));
+        var three = SeasonWith(3, (7, "Fire & Ice"));
+
+        var result = await ResolveAsync(Parsed(3, [7], "Fire & Ice (Extended Cut)"), one, three);
+
+        Assert.Equal([(3, 7)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_OneWordSegment_LinksOnlyAnExactName()
+    {
+        // "Mooncations" scores about 0.91 against "Mooncation": close enough for a longer name, not for one word.
+        var one = SeasonWith(1, (1, "Mooncation"), (2, "Goodbye Again My Friend"), (3, "Third Thing"));
+
+        var result = await ResolveAsync(Parsed(1, [3], "Mooncations & Goodbye Again My Friend"), one);
+
+        Assert.Equal([(1, 2)], Keys(result));
     }
 
     [Fact]
@@ -353,43 +386,91 @@ public class EpisodeResolverTests
         Assert.Empty(result!);
     }
 
-    // ---- Parts ("Film. Part 1" of a film TMDB lists whole) ----
+    // ---- Parts ("Story. Part 2") ----
+
+    private static readonly SeasonDetails Imaginationland = SeasonWith(11,
+        (5, "Something Else"), (10, "Imaginationland"), (11, "Imaginationland, Episode II"), (12, "Imaginationland, Episode III"));
+
+    [Theory]
+    [InlineData("Imaginationland. Part 1", 10, 10)]
+    [InlineData("Imaginationland. Part 2", 11, 11)]
+    [InlineData("Imaginationland Part 3", 12, 12)]
+    [InlineData("Imaginationland - Part II", 11, 11)]
+    [InlineData("Imaginationland. Part 3", 5, 12)]
+    [InlineData("Imaginationland. Part 1", 5, 10)]
+    public async Task PartTitle_LinksTheEpisodeWithTheSamePartNumber(string title, int number, int expected)
+    {
+        var result = await ResolveAsync(Parsed(11, [number], title), Imaginationland);
+
+        Assert.Equal([(11, expected)], Keys(result));
+    }
+
+    [Theory]
+    [InlineData("Cartoon Wars (2)")]
+    [InlineData("Cartoon Wars Part 2")]
+    [InlineData("Cartoon Wars: Part Two")]
+    [InlineData("Cartoon Wars, Episode II")]
+    public async Task PartTitle_FindsThePartInAnyForm_InAnotherSeason(string tmdbName)
+    {
+        var ten = SeasonWith(10, (1, "Unrelated"), (4, tmdbName));
+        var nine = SeasonWith(9, (4, "Something Else"));
+
+        var result = await ResolveAsync(Parsed(9, [4], "Cartoon Wars. Part 2"), nine, ten);
+
+        Assert.Equal([(10, 4)], Keys(result));
+    }
 
     [Theory]
     [InlineData("Bender's Big Score. Part 1")]
     [InlineData("Bender's Big Score Part 4")]
     [InlineData("Bender's Big Score - Part II")]
-    public async Task PartTitle_FindsTheWholeEpisode_InSpecials(string title)
+    public async Task PartTitle_OfAFilmTmdbListsWhole_LinksNoEpisode(string title)
     {
         var specials = SeasonWith(0, (1, "Bender's Big Score"), (5, "Bender's Game"));
         var five = SeasonWith(5, (1, "Crimes of the Hot"), (4, "A Taste of Freedom"));
 
         var result = await ResolveAsync(Parsed(5, [1], title), specials, five);
 
-        Assert.Equal([(0, 1)], Keys(result));
-    }
-
-    [Theory]
-    [InlineData("Bender's Big Score. Part 1", "Bender's Big Score")]
-    [InlineData("Into the Wild Green Yonder Part IV", "Into the Wild Green Yonder")]
-    [InlineData("Imaginationland - part two", "Imaginationland")]
-    [InlineData("Counterpart", null)]
-    [InlineData("Part 2", null)]
-    [InlineData("Cartoon Wars (1)", null)]
-    public void WithoutPart_DropsATrailingPartNumber(string title, string? expected)
-    {
-        Assert.Equal(expected, EpisodeResolver.WithoutPart(title));
+        Assert.NotNull(result);
+        Assert.Empty(result);
     }
 
     [Fact]
-    public async Task PartTitle_SeasonTmdbLacks_StillSearchesSeasonZero()
+    public async Task PartTitle_SeasonTmdbLacks_FilmListedWhole_IsTheShowWithNoEpisode()
     {
         var specials = SeasonWith(0, (5, "Bender's Game"));
         var five = SeasonWith(5, (1, "Crimes of the Hot"));
 
         var result = await ResolveAsync(Parsed(9, [2], "Bender's Game. Part 2"), specials, five);
 
-        Assert.Equal([(0, 5)], Keys(result));
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task PartTitle_WithACommaInTheName_IsStillAPart()
+    {
+        var one = SeasonWith(1, (1, "Pilot"));
+        var two = SeasonWith(2, (3, "Hello, Dolly (2)"));
+
+        var result = await ResolveAsync(Parsed(1, [1], "Hello, Dolly. Part 2"), one, two);
+
+        Assert.Equal([(2, 3)], Keys(result));
+    }
+
+    [Theory]
+    [InlineData("Bender's Big Score. Part 1", "Bender's Big Score", 1)]
+    [InlineData("Into the Wild Green Yonder Part IV", "Into the Wild Green Yonder", 4)]
+    [InlineData("Imaginationland - part two", "Imaginationland", 2)]
+    [InlineData("Counterpart", null, 0)]
+    [InlineData("Part 2", null, 0)]
+    [InlineData("Cartoon Wars (1)", null, 0)]
+    public void PartOf_ReadsATrailingPartNumber(string title, string? whole, int number)
+    {
+        var part = EpisodeResolver.PartOf(title);
+
+        Assert.Equal(whole, part?.Whole);
+        if (whole is not null) Assert.Equal(number, part!.Value.Number);
     }
 
     [Fact]
@@ -421,5 +502,35 @@ public class EpisodeResolverTests
         var result = await ResolveAsync(Parsed(24, [1], "Show"), SeasonWith(24, (1, "The Pandemic Special")));
 
         Assert.Equal([(24, 1)], Keys(result));
+    }
+
+    [Theory]
+    [InlineData("Episode 5")]
+    [InlineData("Episode #5")]
+    [InlineData("TBA")]
+    [InlineData("")]
+    public async Task TmdbPlaceholderName_KeepsTheNumber(string placeholder)
+    {
+        var result = await ResolveAsync(Parsed(29, [5], "The Real Title"), SeasonWith(29, (4, "Before"), (5, placeholder)));
+
+        Assert.Equal([(29, 5)], Keys(result));
+    }
+
+    [Fact]
+    public async Task NonLatinTitle_KeepsTheNumber()
+    {
+        var result = await ResolveAsync(Parsed(1, [2], "Відвідувач"), SeasonWith(1, (1, "Pilot"), (2, "The Visitor")));
+
+        Assert.Equal([(1, 2)], Keys(result));
+    }
+
+    [Fact]
+    public async Task ShowNameWithAnAmpersand_IsNoSegmentedTitle()
+    {
+        var parsed = Parsed(1, [1], "Will & Grace") with { Title = "Will & Grace" };
+
+        var result = await ResolveAsync(parsed, SeasonWith(1, (1, "Pilot")), SeasonWith(2, (7, "Grace"), (8, "Will")));
+
+        Assert.Equal([(1, 1)], Keys(result));
     }
 }

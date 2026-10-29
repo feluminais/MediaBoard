@@ -440,10 +440,10 @@ public sealed class IdentificationService : IDisposable
             var fetched = new List<SeasonDetails>();
             var episodes = await ResolveRuleEpisodesAsync(show, parsed, preferStored: true, fetched, run, ct).ConfigureAwait(false);
 
-            // The file's own season came from storage and may be stale (a new episode since): ask TMDB once more.
-            // Other seasons the lookup fetched say nothing about that.
+            // The file's own season came from storage and may be stale (a new episode, or a name TMDB has filled in
+            // since): ask TMDB once more when it gave no episode. Other seasons the lookup fetched say nothing about that.
             var number = parsed.Season ?? 1;
-            if (episodes is null && fetched.All(s => s.Season != number))
+            if (episodes is not { Count: > 0 } && fetched.All(s => s.Season != number))
             {
                 episodes = await ResolveRuleEpisodesAsync(show, parsed, preferStored: false, fetched, run, ct).ConfigureAwait(false);
             }
