@@ -965,6 +965,17 @@ public sealed class LocalLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchLocal_TypoWithoutTheSequelNumber_FindsEverySequel()
+    {
+        await Linked(@"a.mkv", MovieTitle("Open Season", 7484));
+        await Linked(@"b.mkv", MovieTitle("Open Season 2", 13690));
+
+        var found = _library.SearchLocal("opne season", 10).Select(c => c.Name).Order();
+
+        Assert.Equal(["Open Season", "Open Season 2"], found);
+    }
+
+    [Fact]
     public async Task SearchLocal_MatchesTokensPrefixesAndOrderAndLimit()
     {
         await Linked(@"a.mkv", MovieTitle("The Sopranos", 1));

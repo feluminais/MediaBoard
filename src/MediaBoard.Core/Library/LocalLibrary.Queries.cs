@@ -323,7 +323,7 @@ public sealed partial class LocalLibrary
                 for (var i = 0; i < entry.Keys.Length; i++)
                 {
                     if (CanReachThreshold(normalized, typedLetters, entry.Keys[i], entry.Letters[i]))
-                        score = Math.Max(score, TitleSimilarity.ScoreNormalized(normalized, entry.Keys[i]));
+                        score = Math.Max(score, TitleSimilarity.ScoreNormalized(normalized, entry.Keys[i], numbersMustAgree: false));
                 }
 
                 if (score >= FuzzyThreshold) hits.Add((NoMatch, score, entry));

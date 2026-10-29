@@ -14,36 +14,51 @@ public static class TitleSimilarity
 
     /// <summary>
     /// <see cref="Score"/> for two titles that went through <see cref="TitleNormalizer.Normalize"/> already, for
-    /// callers that compare one title against many and normalize each only once.
+    /// callers that compare one title against many and normalize each only once. Without
+    /// <paramref name="numbersMustAgree"/> the sequel-number penalty is left out, for a typed search where a
+    /// missing number means "any of them".
     /// </summary>
-    public static double ScoreNormalized(string na, string nb)
+    public static double ScoreNormalized(string na, string nb, bool numbersMustAgree = true)
     {
         if (na.Length == 0 || nb.Length == 0) return 0.0;
         if (na == nb) return 1.0;
 
         var score = ScoringWeights.TitleSortShare * TokenSortRatio(na, nb)
                     + ScoringWeights.TitleSetShare * TokenSetRatio(na, nb);
-        if (!SameNumbers(na, nb)) score -= ScoringWeights.NumberMismatchPenalty;
+        if (numbersMustAgree && !SameNumbers(na, nb)) score -= ScoringWeights.NumberMismatchPenalty;
         return Math.Clamp(score, 0.0, 1.0);
     }
 
-    // "i", "v" and "x" are left out: they are as often a letter or a name ("Malcolm X", "V for Vendetta").
+    private static readonly Dictionary<string, int> NumberWords = new(StringComparer.Ordinal)
+    {
+        ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5, ["six"] = 6, ["seven"] = 7,
+        ["eight"] = 8, ["nine"] = 9, ["ten"] = 10, ["eleven"] = 11, ["twelve"] = 12, ["thirteen"] = 13,
+        ["fourteen"] = 14, ["fifteen"] = 15, ["sixteen"] = 16, ["seventeen"] = 17, ["eighteen"] = 18,
+        ["nineteen"] = 19, ["twenty"] = 20,
+    };
+
+    // "i", "v" and "x" alone are as often a letter or a name ("Malcolm X", "V for Vendetta"), so they count only
+    // after a word that announces a number.
     private static readonly Dictionary<string, int> RomanNumerals = new(StringComparer.Ordinal)
     {
         ["ii"] = 2, ["iii"] = 3, ["iv"] = 4, ["vi"] = 6, ["vii"] = 7, ["viii"] = 8, ["ix"] = 9,
         ["xi"] = 11, ["xii"] = 12, ["xiii"] = 13, ["xiv"] = 14, ["xv"] = 15,
     };
 
-    private static readonly Dictionary<string, int> PartWords = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, int> SingleLetterNumerals = new(StringComparer.Ordinal)
     {
-        ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5,
-        ["six"] = 6, ["seven"] = 7, ["eight"] = 8, ["nine"] = 9, ["ten"] = 10,
+        ["i"] = 1, ["v"] = 5, ["x"] = 10,
+    };
+
+    private static readonly HashSet<string> NumberLeads = new(StringComparer.Ordinal)
+    {
+        "part", "episode", "chapter", "volume", "vol",
     };
 
     /// <summary>
-    /// True when two normalized titles carry the same sequel and part numbers: digits ("2"), Roman numerals
-    /// ("II") and a number word after "part" ("Part Two") all count, so "Rocky 2" and "Rocky II" agree while
-    /// "Open Season 2" and "Open Season" do not.
+    /// True when two normalized titles carry the same sequel and part numbers: digits ("2"), number words up to
+    /// twenty ("Four", "Eleven"), Roman numerals ("II"), and "I", "V" or "X" after "part", "episode", "chapter" or
+    /// "volume" all count. So "Rocky 2" and "Rocky II" agree while "Open Season 2" and "Open Season" do not.
     /// </summary>
     public static bool SameNumbers(string na, string nb) => Numbers(na).SetEquals(Numbers(nb));
 
@@ -55,8 +70,10 @@ public static class TitleSimilarity
         {
             var token = tokens[i];
             if (token.All(char.IsAsciiDigit) && int.TryParse(token, out var n)) numbers.Add(n);
+            else if (NumberWords.TryGetValue(token, out var word)) numbers.Add(word);
             else if (RomanNumerals.TryGetValue(token, out var roman)) numbers.Add(roman);
-            else if (i > 0 && tokens[i - 1] == "part" && PartWords.TryGetValue(token, out var word)) numbers.Add(word);
+            else if (i > 0 && NumberLeads.Contains(tokens[i - 1]) && SingleLetterNumerals.TryGetValue(token, out var letter))
+                numbers.Add(letter);
         }
 
         return numbers;

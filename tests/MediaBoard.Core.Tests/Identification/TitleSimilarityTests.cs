@@ -65,6 +65,14 @@ public class TitleSimilarityTests
     [InlineData("Toy Story 3", "Toy Story 3", true)]
     [InlineData("Malcolm X", "Malcolm", true)]
     [InlineData("Planes Fire and Rescue", "Planes: Fire & Rescue", true)]
+    [InlineData("Fantastic 4 Rise of the Silver Surfer", "Fantastic Four: Rise of the Silver Surfer", true)]
+    [InlineData("Oceans 11", "Ocean's Eleven", true)]
+    [InlineData("Twelve Monkeys", "12 Monkeys", true)]
+    [InlineData("Cartoon Wars Part I", "Cartoon Wars (1)", true)]
+    [InlineData("Kill Bill Vol. 1", "Kill Bill: Volume I", true)]
+    [InlineData("Star Wars Episode V", "Star Wars Episode 5", true)]
+    [InlineData("Imaginationland Chapter X", "Imaginationland Chapter 9", false)]
+    [InlineData("V for Vendetta", "Vendetta", true)]
     public void SameNumbers_ComparesDigitsRomanNumeralsAndPartWords(string a, string b, bool expected)
     {
         Assert.Equal(expected, TitleSimilarity.SameNumbers(TitleNormalizer.Normalize(a), TitleNormalizer.Normalize(b)));
