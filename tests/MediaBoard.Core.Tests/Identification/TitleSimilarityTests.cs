@@ -46,6 +46,30 @@ public class TitleSimilarityTests
         Assert.True(gap >= 0.03, $"gap was {gap}");
     }
 
+    [Theory]
+    [InlineData("Open Season 2", "Open Season 3", "Open Season b", "Open Season c")]
+    [InlineData("Rocky", "Rocky 2", "Rocky", "Rocky b")]
+    [InlineData("Rocky", "Rocky II", "Rocky", "Rocky bb")]
+    public void Score_SequelNumberOnOneSideOrDifferent_CostsThePenalty(string a, string b, string plainA, string plainB)
+    {
+        // The plain pair differs by letters in the same places, so only the penalty sets the two scores apart.
+        Assert.Equal(TitleSimilarity.Score(plainA, plainB) - ScoringWeights.NumberMismatchPenalty, TitleSimilarity.Score(a, b), 9);
+    }
+
+    [Theory]
+    [InlineData("South Park the Streaming Wars", "South Park the Streaming Wars Part 2", false)]
+    [InlineData("Open Season 2", "Open Season 3", false)]
+    [InlineData("Dune Part Two", "Dune", false)]
+    [InlineData("Rocky 2", "Rocky II", true)]
+    [InlineData("Dune Part Two", "Dune: Part 2", true)]
+    [InlineData("Toy Story 3", "Toy Story 3", true)]
+    [InlineData("Malcolm X", "Malcolm", true)]
+    [InlineData("Planes Fire and Rescue", "Planes: Fire & Rescue", true)]
+    public void SameNumbers_ComparesDigitsRomanNumeralsAndPartWords(string a, string b, bool expected)
+    {
+        Assert.Equal(expected, TitleSimilarity.SameNumbers(TitleNormalizer.Normalize(a), TitleNormalizer.Normalize(b)));
+    }
+
     [Fact]
     public void Score_DiacriticsAndCase_AreIgnored()
     {

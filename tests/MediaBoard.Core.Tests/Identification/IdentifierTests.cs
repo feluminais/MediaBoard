@@ -461,6 +461,36 @@ public class IdentifierTests : IDisposable
         Assert.Equal(438631, result.Candidates[0].TmdbId);
     }
 
+    [Theory]
+    [InlineData("South Park. The Streaming Wars", 974691)]
+    [InlineData("South Park. The Streaming Wars. Part 2", 993729)]
+    public async Task PartNumber_PicksTheExactPart_InBothDirections(string title, int expected)
+    {
+        _tmdb.OnSearch(title, 2022, TitleKind.Movie,
+                Film(974691, "South Park the Streaming Wars", 2022, 2.7),
+                Film(993729, "South Park the Streaming Wars Part 2", 2022, 2.3))
+            .OnTitle(FilmTitle(974691, "South Park the Streaming Wars", 2022))
+            .OnTitle(FilmTitle(993729, "South Park the Streaming Wars Part 2", 2022));
+
+        var result = await Identify(Movie(title, 2022));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(expected, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task SequelNumber_PicksTheSequel_WithoutAYear()
+    {
+        _tmdb.OnSearch("Open Season 2", null, TitleKind.Movie,
+                Film(7484, "Open Season", 2006, 30), Film(13690, "Open Season 2", 2008, 20), Film(51170, "Open Season 3", 2010, 20))
+            .OnTitle(FilmTitle(13690, "Open Season 2", 2008));
+
+        var result = await Identify(Movie("Open Season 2"));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(13690, result.Title!.TmdbId);
+    }
+
     [Fact]
     public async Task ShortenedTitle_LosesAPenaltyPerDroppedWord()
     {

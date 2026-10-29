@@ -35,6 +35,10 @@ public static class ScoringWeights
     public const double TitleSortShare = 0.8;
     public const double TitleSetShare = 0.2;
 
+    // Title similarity loses this much when the titles carry different sequel or part numbers ("Open Season 2"
+    // and "Open Season 3"), or only one of them has one.
+    public const double NumberMismatchPenalty = 0.20;
+
     // An episode title from a file name matches a TMDB episode name at or above this similarity.
     public const double EpisodeTitleThreshold = 0.85;
 }

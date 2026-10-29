@@ -7,7 +7,8 @@ public static class TitleSimilarity
     /// ratio plus <see cref="ScoringWeights.TitleSetShare"/> times the token-set ratio. Both parts ignore
     /// word order. The token-sort ratio is the Levenshtein ratio of the normalized words sorted
     /// alphabetically, so extra words (a sequel number) cost points; the token-set ratio compares the
-    /// shared words with the rest and scores a title that contains the other's words as 1.0.
+    /// shared words with the rest and scores a title that contains the other's words as 1.0. Titles whose
+    /// sequel numbers differ lose <see cref="ScoringWeights.NumberMismatchPenalty"/> (see <see cref="SameNumbers"/>).
     /// </summary>
     public static double Score(string a, string b) => ScoreNormalized(TitleNormalizer.Normalize(a), TitleNormalizer.Normalize(b));
 
@@ -22,7 +23,43 @@ public static class TitleSimilarity
 
         var score = ScoringWeights.TitleSortShare * TokenSortRatio(na, nb)
                     + ScoringWeights.TitleSetShare * TokenSetRatio(na, nb);
+        if (!SameNumbers(na, nb)) score -= ScoringWeights.NumberMismatchPenalty;
         return Math.Clamp(score, 0.0, 1.0);
+    }
+
+    // "i", "v" and "x" are left out: they are as often a letter or a name ("Malcolm X", "V for Vendetta").
+    private static readonly Dictionary<string, int> RomanNumerals = new(StringComparer.Ordinal)
+    {
+        ["ii"] = 2, ["iii"] = 3, ["iv"] = 4, ["vi"] = 6, ["vii"] = 7, ["viii"] = 8, ["ix"] = 9,
+        ["xi"] = 11, ["xii"] = 12, ["xiii"] = 13, ["xiv"] = 14, ["xv"] = 15,
+    };
+
+    private static readonly Dictionary<string, int> PartWords = new(StringComparer.Ordinal)
+    {
+        ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5,
+        ["six"] = 6, ["seven"] = 7, ["eight"] = 8, ["nine"] = 9, ["ten"] = 10,
+    };
+
+    /// <summary>
+    /// True when two normalized titles carry the same sequel and part numbers: digits ("2"), Roman numerals
+    /// ("II") and a number word after "part" ("Part Two") all count, so "Rocky 2" and "Rocky II" agree while
+    /// "Open Season 2" and "Open Season" do not.
+    /// </summary>
+    public static bool SameNumbers(string na, string nb) => Numbers(na).SetEquals(Numbers(nb));
+
+    private static HashSet<int> Numbers(string normalized)
+    {
+        var numbers = new HashSet<int>();
+        var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var token = tokens[i];
+            if (token.All(char.IsAsciiDigit) && int.TryParse(token, out var n)) numbers.Add(n);
+            else if (RomanNumerals.TryGetValue(token, out var roman)) numbers.Add(roman);
+            else if (i > 0 && tokens[i - 1] == "part" && PartWords.TryGetValue(token, out var word)) numbers.Add(word);
+        }
+
+        return numbers;
     }
 
     private static double TokenSortRatio(string a, string b) => Ratio(SortWords(a), SortWords(b));
