@@ -118,7 +118,7 @@ public sealed partial class LocalLibrary : ILibrary
         var details = await _provider.GetTitleAsync(tmdbId, kind, ct).ConfigureAwait(false);
         var seasons = new List<SeasonDetails>();
         IReadOnlyList<EpisodeDetails> episodes = [];
-        if (kind == TitleKind.Show) (episodes, seasons) = await ResolveEpisodesAsync(parsed, tmdbId, ct).ConfigureAwait(false);
+        if (kind == TitleKind.Show) (episodes, seasons) = await ResolveEpisodesAsync(parsed, details, ct).ConfigureAwait(false);
 
         var titleId = _titles.Upsert(details);
         foreach (var season in seasons) _titles.UpsertEpisodes(titleId, season);
@@ -135,31 +135,32 @@ public sealed partial class LocalLibrary : ILibrary
     }
 
     /// <summary>
-    /// The episodes the file holds in the chosen show. The resolver goes first (it matches episode titles and
-    /// numbers against TMDB's list); when it cannot decide, the numbers parsed from the name are used as they are.
+    /// The episodes the file holds in the chosen show, found the way identification finds them (titles and
+    /// numbers, the other seasons for a release numbered differently; see <see cref="EpisodeResolver.ResolveAsync"/>).
+    /// When that cannot decide, the numbers parsed from the name are used as they are. The seasons returned for
+    /// storing are the file's own, the specials and those its episodes are in, not every season looked through.
     /// </summary>
     private async Task<(IReadOnlyList<EpisodeDetails> Episodes, List<SeasonDetails> Seasons)> ResolveEpisodesAsync(
-        ParsedMedia parsed, int tmdbId, CancellationToken ct)
+        ParsedMedia parsed, TitleDetails show, CancellationToken ct)
     {
-        var seasons = new List<SeasonDetails>();
-        if (parsed.Episodes.Count == 0 && parsed.EpisodeTitles.Count == 0) return ([], seasons);
+        var fetched = new List<SeasonDetails>();
+        if (parsed.Episodes.Count == 0 && parsed.EpisodeTitles.Count == 0) return ([], fetched);
 
-        var number = parsed.Season ?? 1;
-        var season = await TryGetSeasonAsync(tmdbId, number, ct).ConfigureAwait(false);
-        if (season is null) return ([], seasons);
-        seasons.Add(season);
-
-        // The resolver reads season 0 only to match an episode title.
-        SeasonDetails? specials = null;
-        if (number != 0 && parsed.EpisodeTitles.Count > 0)
+        async Task<SeasonDetails?> Season(int number)
         {
-            specials = await TryGetSeasonAsync(tmdbId, 0, ct).ConfigureAwait(false);
-            if (specials is not null) seasons.Add(specials);
+            var season = await TryGetSeasonAsync(show.TmdbId, number, ct).ConfigureAwait(false);
+            if (season is not null) fetched.Add(season);
+            return season;
         }
 
-        var resolved = EpisodeResolver.Resolve(parsed, season, specials)
-                       ?? season.Episodes.Where(e => parsed.Episodes.Contains(e.Number)).OrderBy(e => e.Number).ToList();
-        return (resolved, seasons);
+        var own = parsed.Season ?? 1;
+        var resolved = await EpisodeResolver.ResolveAsync(parsed, Season, () => Task.FromResult(show.SeasonNumbers))
+                           .ConfigureAwait(false)
+                       ?? fetched.FirstOrDefault(s => s.Season == own)?.Episodes
+                           .Where(e => parsed.Episodes.Contains(e.Number)).OrderBy(e => e.Number).ToList()
+                       ?? [];
+        var keep = fetched.Where(s => s.Season == own || s.Season == 0 || resolved.Any(e => e.Season == s.Season)).ToList();
+        return (resolved, keep);
     }
 
     /// <summary>A season TMDB does not have is not an error: the file is matched without episodes.</summary>

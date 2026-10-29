@@ -682,6 +682,32 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM match_rules"));
     }
 
+    [Theory]
+    [InlineData(@"Futurama\Season 04\S04E01 Kif Gets Knocked Up a Notch.mkv", "5x2 Kif Gets Knocked Up a Notch")]
+    [InlineData(@"Futurama\Season 04\S04E13 Bend Her.mkv", "5x3 Bend Her")]
+    [InlineData(@"Futurama\Season 04\S04E02 A Tale of Two Santas.mkv", "4x2 A Tale of Two Santas")]
+    public async Task FixMatch_FindsEpisodesByTitle_LikeTheRulePath(string rel, string expected)
+    {
+        _lib.File(rel, 4096);
+        await Scan();
+        var file = Row(rel);
+        _tmdb.OnTitle(new TitleDetails(615, TitleKind.Show, "Futurama", 1999, null, null, 8.4, null, 22, [1, 4, 5]))
+            .OnSeason(615, new SeasonDetails(1, [new EpisodeDetails(1, 1, "Space Pilot 3000", 22, null)]))
+            .OnSeason(615, new SeasonDetails(4, [
+                new EpisodeDetails(4, 1, "Roswell That Ends Well", 22, null),
+                new EpisodeDetails(4, 2, "A Tale of Two Santas", 22, null)]))
+            .OnSeason(615, new SeasonDetails(5, [
+                new EpisodeDetails(5, 1, "Crimes of the Hot", 22, null),
+                new EpisodeDetails(5, 2, "Kif Gets Knocked Up a Notch", 22, null),
+                new EpisodeDetails(5, 3, "Bend Her", 22, null)]));
+
+        await _library.FixMatchAsync(file.Id, 615, TitleKind.Show, Ct);
+
+        Assert.Equal(expected, Scalar<string>(
+            "SELECT e.season || 'x' || e.number || ' ' || e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
+            new { id = file.Id }));
+    }
+
     [Fact]
     public async Task FixMatch_UnknownFile_Throws()
     {
