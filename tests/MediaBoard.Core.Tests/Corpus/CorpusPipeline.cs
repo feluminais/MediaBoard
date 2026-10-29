@@ -69,8 +69,8 @@ public static class CorpusPipeline
         IReadOnlyList<(int Season, int Number)>? Episodes = null, IReadOnlyList<string>? EpisodeTitles = null);
 
     /// <summary>
-    /// Every TMDB episode linked to more than one file, one line each. Files that are parts of one title
-    /// ("Bender's Big Score. Part 1" to "Part 4", all on TMDB's "Bender's Big Score") may share it.
+    /// Every TMDB episode linked to more than one file, one line each. No two files may share one: parts of a
+    /// film TMDB lists whole get no episode rather than all sharing the film's.
     /// </summary>
     public static IReadOnlyList<string> SharedEpisodes(IEnumerable<IdentifiedFile> files) =>
     [
@@ -78,20 +78,11 @@ public static class CorpusPipeline
             .Where(f => f.Title is not null)
             .SelectMany(f => (f.Episodes ?? []).Select(e => (Key: (f.Title!.Id, e.Season, e.Number), File: f)))
             .GroupBy(x => x.Key, x => x.File)
-            .Where(g => g.Count() > 1 && !PartsOfOneTitle(g.ToList()))
+            .Where(g => g.Count() > 1)
             .OrderBy(g => g.First().Title!.Name, StringComparer.Ordinal).ThenBy(g => g.Key.Season).ThenBy(g => g.Key.Number)
             .Select(g => $"{g.First().Title!.Name} {g.Key.Season}x{g.Key.Number}: " +
                          string.Join(" | ", g.Select(f => string.Join(" & ", f.EpisodeTitles ?? []) + " (" + f.RelPath + ")"))),
     ];
-
-    private static bool PartsOfOneTitle(IReadOnlyList<IdentifiedFile> files)
-    {
-        var wholes = files
-            .Select(f => f.EpisodeTitles is [var title] ? EpisodeResolver.WithoutPart(title) : null)
-            .ToList();
-        return wholes.All(w => w is not null)
-               && wholes.Select(w => TitleNormalizer.Normalize(w!)).Distinct(StringComparer.Ordinal).Count() == 1;
-    }
 
     private static IReadOnlyList<IdentifiedFile> Read(LibraryDatabase db, int folderId)
     {

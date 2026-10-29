@@ -95,7 +95,7 @@ public class CorpusPipelineTests
     }
 
     [Fact]
-    public void SharedEpisodes_PartsOfOneTitle_MayShareIt()
+    public void SharedEpisodes_PartsOfOneTitle_AreReportedToo()
     {
         var futurama = Title(615, TitleKind.Show, "Futurama", 1999);
 
@@ -103,22 +103,6 @@ public class CorpusPipelineTests
         [
             Linked(@"Futurama\S05E01 Bender's Big Score. Part 1.mkv", futurama, "Bender's Big Score. Part 1", (0, 1)),
             Linked(@"Futurama\S05E02 Bender's Big Score. Part 2.mkv", futurama, "Bender's Big Score. Part 2", (0, 1)),
-        ]);
-
-        Assert.Empty(problems);
-    }
-
-    [Theory]
-    [InlineData("Bender's Game. Part 1")]
-    [InlineData("Bender's Big Score")]
-    public void SharedEpisodes_APartAndAnotherTitle_AreReported(string otherTitle)
-    {
-        var futurama = Title(615, TitleKind.Show, "Futurama", 1999);
-
-        var problems = CorpusPipeline.SharedEpisodes(
-        [
-            Linked(@"Futurama\a.mkv", futurama, "Bender's Big Score. Part 1", (0, 1)),
-            Linked(@"Futurama\b.mkv", futurama, otherTitle, (0, 1)),
         ]);
 
         Assert.Single(problems);

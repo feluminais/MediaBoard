@@ -17,19 +17,39 @@ public class CorpusIdentificationTests
             "then have the owner review expected-identification.draft.json");
         var expected = ReferenceFile.Read(ReferenceFile.ReviewedPath);
 
-        // Replay only: the handler never reaches the network, and a fixture that is missing is reported by name.
         using var handler = new FixtureHandler(SourceTree.FixtureDirectory);
+        var files = await ReplayAsync(handler);
+
+        var problems = Compare(expected, CorpusPipeline.Group(files));
+        Assert.True(problems.Count == 0, $"{problems.Count} item(s) differ from the reference:\n" + string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// No TMDB episode is linked to two files. Runs whenever a recording has been made (its draft or the reviewed
+    /// list is there), whether or not the owner has reviewed it yet.
+    /// </summary>
+    [Fact]
+    public async Task NoEpisodeIsLinkedToTwoFiles()
+    {
+        Assert.SkipUnless(
+            File.Exists(ReferenceFile.DraftPath) || File.Exists(ReferenceFile.ReviewedPath),
+            "No recording yet: run the Record tests with MEDIABOARD_TMDB_KEY");
+
+        using var handler = new FixtureHandler(SourceTree.FixtureDirectory);
+        var files = await ReplayAsync(handler);
+
+        var shared = CorpusPipeline.SharedEpisodes(files);
+        Assert.True(shared.Count == 0, $"{shared.Count} episode(s) linked to several files:\n" + string.Join("\n", shared));
+    }
+
+    /// <summary>Replay only: the handler never reaches the network, and a fixture that is missing fails by name.</summary>
+    private static async Task<IReadOnlyList<CorpusPipeline.IdentifiedFile>> ReplayAsync(FixtureHandler handler)
+    {
         var files = await CorpusPipeline.IdentifyFilesAsync(handler, "replay-key", new FakeClock(), TestContext.Current.CancellationToken);
 
         Assert.True(handler.MissingFixtures.Count == 0,
             "Missing fixtures (record them with MEDIABOARD_RECORD=1):\n" + string.Join("\n", handler.MissingFixtures.Distinct().Order()));
-
-        var problems = Compare(expected, CorpusPipeline.Group(files));
-        Assert.True(problems.Count == 0, $"{problems.Count} item(s) differ from the reference:\n" + string.Join("\n", problems));
-
-        // Each episode is one file's, unless the files are parts of one title TMDB lists whole.
-        var shared = CorpusPipeline.SharedEpisodes(files);
-        Assert.True(shared.Count == 0, $"{shared.Count} episode(s) linked to several files:\n" + string.Join("\n", shared));
+        return files;
     }
 
     internal static List<string> Compare(IReadOnlyList<ReferenceItem> expected, IReadOnlyList<ReferenceItem> actual)
