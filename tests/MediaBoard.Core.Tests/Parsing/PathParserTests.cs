@@ -39,6 +39,9 @@ public class PathParserTests
         Episode(
             SpongeBob + @"\Season 05 (2007-2009) SATRip-AVC [Ukr] [Hurtom]\[5x03] Rise and Shine & Waiting & Fungus Among Us [Ukr] SATRip-AVC.mkv",
             "SpongeBob SquarePants", null, 5, [3], SpongeBob),
+        Episode(
+            SpongeBob + @"\Season 06 (2008-2010) DVDRip-AVC, SATRip-AVC [Ukr, Eng] [Hurtom]\[6x23-24] Truth or Square [Ukr.Eng] DVDRip-AVC.mkv",
+            "SpongeBob SquarePants", null, 6, [23, 24], SpongeBob),
         Movie(
             SpongeBob + @"\The SpongeBob SquarePants Movie (2004) BDRip-AVC [2xUkr, Eng] [Hurtom].mkv",
             "The SpongeBob SquarePants Movie", 2004),
