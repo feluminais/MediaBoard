@@ -126,4 +126,28 @@ public class PathParserTests
         Assert.Equal(MediaKind.Movie, parsed.Kind);
         Assert.Equal("Movie 2", parsed.Title);
     }
+
+    [Theory]
+    [InlineData(@"South Park (1997) BDRip-AVC [UKR_ENG] [Hurtom]\Season 06\E01. Jared Has Aides (2002) BDRip-AVC [UKR_ENG] [Hurtom].mkv", 1997, 2002)]
+    [InlineData(@"South Park (1997)\Season 01\E02. Weight Gain 4000 (1997).mkv", 1997, 1997)]
+    [InlineData(@"Mobland. H265\Season 01 (2025)\S01E01. MobLand (2025). Stick or Twist.mkv", null, 2025)]
+    [InlineData(@"The Sopranos (1999) - S01E01 - The Sopranos.mkv", null, 1999)]
+    [InlineData(@"Brassic - Season 1 (2019)\Brassic - S01E01.mkv", 2019, null)]
+    [InlineData(@"Brassic - Season 3 (2021)\Brassic - S03E01.mkv", null, 2021)]
+    [InlineData(@"Shows\Lost (2004)\Season 1\Lost.S01E01.mkv", 2004, null)]
+    [InlineData(@"Supernatural\Supernatural.S01E01.mkv", null, null)]
+    public void Parse_EpisodeYear_ComesFromAShowFolder_OtherYearsAreAirYears(string path, int? year, int? airYear)
+    {
+        var parsed = PathParser.Parse(path, []);
+
+        Assert.Equal(MediaKind.Episode, parsed.Kind);
+        Assert.Equal(year, parsed.Year);
+        Assert.Equal(airYear, parsed.AirYear);
+    }
+
+    [Fact]
+    public void Parse_MovieHasNoAirYear()
+    {
+        Assert.Null(PathParser.Parse(@"South Park (1997)\01. South Park Bigger, Longer & Uncut (1999).mkv", []).AirYear);
+    }
 }

@@ -387,6 +387,24 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ShowIsSearchedOnce_HoweverManyAirYearsItsEpisodesCarry()
+    {
+        _tmdb.OnSearch("South Park", 1997, TitleKind.Show, ShowHit(2190, "South Park", 1997))
+            .OnTitle(ShowTitle(2190, "South Park", 1997, 6, 13))
+            .OnSeason(2190, Season(6, "Jared Has Aides", "Asspen"))
+            .OnSeason(2190, Season(13, "The Ring"));
+        _lib.File(@"South Park (1997) BDRip-AVC\Season 06\E01. Jared Has Aides (2002) BDRip-AVC.mkv");
+        _lib.File(@"South Park (1997) BDRip-AVC\Season 06\E02. Asspen (2002) BDRip-AVC.mkv");
+        _lib.File(@"South Park (1997) BDRip-AVC\Season 13\E01. The Ring (2009) BDRip-AVC.mkv");
+        await Scan();
+
+        await Run();
+
+        Assert.All(_files.ByFolder(_folder.Id), f => Assert.Equal("matched", f.Status));
+        Assert.Equal([("South Park", (int?)1997, TitleKind.Show)], _tmdb.Searches);
+    }
+
+    [Fact]
     public async Task UserMatch_IsNeverReidentified_AndIsRestoredToMatched()
     {
         KnowHeat();

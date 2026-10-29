@@ -263,20 +263,9 @@ public sealed class Identifier(IMetadataProvider provider)
         return await ResolveAsync(parsed, title, best.Score, "auto", top, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Scores a candidate against the title that was searched for (a shortened title after a retry).
-    /// For an episode year the file name carries the air date, which is usually not the show's start year,
-    /// so a show whose year differs is scored as if the file had no year.
-    /// </summary>
-    private static double Score(ParsedMedia parsed, string queryTitle, SearchCandidate c)
-    {
-        var forCandidate = parsed with
-        {
-            Title = queryTitle,
-            Year = parsed.Kind == MediaKind.Episode && parsed.Year != c.Year ? null : parsed.Year,
-        };
-        return CandidateScorer.Score(forCandidate, c, null, null);
-    }
+    /// <summary>Scores a candidate against the title that was searched for (a shortened title after a retry).</summary>
+    private static double Score(ParsedMedia parsed, string queryTitle, SearchCandidate c) =>
+        CandidateScorer.Score(parsed with { Title = queryTitle }, c, null, null);
 
     // ---- Result ----
 

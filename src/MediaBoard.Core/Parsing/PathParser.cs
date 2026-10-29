@@ -57,16 +57,22 @@ public static class PathParser
                      ?? folderInfos.Reverse().Select(f => f.Season).FirstOrDefault(s => s is not null)
                      ?? 1;
 
+        // Only a folder can say when the show started. A year in the file name is when the episode aired, and so
+        // is the year on a folder for a later season ("Show - Season 3 (2019)").
+        var showYear = folderInfos.FirstOrDefault(f => f.Year is not null && f.Season is null or 1)?.Year;
+        var airYear = file.Year ?? folderInfos.FirstOrDefault(f => f.Year is not null && f.Season > 1)?.Year;
+
         return new ParsedMedia(
             MediaKind.Episode,
             title,
-            file.Year ?? folderInfos.Select(f => f.Year).FirstOrDefault(y => y is not null),
+            showYear,
             season,
             episodes,
             file.EpisodeTitles,
             folders.Length > 0 ? folders[0] : null,
             file.TmdbId ?? folderInfos.Select(f => f.TmdbId).FirstOrDefault(id => id is not null),
-            file.ImdbId ?? folderInfos.Select(f => f.ImdbId).FirstOrDefault(id => id is not null));
+            file.ImdbId ?? folderInfos.Select(f => f.ImdbId).FirstOrDefault(id => id is not null),
+            airYear);
     }
 
     private static ParsedMedia BuildMovie(string stem, ParsedName file, string fileTitle, FolderInfo[] folderInfos)

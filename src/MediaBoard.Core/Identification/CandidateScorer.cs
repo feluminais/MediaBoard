@@ -17,7 +17,7 @@ public static class CandidateScorer
         }
 
         var score = ScoringWeights.TitleWeight * titleSim
-                    + ScoringWeights.YearWeight * YearScore(parsed.Year, c.Year)
+                    + ScoringWeights.YearWeight * YearScore(parsed, c.Year)
                     + ScoringWeights.TypeWeight * (KindMatches(parsed.Kind, c.Kind) ? 1.0 : 0.0)
                     + ScoringWeights.PopularityWeight * PopularityScore(c.Popularity);
 
@@ -29,9 +29,17 @@ public static class CandidateScorer
         return Math.Clamp(score, 0.0, 1.0);
     }
 
-    private static double YearScore(int? parsedYear, int? candidateYear)
+    /// <summary>
+    /// The year component. An episode's air year is no start year: it only rules out a show that started
+    /// after it, which scores as a far year.
+    /// </summary>
+    private static double YearScore(ParsedMedia parsed, int? candidateYear)
     {
-        if (parsedYear is not { } p || candidateYear is not { } c) return ScoringWeights.YearUnknownScore;
+        if (candidateYear is not { } c) return ScoringWeights.YearUnknownScore;
+        if (parsed.Year is not { } p)
+        {
+            return parsed.AirYear is { } aired && c > aired ? ScoringWeights.YearFarScore : ScoringWeights.YearUnknownScore;
+        }
 
         var distance = Math.Abs(p - c);
         if (distance == 0) return ScoringWeights.YearExactScore;

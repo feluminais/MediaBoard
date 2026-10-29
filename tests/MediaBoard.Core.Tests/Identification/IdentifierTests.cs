@@ -285,15 +285,52 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
-    public async Task EpisodeYearIsAHint_AirYearDoesNotBlockTheShow()
+    public async Task EpisodeAirYear_IsNeverSentAsTheFirstAirYear()
     {
-        _tmdb.OnSearch("South Park", 2020, TitleKind.Show, Show(2190, "South Park", 1997))
+        _tmdb.OnSearch("South Park", null, TitleKind.Show, Show(2190, "South Park", 1997))
             .OnTitle(ShowTitle(2190, "South Park", 1997, 24)).OnSeason(2190, Season(24, "The Pandemic Special"));
 
-        var result = await Identify(Episode("South Park", 2020, 24, 1));
+        var result = await Identify(Episode("South Park", null, 24, 1) with { AirYear = 2020 });
 
         Assert.Equal(IdentificationStatus.Matched, result.Status);
         Assert.Equal(2190, result.Title!.TmdbId);
+        Assert.Equal([("South Park", (int?)null)], _tmdb.Searches.Select(s => (s.Title, s.Year)));
+    }
+
+    [Fact]
+    public async Task EpisodeShowYear_IsSearched_NotTheAirYear()
+    {
+        _tmdb.OnSearch("South Park", 1997, TitleKind.Show, Show(2190, "South Park", 1997, 150))
+            .OnSearch("South Park", 2002, TitleKind.Show, Show(612, "3-South", 2002, 6))
+            .OnTitle(ShowTitle(2190, "South Park", 1997, 6)).OnSeason(2190, Season(6, "Jared Has Aides"));
+
+        var result = await Identify(Episode("South Park", 1997, 6, 1) with { AirYear = 2002 });
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(2190, result.Title!.TmdbId);
+        Assert.Equal([("South Park", (int?)1997)], _tmdb.Searches.Select(s => (s.Title, s.Year)));
+    }
+
+    [Fact]
+    public async Task EpisodeAirYear_ShowThatStartedLater_LosesTheYearCredit()
+    {
+        _tmdb.OnSearch("Shameless", null, TitleKind.Show, Show(1906, "Shameless", 2004, 20), Show(34307, "Shameless", 2011, 20))
+            .OnTitle(ShowTitle(1906, "Shameless", 2004, 2)).OnSeason(1906, Season(2, "Episode 1"));
+
+        var result = await Identify(Episode("Shameless", null, 2, 1) with { AirYear = 2005 });
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(1906, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task EpisodeAirYear_ShowThatStartedEarlier_KeepsTheTie()
+    {
+        _tmdb.OnSearch("Shameless", null, TitleKind.Show, Show(1906, "Shameless", 2004, 20), Show(34307, "Shameless", 2011, 20));
+
+        var result = await Identify(Episode("Shameless", null, 2, 1) with { AirYear = 2012 });
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
     }
 
     [Fact]
