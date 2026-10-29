@@ -465,6 +465,41 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RequeuedAutomaticMatch_KeepsItsTitleAndEpisodesWhileTmdbIsUnreachable_AndIsRedoneLater()
+    {
+        KnowLost();
+        const string rel = @"Lost\Season 1\Lost.S01E02.mkv";
+        _lib.File(rel);
+        await Scan();
+        await Run();
+        var id = Row(rel).Id;
+        using (var conn = _db.Open()) conn.Execute("DELETE FROM meta");
+        _tmdb.Unavailable = UnavailableReason.Offline;
+        _networkUp = false;
+
+        await Run();
+
+        // The library shows the same as before, but the file still waits to be identified again.
+        Assert.Equal("pending", Row(rel).Status);
+        Assert.Equal(4607, Scalar<int>(
+            "SELECT t.tmdb_id FROM file_titles ft JOIN titles t ON t.id = ft.title_id WHERE ft.file_id = @id", new { id }));
+        Assert.Equal("auto", LinkSource(id));
+        Assert.Equal("Walkabout", Scalar<string>(
+            "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id", new { id }));
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM titles WHERE tmdb_id IS NULL"));
+
+        ClearProviderCalls();
+        _tmdb.Unavailable = null;
+        _networkUp = true;
+        _service.Start();
+
+        await WaitUntil(() => Row(rel).Status == "matched");
+        Assert.Contains(_tmdb.Searches, s => s.Title == "Lost");
+        Assert.Equal("Walkabout", Scalar<string>(
+            "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id", new { id }));
+    }
+
+    [Fact]
     public async Task OlderParserVersion_RequeuesAnAutomaticMatch_ButNotRuleOrNotMediaFiles()
     {
         KnowLost();

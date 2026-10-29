@@ -110,13 +110,14 @@ public sealed class MatchStore(LibraryDatabase db)
     /// <summary>
     /// Gives a file TMDB could not place a provisional title (confidence 0) and the status "offline", so it
     /// stays playable and listed until the lookup can run again. Skipped (false) for a file with a user match or
-    /// one marked "not a movie or show".
+    /// one marked "not a movie or show", and for a file queued again while still linked automatically to a TMDB
+    /// title (after a parser update): it keeps that title and its episodes, and stays pending for the next run.
     /// </summary>
     public bool SetProvisional(int fileId, int provisionalTitleId)
     {
         using var connection = db.Open();
         using var transaction = BeginWrite(connection);
-        if (UserDecided(connection, transaction, fileId)) return false;
+        if (UserDecided(connection, transaction, fileId) || HasAutomaticTmdbLink(connection, transaction, fileId)) return false;
 
         var placeholder = PlaceholderOf(connection, transaction, fileId);
         ClearLinks(connection, transaction, fileId);
@@ -292,6 +293,14 @@ public sealed class MatchStore(LibraryDatabase db)
         HasUserLink(connection, transaction, fileId)
         || connection.ExecuteScalar<int>(
             "SELECT EXISTS (SELECT 1 FROM files WHERE id = @fileId AND status = 'not_media')", new { fileId }, transaction) != 0;
+
+    private static bool HasAutomaticTmdbLink(SqliteConnection connection, SqliteTransaction transaction, int fileId) =>
+        connection.ExecuteScalar<int>(
+            """
+            SELECT EXISTS (SELECT 1 FROM file_titles ft JOIN titles t ON t.id = ft.title_id
+                           WHERE ft.file_id = @fileId AND ft.source IN ('auto', 'id_tag') AND t.tmdb_id IS NOT NULL)
+            """,
+            new { fileId }, transaction) != 0;
 
     private static void ClearLinks(SqliteConnection connection, SqliteTransaction transaction, int fileId)
     {
