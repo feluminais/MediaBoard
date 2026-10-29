@@ -453,6 +453,19 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
+    public async Task SameTitleNoYear_AirYearIsTheLeadersStartYear_VotesStillDecide()
+    {
+        _tmdb.OnSearch("Battlestar Galactica", null, TitleKind.Show,
+                Show(1972, "Battlestar Galactica", 2004, 60, votes: 3000), Show(501, "Battlestar Galactica", 1978, 20, votes: 200))
+            .OnTitle(ShowTitle(1972, "Battlestar Galactica", 2004, 1)).OnSeason(1972, Season(1, "33"));
+
+        var result = await Identify(Episode("Battlestar Galactica", null, 1, 1) with { AirYear = 2004 });
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(1972, result.Title!.TmdbId);
+    }
+
+    [Fact]
     public async Task SameTitleNoYear_AirYearMatchingNoTiedShow_VotesStillDecide()
     {
         KnowSupernatural(leaderVotes: 8789, runnerUpVotes: 11);

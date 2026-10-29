@@ -269,7 +269,7 @@ public sealed class Identifier(IMetadataProvider provider)
     /// Two titles with the same name and no year to tell them apart ("Supernatural" 2005 and 1977): the leader
     /// is still accepted when every candidate inside the margin ties with it on title and it has far more
     /// votes than each of them. A known year decides on its own, so this never applies with one, nor when the
-    /// episode's air year is the start year of one of the tied shows.
+    /// episode's air year is the start year of a tied rival.
     /// </summary>
     private static bool LeadsOnVotes(ParsedMedia parsed, List<Entry> ranked)
     {
@@ -282,9 +282,9 @@ public sealed class Identifier(IMetadataProvider provider)
             .TakeWhile(e => best.Score - e.Score < ScoringWeights.AcceptMargin - MarginTolerance)
             .ToList();
 
-        // An episode that aired in the year one of the tied shows started ("Frasier S02E01 (2023)") points at that
-        // show, so the older, more voted one must not win on votes.
-        if (parsed.AirYear is { } aired && rivals.Prepend(best).Any(e => e.Candidate.Year == aired)) return false;
+        // An episode that aired in the year a tied rival started ("Frasier S02E01 (2023)") points at that rival, so
+        // the older, more voted show must not win on votes. The leader's own start year only agrees with the votes.
+        if (parsed.AirYear is { } aired && rivals.Any(e => e.Candidate.Year == aired)) return false;
 
         var bestTitle = CandidateScorer.TitleScore(parsed.Title, best.Candidate);
         return rivals.All(e => Math.Abs(CandidateScorer.TitleScore(parsed.Title, e.Candidate) - bestTitle) <= MarginTolerance
