@@ -69,7 +69,114 @@ public partial class MainWindowViewModelTests
         Flush();
 
         await WaitUntil(() => vm.ReviewCount == 2);
-        Assert.Equal(2, vm.NavItems.Single(i => i.Key == MainWindowViewModel.ReviewPage).Badge);
+        Assert.True(vm.HasReview);
+        Assert.Equal("2 need review", vm.ReviewItem.Label);
+    }
+
+    [AvaloniaFact]
+    public void Sidebar_MainList_HasNoNeedsReviewEntry()
+    {
+        var vm = Create();
+
+        Assert.Equal(
+            [MainWindowViewModel.HomePage, MainWindowViewModel.MoviesPage, MainWindowViewModel.ShowsPage,
+             MainWindowViewModel.FoldersPage, MainWindowViewModel.SettingsPage],
+            vm.NavItems.Select(i => i.Key));
+    }
+
+    [AvaloniaFact]
+    public async Task ReviewItem_ShowsOnlyWhileSomethingNeedsReview_WithTheCountInItsLabel()
+    {
+        var vm = Create();
+        Assert.False(vm.HasReview);
+
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => vm.HasReview);
+        Assert.Equal("1 needs review", vm.ReviewItem.Label);
+
+        _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => vm.ReviewCount == 2);
+        Assert.Equal("2 need review", vm.ReviewItem.Label);
+
+        _library.Review.Clear();
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => !vm.HasReview);
+    }
+
+    [AvaloniaFact]
+    public void ReviewItem_IsSelected_WhileTheReviewPageIsOpen()
+    {
+        var vm = Create();
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.ReviewPage);
+
+        Assert.IsType<ReviewViewModel>(vm.CurrentPage);
+        Assert.True(vm.ReviewItem.IsSelected);
+        Assert.DoesNotContain(vm.NavItems, i => i.IsSelected);
+
+        vm.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+
+        Assert.False(vm.ReviewItem.IsSelected);
+    }
+
+    [AvaloniaFact]
+    public async Task ResolvingTheLastItem_HidesTheSidebarItem_AndStaysOnTheReviewPage()
+    {
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        var vm = Create();
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => vm.HasReview);
+        vm.NavigateCommand.Execute(MainWindowViewModel.ReviewPage);
+        var page = Assert.IsType<ReviewViewModel>(vm.CurrentPage);
+        await WaitUntil(() => page.IsLoaded && page.Groups.Count > 0);
+
+        _library.MarkNotMedia(1);
+        _library.RaiseChanged();
+        Flush();
+
+        await WaitUntil(() => !vm.HasReview && page.Groups.Count == 0);
+        Assert.Same(page, vm.CurrentPage);
+        Assert.True(vm.ReviewItem.IsSelected);
+        Assert.Equal("Nothing to review", page.EmptyText);
+    }
+
+    [AvaloniaFact]
+    public async Task ReviewItem_RendersAtTheBottomOfTheSidebar_AndOpensTheReviewPageOnClick()
+    {
+        var vm = Create();
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        var button = () => Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
+            .OfType<Button>().Single(b => b.Name == "ReviewNavButton");
+        Flush();
+        Assert.False(button().IsVisible);
+
+        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
+        _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
+        _library.RaiseChanged();
+        Flush();
+        await WaitUntil(() => vm.HasReview);
+        Flush();
+        Assert.True(button().IsVisible);
+        Assert.Contains("2 need review", TextsOf(window));
+        var sidebarBottom = Avalonia.VisualExtensions.TranslatePoint(button(), new Avalonia.Point(0, button().Bounds.Height), window)!.Value.Y;
+        var statusTop = Avalonia.VisualExtensions.TranslatePoint(window.FindControl<Button>("StatusStrip")!, default, window)!.Value.Y;
+        Assert.InRange(statusTop - sidebarBottom, 0, 24); // pinned to the bottom edge, above the status bar
+
+        button().Focus();
+        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+        Flush();
+
+        Assert.IsType<ReviewViewModel>(vm.CurrentPage);
+        Assert.True(vm.ReviewItem.IsSelected);
+        Assert.Contains("selected", button().Classes);
+        window.Close();
     }
 
     [AvaloniaFact]

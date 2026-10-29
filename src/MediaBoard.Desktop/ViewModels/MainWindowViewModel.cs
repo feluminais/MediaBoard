@@ -9,18 +9,13 @@ using MediaBoard.Core.Playback;
 
 namespace MediaBoard.Desktop.ViewModels;
 
-/// <summary>A sidebar entry. <see cref="Badge"/> is a count shown beside the label; 0 hides it.</summary>
+/// <summary>A sidebar entry.</summary>
 public sealed partial class NavItem(string key, string label) : ObservableObject
 {
     public string Key { get; } = key;
 
-    public string Label { get; } = label;
-
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasBadge))]
-    public partial int Badge { get; set; }
-
-    public bool HasBadge => Badge > 0;
+    public partial string Label { get; set; } = label;
 
     [ObservableProperty]
     public partial bool IsSelected { get; set; }
@@ -51,7 +46,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly HomeViewModel _home;
     private readonly BackgroundQuery _reviewCount;
     private readonly Dictionary<string, PageViewModel> _pages;
-    private readonly NavItem _reviewItem;
     private int _refreshQueued;
 
     public MainWindowViewModel(
@@ -104,13 +98,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             [FoldersPage] = folders,
             [SettingsPage] = settings,
         };
-        _reviewItem = new NavItem(ReviewPage, "Needs review");
+        ReviewItem = new NavItem(ReviewPage, ReviewLabel(0));
         NavItems =
         [
             new NavItem(HomePage, "Home"),
             new NavItem(MoviesPage, "Movies"),
             new NavItem(ShowsPage, "Shows"),
-            _reviewItem,
             new NavItem(FoldersPage, "Folders"),
             new NavItem(SettingsPage, "Settings"),
         ];
@@ -133,11 +126,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Sidebar entries below Search, in order.</summary>
     public IReadOnlyList<NavItem> NavItems { get; }
 
+    /// <summary>
+    /// The entry at the bottom of the sidebar that opens the review page; it shows only while <see cref="HasReview"/>,
+    /// and its label carries the count.
+    /// </summary>
+    public NavItem ReviewItem { get; }
+
     [ObservableProperty]
     public partial ObservableObject CurrentPage { get; private set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReview))]
     public partial int ReviewCount { get; private set; }
+
+    public bool HasReview => ReviewCount > 0;
 
     /// <summary>The title whose page was opened last; null until one was.</summary>
     public int? OpenTitleId { get; private set; }
@@ -158,6 +160,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _back.Clear();
         CurrentPage = target;
         foreach (var item in NavItems) item.IsSelected = item.Key == page;
+        ReviewItem.IsSelected = ReviewItem.Key == page;
         target.Opened();
     }
 
@@ -261,7 +264,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (oldValue is PageViewModel closed && !ReferenceEquals(oldValue, newValue)) closed.Closed();
     }
 
-    partial void OnReviewCountChanged(int value) => _reviewItem.Badge = value;
+    // The item hides at 0, so its label keeps the last count meanwhile; the review page stays open and shows its own empty text.
+    partial void OnReviewCountChanged(int value)
+    {
+        if (value > 0) ReviewItem.Label = ReviewLabel(value);
+    }
+
+    private static string ReviewLabel(int count) => count == 1 ? "1 needs review" : $"{count} need review";
 
     private void OnLibraryChanged()
     {
