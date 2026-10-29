@@ -31,5 +31,6 @@ public class RecordFixturesTests
         Directory.CreateDirectory(SourceTree.CorpusDirectory);
         ReferenceFile.Write(ReferenceFile.DraftPath, items);
         Assert.NotEmpty(items);
+        Assert.NotEmpty(handler.Recorded);
     }
 }
