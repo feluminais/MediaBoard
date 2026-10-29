@@ -22,6 +22,11 @@ public static class CorpusPipeline
 {
     /// <param name="tmdbTime">Clock for the client's request pacing: the real one when talking to TMDB, a fake one otherwise.</param>
     public static async Task<IReadOnlyList<ReferenceItem>> IdentifyAsync(
+        HttpMessageHandler handler, string tmdbKey, TimeProvider tmdbTime, CancellationToken ct) =>
+        Group(await IdentifyFilesAsync(handler, tmdbKey, tmdbTime, ct));
+
+    /// <summary>As <see cref="IdentifyAsync"/>, per file with its episodes, before grouping into items.</summary>
+    public static async Task<IReadOnlyList<IdentifiedFile>> IdentifyFilesAsync(
         HttpMessageHandler handler, string tmdbKey, TimeProvider tmdbTime, CancellationToken ct)
     {
         var scratch = Path.Combine(Path.GetTempPath(), "mediaboard-corpus-" + Guid.NewGuid().ToString("N"));
@@ -46,7 +51,7 @@ public static class CorpusPipeline
             await new LibraryScanner(db, hub, clock).ScanAsync(folder, ct);
             await service.RunPendingAsync(ct);
 
-            return Group(Read(db, folder.Id));
+            return Read(db, folder.Id);
         }
         finally
         {
@@ -57,7 +62,36 @@ public static class CorpusPipeline
     }
 
     /// <summary>What identification stored for one file.</summary>
-    public sealed record IdentifiedFile(string RelPath, MediaKind ParsedKind, string Status, TitleRow? Title);
+    /// <param name="Episodes">The linked episodes as (season, number) of <paramref name="Title"/>.</param>
+    /// <param name="EpisodeTitles">The episode titles parsed from the name.</param>
+    public sealed record IdentifiedFile(
+        string RelPath, MediaKind ParsedKind, string Status, TitleRow? Title,
+        IReadOnlyList<(int Season, int Number)>? Episodes = null, IReadOnlyList<string>? EpisodeTitles = null);
+
+    /// <summary>
+    /// Every TMDB episode linked to more than one file, one line each. Files that are parts of one title
+    /// ("Bender's Big Score. Part 1" to "Part 4", all on TMDB's "Bender's Big Score") may share it.
+    /// </summary>
+    public static IReadOnlyList<string> SharedEpisodes(IEnumerable<IdentifiedFile> files) =>
+    [
+        .. files
+            .Where(f => f.Title is not null)
+            .SelectMany(f => (f.Episodes ?? []).Select(e => (Key: (f.Title!.Id, e.Season, e.Number), File: f)))
+            .GroupBy(x => x.Key, x => x.File)
+            .Where(g => g.Count() > 1 && !PartsOfOneTitle(g.ToList()))
+            .OrderBy(g => g.First().Title!.Name, StringComparer.Ordinal).ThenBy(g => g.Key.Season).ThenBy(g => g.Key.Number)
+            .Select(g => $"{g.First().Title!.Name} {g.Key.Season}x{g.Key.Number}: " +
+                         string.Join(" | ", g.Select(f => string.Join(" & ", f.EpisodeTitles ?? []) + " (" + f.RelPath + ")"))),
+    ];
+
+    private static bool PartsOfOneTitle(IReadOnlyList<IdentifiedFile> files)
+    {
+        var wholes = files
+            .Select(f => f.EpisodeTitles is [var title] ? EpisodeResolver.WithoutPart(title) : null)
+            .ToList();
+        return wholes.All(w => w is not null)
+               && wholes.Select(w => TitleNormalizer.Normalize(w!)).Distinct(StringComparer.Ordinal).Count() == 1;
+    }
 
     private static IReadOnlyList<IdentifiedFile> Read(LibraryDatabase db, int folderId)
     {
@@ -68,10 +102,15 @@ public static class CorpusPipeline
             .Query<(long FileId, long TitleId)>("SELECT file_id, title_id FROM file_titles ORDER BY confidence DESC, title_id")
             .GroupBy(l => l.FileId)
             .ToDictionary(g => g.Key, g => (int)g.First().TitleId);
+        var episodes = connection
+            .Query<(long FileId, int Season, int Number)>(
+                "SELECT fe.file_id, e.season, e.number FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id ORDER BY e.season, e.number")
+            .ToLookup(e => e.FileId, e => (e.Season, e.Number));
 
         return files
             .Select(f => new IdentifiedFile(
-                f.RelPath, f.Parsed.Kind, f.Status, links.TryGetValue(f.Id, out var titleId) ? titles.Get(titleId) : null))
+                f.RelPath, f.Parsed.Kind, f.Status, links.TryGetValue(f.Id, out var titleId) ? titles.Get(titleId) : null,
+                [.. episodes[f.Id]], f.Parsed.EpisodeTitles))
             .ToList();
     }
 

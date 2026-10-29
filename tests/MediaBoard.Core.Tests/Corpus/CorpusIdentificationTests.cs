@@ -19,13 +19,17 @@ public class CorpusIdentificationTests
 
         // Replay only: the handler never reaches the network, and a fixture that is missing is reported by name.
         using var handler = new FixtureHandler(SourceTree.FixtureDirectory);
-        var actual = await CorpusPipeline.IdentifyAsync(handler, "replay-key", new FakeClock(), TestContext.Current.CancellationToken);
+        var files = await CorpusPipeline.IdentifyFilesAsync(handler, "replay-key", new FakeClock(), TestContext.Current.CancellationToken);
 
         Assert.True(handler.MissingFixtures.Count == 0,
             "Missing fixtures (record them with MEDIABOARD_RECORD=1):\n" + string.Join("\n", handler.MissingFixtures.Distinct().Order()));
 
-        var problems = Compare(expected, actual);
+        var problems = Compare(expected, CorpusPipeline.Group(files));
         Assert.True(problems.Count == 0, $"{problems.Count} item(s) differ from the reference:\n" + string.Join("\n", problems));
+
+        // Each episode is one file's, unless the files are parts of one title TMDB lists whole.
+        var shared = CorpusPipeline.SharedEpisodes(files);
+        Assert.True(shared.Count == 0, $"{shared.Count} episode(s) linked to several files:\n" + string.Join("\n", shared));
     }
 
     internal static List<string> Compare(IReadOnlyList<ReferenceItem> expected, IReadOnlyList<ReferenceItem> actual)
