@@ -26,7 +26,7 @@ public class PathParserTests
             "Better Call Saul", null, 1, [1], "Better Call Saul 1080p H265"),
         Episode(
             @"Brassic - Season 1 (2019) WEBRip 1080p [Ukr.Eng] [Цікава Ідея]\Brassic - S01E01 (2019) WEBRip 1080p [Ukr.Eng] [Цікава Ідея].mkv",
-            "Brassic", 2019, 1, [1], "Brassic - Season 1 (2019) WEBRip 1080p [Ukr.Eng] [Цікава Ідея]"),
+            "Brassic", null, 1, [1], "Brassic - Season 1 (2019) WEBRip 1080p [Ukr.Eng] [Цікава Ідея]"),
         Episode(
             @"Futurama [WEB-DL1080p]\Season 04\S04E01 Kif Gets Knocked Up a Notch [AMZN]WEB-DL1080p.mkv",
             "Futurama", null, 4, [1], "Futurama [WEB-DL1080p]"),
@@ -131,8 +131,12 @@ public class PathParserTests
     [InlineData(@"South Park (1997) BDRip-AVC [UKR_ENG] [Hurtom]\Season 06\E01. Jared Has Aides (2002) BDRip-AVC [UKR_ENG] [Hurtom].mkv", 1997, 2002)]
     [InlineData(@"South Park (1997)\Season 01\E02. Weight Gain 4000 (1997).mkv", 1997, 1997)]
     [InlineData(@"Mobland. H265\Season 01 (2025)\S01E01. MobLand (2025). Stick or Twist.mkv", null, 2025)]
-    [InlineData(@"The Sopranos (1999) - S01E01 - The Sopranos.mkv", null, 1999)]
-    [InlineData(@"Brassic - Season 1 (2019)\Brassic - S01E01.mkv", 2019, null)]
+    [InlineData(@"The Sopranos (1999) - S01E01 - The Sopranos.mkv", 1999, null)]
+    [InlineData(@"Brassic - Season 1 (2019)\Brassic - S01E01.mkv", null, 2019)]
+    [InlineData(@"Frasier.2023.S02E01.1080p.WEB.h264-ETHEL.mkv", 2023, null)]
+    [InlineData(@"Show.2023.S01.1080p\Show.S01E01.mkv", 2023, null)]
+    [InlineData(@"Widows.Bay.S01.2026.ATVP.WEB-DL.1080p\Widows.Bay.S01E01.2026.ATVP.WEB-DL.1080p.mkv", null, 2026)]
+    [InlineData(@"Better Call Saul\Season 01 (2015)\Better Call Saul.S01E01.Uno.mkv", null, 2015)]
     [InlineData(@"Brassic - Season 3 (2021)\Brassic - S03E01.mkv", null, 2021)]
     [InlineData(@"Shows\Lost (2004)\Season 1\Lost.S01E01.mkv", 2004, null)]
     [InlineData(@"Supernatural\Supernatural.S01E01.mkv", null, null)]

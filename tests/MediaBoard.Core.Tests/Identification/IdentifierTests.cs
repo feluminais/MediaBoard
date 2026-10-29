@@ -375,14 +375,55 @@ public class IdentifierTests : IDisposable
         Assert.Equal(1906, result.Title!.TmdbId);
     }
 
-    [Fact]
-    public async Task EpisodeAirYear_ShowThatStartedEarlier_KeepsTheTie()
+    [Theory]
+    [InlineData(2009, IdentificationStatus.Matched)] // the 2011 show started after it
+    [InlineData(2012, IdentificationStatus.NeedsReview)] // both started before it: still a tie
+    public async Task EpisodeAirYear_OnlyAShowThatStartedLaterLosesTheTie(int airYear, IdentificationStatus expected)
     {
-        _tmdb.OnSearch("Shameless", null, TitleKind.Show, Show(1906, "Shameless", 2004, 20), Show(34307, "Shameless", 2011, 20));
+        _tmdb.OnSearch("Shameless", null, TitleKind.Show, Show(1906, "Shameless", 2004, 20), Show(34307, "Shameless", 2011, 20))
+            .OnTitle(ShowTitle(1906, "Shameless", 2004, 2)).OnSeason(1906, Season(2, "Episode 1"));
 
-        var result = await Identify(Episode("Shameless", null, 2, 1) with { AirYear = 2012 });
+        var result = await Identify(Episode("Shameless", null, 2, 1) with { AirYear = airYear });
+
+        Assert.Equal(expected, result.Status);
+    }
+
+    [Fact]
+    public async Task Reboot_YearBeforeTheMarker_IsTheShowYear()
+    {
+        _tmdb.OnSearch("Frasier", 2023, TitleKind.Show, Show(194764, "Frasier", 2023, 40, votes: 150))
+            .OnSearch("Frasier", null, TitleKind.Show, Show(3452, "Frasier", 1993, 60, votes: 1900), Show(194764, "Frasier", 2023, 40, votes: 150))
+            .OnTitle(ShowTitle(3452, "Frasier", 1993, 2)).OnSeason(3452, Season(2, "Episode 1"))
+            .OnTitle(ShowTitle(194764, "Frasier", 2023, 2)).OnSeason(194764, Season(2, "Episode 1"));
+        var parsed = PathParser.Parse("Frasier.2023.S02E01.1080p.WEB.h264-ETHEL.mkv", []);
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(194764, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task SameTitleNoYear_AirYearIsATiedShowsStartYear_VotesDoNotDecide()
+    {
+        _tmdb.OnSearch("Frasier", null, TitleKind.Show,
+                Show(3452, "Frasier", 1993, 60, votes: 1900), Show(194764, "Frasier", 2023, 40, votes: 150))
+            .OnTitle(ShowTitle(3452, "Frasier", 1993, 2)).OnSeason(3452, Season(2, "Episode 1"));
+
+        var result = await Identify(Episode("Frasier", null, 2, 1) with { AirYear = 2023 });
 
         Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+    }
+
+    [Fact]
+    public async Task SameTitleNoYear_AirYearMatchingNoTiedShow_VotesStillDecide()
+    {
+        KnowSupernatural(leaderVotes: 8789, runnerUpVotes: 11);
+
+        var result = await Identify(Episode("Supernatural", null, 1, 1) with { AirYear = 2006 });
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(1622, result.Title!.TmdbId);
     }
 
     [Fact]

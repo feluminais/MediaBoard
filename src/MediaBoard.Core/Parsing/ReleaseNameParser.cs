@@ -132,7 +132,7 @@ public static class ReleaseNameParser
         }
 
         IReadOnlyList<string> episodeTitles = string.IsNullOrEmpty(episodeTitle) ? [] : [episodeTitle];
-        return new ParsedName(title, year, marker.Season, marker.Episodes, episodeTitles, null, null, null);
+        return new ParsedName(title, year, marker.Season, marker.Episodes, episodeTitles, null, null, null, yearInTail is not null);
     }
 
     /// <summary>

@@ -57,10 +57,13 @@ public static class PathParser
                      ?? folderInfos.Reverse().Select(f => f.Season).FirstOrDefault(s => s is not null)
                      ?? 1;
 
-        // Only a folder can say when the show started. A year in the file name is when the episode aired, and so
-        // is the year on a folder for a later season ("Show - Season 3 (2019)").
-        var showYear = folderInfos.FirstOrDefault(f => f.Year is not null && f.Season is null or 1)?.Year;
-        var airYear = file.Year ?? folderInfos.FirstOrDefault(f => f.Year is not null && f.Season > 1)?.Year;
+        // A year in front of the episode or season marker names the show ("South Park (1997)", "Frasier.2023.S02E01");
+        // one after it dates the episode or season ("E01. Jared Has Aides (2002)", "Widows.Bay.S01.2026").
+        // A folder's show year wins over the file's.
+        var showYear = folderInfos.Select(f => f.Year).FirstOrDefault(y => y is not null)
+                       ?? (file.YearAfterMarker ? null : file.Year);
+        var airYear = (file.YearAfterMarker ? file.Year : null)
+                      ?? folderInfos.Reverse().Select(f => f.AirYear).FirstOrDefault(y => y is not null);
 
         return new ParsedMedia(
             MediaKind.Episode,
@@ -133,7 +136,7 @@ public static class PathParser
     {
         var seasonOnly = SeasonFolder.Match(folder);
         if (seasonOnly.Success)
-            return new FolderInfo("", null, SeasonFrom(seasonOnly), null, null);
+            return new FolderInfo("", null, SeasonFrom(seasonOnly), null, null, ReleaseNameParser.Parse(folder).Year);
 
         var parsed = ReleaseNameParser.Parse(folder);
         var title = parsed.Title;
@@ -149,7 +152,11 @@ public static class PathParser
             title = suffix.Groups["title"].Value;
             season = SeasonFrom(suffix);
         }
-        return new FolderInfo(Tidy(title), parsed.Year, season, parsed.TmdbId, parsed.ImdbId);
+
+        // A year after a season marker the title still held ("Brassic - Season 1 (2019)") dates the season.
+        var yearDatesSeason = suffix.Success || parsed.YearAfterMarker;
+        return new FolderInfo(Tidy(title), yearDatesSeason ? null : parsed.Year, season, parsed.TmdbId, parsed.ImdbId,
+            yearDatesSeason ? parsed.Year : null);
     }
 
     private static int? SeasonFrom(Match match) =>
@@ -159,5 +166,7 @@ public static class PathParser
 
     private static string Tidy(string text) => text.Trim().Trim(Stray);
 
-    private sealed record FolderInfo(string Title, int? Year, int? Season, int? TmdbId, string? ImdbId);
+    /// <param name="Year">The title's year: a movie's release or a show's start.</param>
+    /// <param name="AirYear">A year that dates a season rather than the show.</param>
+    private sealed record FolderInfo(string Title, int? Year, int? Season, int? TmdbId, string? ImdbId, int? AirYear);
 }
