@@ -81,12 +81,14 @@ public sealed class AppHost(
         try
         {
             if (!TryOpenDatabase()) return; // nothing else can work without it
+            // In line before the pages first load, so a folder whose first scan never finished doesn't look empty.
+            using var line = new FolderLine(hub, folders.All().Where(f => f.Enabled).ToList());
             library.NotifyChanged(); // the pages can read it now
 
             connectivity.Start();
             identification.Start();
 
-            await ScanInTurnAsync(folders.All().Where(f => f.Enabled).ToList(), ct, scanned => _ = IdentifyAsync(ct)).ConfigureAwait(false);
+            await ScanInTurnAsync(line, ct, scanned => _ = IdentifyAsync(ct)).ConfigureAwait(false);
 
             ct.ThrowIfCancellationRequested();
             watcher.Start();
@@ -172,18 +174,20 @@ public sealed class AppHost(
         return true;
     }
 
-    /// <summary>Records that a folder's last scan threw (a name) or worked (null), and publishes the failed names.</summary>
+    /// <summary>Records that a folder's last scan threw (a name) or worked (null), and publishes the failed folders.</summary>
     private void SetScanFailed(int folderId, string? name)
     {
         string[] names;
+        int[] ids;
         lock (_failedScans)
         {
             var changed = name is null ? _failedScans.Remove(folderId) : _failedScans.TryAdd(folderId, name);
             if (!changed) return;
             names = _failedScans.Values.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            ids = _failedScans.Keys.Order().ToArray();
         }
 
-        hub.SetFailedScans(names);
+        hub.SetFailedScans(names, ids);
     }
 
     private static string FolderName(string path)
@@ -234,7 +238,8 @@ public sealed class AppHost(
     {
         var unavailable = scanner.UnavailableFolderIds();
         var back = folders.All().Where(f => f.Enabled && unavailable.Contains(f.Id) && Directory.Exists(f.Path)).ToList();
-        await ScanInTurnAsync(back, ct, folder =>
+        using var line = new FolderLine(hub, back);
+        await ScanInTurnAsync(line, ct, folder =>
         {
             hub.Log(ActivityLevel.Info, $"Folder available again: {FolderName(folder.Path)}");
             library.NotifyChanged();
@@ -245,25 +250,43 @@ public sealed class AppHost(
     }
 
     /// <summary>
-    /// Scans the folders one after another. The ones still in line show as waiting to scan, so their rows don't say
-    /// they are empty. <paramref name="scanned"/> runs after each scan that worked.
+    /// Scans the folders in line one after another. <paramref name="scanned"/> runs after each scan that worked. Each
+    /// folder is read again when its turn comes: one the user switched off or removed while it waited is skipped,
+    /// and one they moved is scanned where it is now.
     /// </summary>
-    private async Task ScanInTurnAsync(IReadOnlyList<LibraryFolder> list, CancellationToken ct, Action<LibraryFolder> scanned)
+    private async Task ScanInTurnAsync(FolderLine line, CancellationToken ct, Action<LibraryFolder> scanned)
     {
-        var queued = list.Select(f => hub.QueueScan(f.Id)).ToList();
-        try
+        for (var i = 0; i < line.Folders.Count; i++)
         {
-            for (var i = 0; i < list.Count; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                var worked = await ScanAsync(list[i], ct).ConfigureAwait(false);
-                queued[i].Dispose();
-                if (worked) scanned(list[i]);
-            }
+            ct.ThrowIfCancellationRequested();
+            var folder = folders.All().FirstOrDefault(f => f.Id == line.Folders[i].Id);
+            var worked = folder is { Enabled: true } && await ScanAsync(folder, ct).ConfigureAwait(false);
+            line.Leave(i);
+            if (worked) scanned(folder!);
         }
-        finally
+    }
+
+    /// <summary>
+    /// Folders waiting for their turn to scan: each shows as waiting from the moment the line is made, so its row never
+    /// says it is empty. Disposing it lets go of the ones still in line, as when closing cuts the run short.
+    /// </summary>
+    private sealed class FolderLine : IDisposable
+    {
+        private readonly IDisposable[] _queued;
+
+        public FolderLine(ActivityHub hub, IReadOnlyList<LibraryFolder> folders)
         {
-            foreach (var entry in queued) entry.Dispose(); // the rest, when closing cut the run short
+            Folders = folders;
+            _queued = folders.Select(f => hub.QueueScan(f.Id)).ToArray();
+        }
+
+        public IReadOnlyList<LibraryFolder> Folders { get; }
+
+        public void Leave(int index) => _queued[index].Dispose();
+
+        public void Dispose()
+        {
+            foreach (var queued in _queued) queued.Dispose();
         }
     }
 

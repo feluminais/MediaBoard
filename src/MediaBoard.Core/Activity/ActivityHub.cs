@@ -40,8 +40,18 @@ public sealed class ActivityHub
     /// </summary>
     public IDisposable QueueScan(int folderId)
     {
-        ChangeScan(folderId, track => track.Queued++);
-        return new QueuedScan(this, folderId);
+        var queued = new QueuedScan(this, folderId);
+        try
+        {
+            ChangeScan(folderId, track => track.Queued++);
+        }
+        catch
+        {
+            queued.Dispose(); // a subscriber threw after the folder was queued; nobody gets the handle to release it
+            throw;
+        }
+
+        return queued;
     }
 
     /// <summary>The scanner started on a folder. Until <see cref="ReportScan"/> the total is unknown (0).</summary>
@@ -84,10 +94,15 @@ public sealed class ActivityHub
     public void SetLibraryError(string? hint) =>
         Update(s => s.LibraryError == hint ? s : s with { LibraryError = hint });
 
-    public void SetFailedScans(IReadOnlyList<string> names)
+    /// <param name="names">For the status bar.</param>
+    /// <param name="folderIds">The same folders by id, so two folders with one name can be told apart.</param>
+    public void SetFailedScans(IReadOnlyList<string> names, IReadOnlyList<int>? folderIds = null)
     {
         var copy = names.ToArray();
-        Update(s => s.FailedScans.SequenceEqual(copy) ? s : s with { FailedScans = copy });
+        var ids = folderIds?.ToArray() ?? [];
+        Update(s => s.FailedScans.SequenceEqual(copy) && s.FailedScanIds.SequenceEqual(ids)
+            ? s
+            : s with { FailedScans = copy, FailedScanIds = ids });
     }
 
     public void Log(ActivityLevel level, string message, string? hint = null)

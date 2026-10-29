@@ -56,9 +56,10 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
     private ScanResult Scan(LibraryFolder folder, CancellationToken ct)
     {
         var name = DisplayName(folder.Path);
-        hub.BeginScan(folder.Id, name);
         try
         {
+            // Inside the try: a status subscriber that throws here must not leave the folder "scanning" for good.
+            hub.BeginScan(folder.Id, name);
             var listing = Enumerate(folder.Path, ct);
             if (listing is null) return MarkUnavailable(folder, name);
 

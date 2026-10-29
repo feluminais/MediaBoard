@@ -114,7 +114,7 @@ public sealed partial class StatusBarViewModel : ObservableObject
     private void Apply(StatusSnapshot s)
     {
         IsBusy = s.IsScanning || s.PendingIdentification > 0;
-        IsBusyIndeterminate = !(s.IsScanning && s.ScanTotal > 0);
+        IsBusyIndeterminate = IsBusy && !(s.IsScanning && s.ScanTotal > 0); // never animating while hidden
         BusyPercent = IsBusyIndeterminate ? 0 : Math.Clamp(s.ScanDone * 100.0 / s.ScanTotal, 0, 100);
         Progress = s switch
         {

@@ -489,6 +489,22 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_WhoseStartAnnouncementThrows_StillEndsIdle()
+    {
+        _lib.File(@"Movies\Heat.1995.mkv");
+        var thrown = 0;
+        _hub.StatusChanged += s =>
+        {
+            if (s.IsScanning && Interlocked.Exchange(ref thrown, 1) == 0) throw new InvalidOperationException("subscriber broke");
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(Scan);
+
+        Assert.Null(_hub.Current.ScanOf(_folder.Id));
+        Assert.Null(_hub.Current.ScanFolder);
+    }
+
+    [Fact]
     public async Task Scan_OfAnUnavailableFolder_EndsIdle()
     {
         await _scanner.ScanAsync(new LibraryFolder(_folder.Id, _lib.PathOf("Gone"), true), CancellationToken.None);

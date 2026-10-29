@@ -51,13 +51,15 @@ public sealed class AppHostTests : IDisposable
                 _ => Task.FromResult(false), TimeProvider.System, sp.GetRequiredService<ActivityHub>()));
         });
 
-    private static async Task RunAsync(ServiceProvider services, Func<MainWindowViewModel, Task> check)
+    /// <param name="beforeStartupEnds">Runs after Start and before waiting for startup, for a test that acts mid-startup.</param>
+    private static async Task RunAsync(ServiceProvider services, Func<MainWindowViewModel, Task> check, Func<Task>? beforeStartupEnds = null)
     {
         var vm = services.GetRequiredService<MainWindowViewModel>();
         var host = services.GetRequiredService<AppHost>();
         host.Start();
         try
         {
+            if (beforeStartupEnds is not null) await beforeStartupEnds();
             await host.Startup.WaitAsync(TimeSpan.FromSeconds(30));
             Dispatcher.UIThread.RunJobs();
             await check(vm);
@@ -165,6 +167,133 @@ public sealed class AppHostTests : IDisposable
         {
             Assert.Equal(FolderScanState.Waiting, secondWhileFirstScans?.State);
             Assert.Empty(hub.Current.FolderScans);
+            return Task.CompletedTask;
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task Startup_QueuesTheFolders_BeforeThePagesFirstLoad()
+    {
+        var movies = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var folder = services.GetRequiredService<FolderStore>().Add(movies);
+        var hub = services.GetRequiredService<ActivityHub>();
+        var library = services.GetRequiredService<LocalLibrary>();
+        FolderScan? atFirstLoad = null;
+        var loads = 0;
+        library.Changed += () =>
+        {
+            if (Interlocked.Increment(ref loads) == 1) atFirstLoad = hub.Current.ScanOf(folder.Id);
+        };
+
+        await RunAsync(services, _ =>
+        {
+            Assert.NotNull(atFirstLoad); // never "No videos found" before its first scan
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>Holds the first scan that starts, on the scanner's thread, until released.</summary>
+    private sealed class FirstScanGate : IDisposable
+    {
+        private readonly ActivityHub _hub;
+        private readonly ManualResetEventSlim _release = new();
+        private int _held;
+
+        public FirstScanGate(ActivityHub hub)
+        {
+            _hub = hub;
+            hub.StatusChanged += Hold;
+        }
+
+        public ManualResetEventSlim Reached { get; } = new();
+
+        public void Release() => _release.Set();
+
+        public void Dispose()
+        {
+            _release.Set();
+            _hub.StatusChanged -= Hold;
+        }
+
+        private void Hold(StatusSnapshot s)
+        {
+            if (!s.IsScanning || Interlocked.Exchange(ref _held, 1) == 1) return;
+            Reached.Set();
+            _release.Wait(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ClosingDuringStartup_ReleasesTheFoldersStillInLine()
+    {
+        var movies = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        var shows = Directory.CreateDirectory(Path.Combine(_dir, "Shows")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(movies, "Heat.1995.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var store = services.GetRequiredService<FolderStore>();
+        store.Add(movies);
+        var second = store.Add(shows);
+        var hub = services.GetRequiredService<ActivityHub>();
+        var host = services.GetRequiredService<AppHost>();
+        using var gate = new FirstScanGate(hub);
+        _ = services.GetRequiredService<MainWindowViewModel>();
+
+        host.Start();
+        Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)), "startup never scanned");
+        Assert.Equal(FolderScanState.Waiting, hub.Current.ScanOf(second.Id)?.State);
+        var stop = host.StopAsync();
+        gate.Release();
+        await stop.WaitAsync(TimeSpan.FromSeconds(30));
+        await services.DisposeAsync();
+
+        Assert.Empty(hub.Current.FolderScans);
+    }
+
+    [AvaloniaFact]
+    public async Task FolderDisabledWhileStartupScansAnother_IsNotScannedByStartup()
+    {
+        var movies = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        var shows = Directory.CreateDirectory(Path.Combine(_dir, "Shows")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(shows, "Lost.S01E01.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var store = services.GetRequiredService<FolderStore>();
+        store.Add(movies);
+        var second = store.Add(shows);
+        var hub = services.GetRequiredService<ActivityHub>();
+        using var gate = new FirstScanGate(hub);
+
+        await RunAsync(services, _ =>
+        {
+            Assert.Empty(services.GetRequiredService<FileStore>().ByFolder(second.Id));
+            Assert.Empty(hub.Current.FolderScans);
+            return Task.CompletedTask;
+        }, beforeStartupEnds: async () =>
+        {
+            Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)), "startup never scanned");
+            var outcome = await services.GetRequiredService<IFolderActions>().SetEnabledAsync(second.Id, false);
+            Assert.True(outcome.Ok);
+            gate.Dispose();
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task FailedScan_IsPublishedWithItsFolderId()
+    {
+        var library = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(library, "Movie.2020.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var folder = services.GetRequiredService<FolderStore>().Add(library);
+        using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "CREATE TRIGGER fail_scan BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;";
+            command.ExecuteNonQuery();
+        }
+
+        await RunAsync(services, _ =>
+        {
+            Assert.Equal([folder.Id], services.GetRequiredService<ActivityHub>().Current.FailedScanIds);
             return Task.CompletedTask;
         });
     }

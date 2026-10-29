@@ -197,6 +197,39 @@ public class ActivityHubTests
     }
 
     [Fact]
+    public void FailedScans_KeepTheFolderIds_SoTwoFoldersWithOneNameAreTold()
+    {
+        var hub = new ActivityHub();
+        var raised = 0;
+        hub.StatusChanged += _ => raised++;
+
+        hub.SetFailedScans(["Movies"], [1]);
+        hub.SetFailedScans(["Movies"], [1]);
+        Assert.Equal(1, raised);
+        Assert.Equal([1], hub.Current.FailedScanIds);
+
+        hub.SetFailedScans(["Movies"], [2]); // same name, the other folder
+        Assert.Equal(2, raised);
+        Assert.Equal([2], hub.Current.FailedScanIds);
+    }
+
+    [Fact]
+    public void QueueScan_WhoseSubscriberThrows_LeavesNothingQueued()
+    {
+        var hub = new ActivityHub();
+        var throwing = true;
+        hub.StatusChanged += _ =>
+        {
+            if (throwing) throw new InvalidOperationException("subscriber broke");
+        };
+
+        Assert.Throws<InvalidOperationException>(() => hub.QueueScan(1));
+
+        throwing = false;
+        Assert.Null(hub.Current.ScanOf(1));
+    }
+
+    [Fact]
     public void ActivityHub_TracksLibraryErrorAndFailedScans()
     {
         var hub = new ActivityHub();

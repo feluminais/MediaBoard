@@ -37,6 +37,9 @@ public sealed record StatusSnapshot
     /// <summary>Folders whose last scan threw; a folder leaves the list when a scan of it succeeds.</summary>
     public IReadOnlyList<string> FailedScans { get; init; } = [];
 
+    /// <summary>The folders of <see cref="FailedScans"/> by id.</summary>
+    public IReadOnlyList<int> FailedScanIds { get; init; } = [];
+
     /// <summary>Folders with a scan running or waiting to run, by folder id. A folder that is not here is idle.</summary>
     public IReadOnlyDictionary<int, FolderScan> FolderScans { get; init; } = new Dictionary<int, FolderScan>();
 

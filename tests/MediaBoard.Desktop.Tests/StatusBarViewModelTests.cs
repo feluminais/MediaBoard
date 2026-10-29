@@ -26,6 +26,7 @@ public class StatusBarViewModelTests
         var vm = Create();
 
         Assert.False(vm.IsBusy);
+        Assert.False(vm.IsBusyIndeterminate); // a hidden bar must not keep animating
         Assert.Equal("Up to date", vm.Progress);
     }
 
@@ -71,6 +72,7 @@ public class StatusBarViewModelTests
         _hub.SetPendingIdentification(0);
         Flush();
         Assert.False(vm.IsBusy);
+        Assert.False(vm.IsBusyIndeterminate); // a hidden bar must not keep animating
     }
 
     [AvaloniaFact]
