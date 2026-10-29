@@ -434,7 +434,11 @@ public sealed class IdentificationService : IDisposable
         {
             var fetched = new List<SeasonDetails>();
             var episodes = await ResolveRuleEpisodesAsync(show, parsed, preferStored: true, fetched, run, ct).ConfigureAwait(false);
-            if (episodes is null && fetched.Count == 0)
+
+            // The file's own season came from storage and may be stale (a new episode since): ask TMDB once more.
+            // Other seasons the lookup fetched say nothing about that.
+            var number = parsed.Season ?? 1;
+            if (episodes is null && fetched.All(s => s.Season != number))
             {
                 episodes = await ResolveRuleEpisodesAsync(show, parsed, preferStored: false, fetched, run, ct).ConfigureAwait(false);
             }
@@ -447,7 +451,6 @@ public sealed class IdentificationService : IDisposable
             }
 
             // Other seasons read only to look a title up are not stored unless the file landed in one.
-            var number = parsed.Season ?? 1;
             var keep = fetched.Where(s => s.Season == number || s.Season == 0 || episodes.Any(e => e.Season == s.Season)).ToList();
             var details = new TitleDetails(
                 show.TmdbId!.Value, TitleKind.Show, show.Name, show.Year, show.EndYear, show.Overview, show.Rating, show.PosterPath, null, []);

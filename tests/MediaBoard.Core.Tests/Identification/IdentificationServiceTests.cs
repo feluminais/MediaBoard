@@ -399,6 +399,29 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rule_NewEpisodeWithATitle_RefreshesTheStaleStoredSeason()
+    {
+        _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 0, 1, 4))
+            .OnSeason(615, Season(0, "Futurama: The Lost Adventure"))
+            .OnSeason(615, Season(1, "Space Pilot 3000"))
+            .OnSeason(615, Season(4, "Roswell That Ends Well", "A Tale of Two Santas", "Brand New One"));
+        _lib.File(@"Futurama\Season 04\S04E03 Brand New One.mkv");
+        await Scan();
+        var showId = _titles.Upsert(ShowTitle(615, "Futurama", 1999, 0, 1, 4));
+        _titles.UpsertEpisodes(showId, Season(4, "Roswell That Ends Well", "A Tale of Two Santas"));
+        _matches.AddRule(_folder.Id, "Futurama", "Futurama", showId);
+
+        await Run();
+
+        var file = Row(@"Futurama\Season 04\S04E03 Brand New One.mkv");
+        Assert.Equal("matched", file.Status);
+        Assert.Equal("rule", LinkSource(file.Id));
+        Assert.Equal("Brand New One", Scalar<string>(
+            "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
+            new { id = file.Id }));
+    }
+
+    [Fact]
     public async Task SeasonsFetchedOncePerShow()
     {
         KnowLost();
