@@ -121,6 +121,49 @@ public class HomeViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task Home_NothingAdded_WhileAScanRuns_SaysScanning()
+    {
+        var (_, home) = await LoadedHome();
+        Assert.True(home.ShowNothingAdded);
+        Assert.False(home.ShowBusy);
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+
+        Assert.False(home.ShowNothingAdded);
+        Assert.True(home.ShowBusy);
+        Assert.Equal("Scanning folders…", home.BusyTitle);
+        var view = new HomeView { DataContext = home };
+        new Window { Width = 1000, Height = 700, Content = view }.Show();
+        var texts = view.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
+        Assert.Contains("Scanning folders…", texts);
+        Assert.Contains("Titles appear as they're found.", texts);
+        Assert.DoesNotContain("Nothing added yet", texts);
+
+        _hub.EndScan(1);
+        _hub.SetPendingIdentification(2);
+        Ui.Flush();
+        Assert.Equal("Identifying 2 files…", home.BusyTitle);
+
+        _hub.SetPendingIdentification(0);
+        Ui.Flush();
+        Assert.True(home.ShowNothingAdded);
+        Assert.False(home.ShowBusy);
+    }
+
+    [AvaloniaFact]
+    public async Task Home_WithTitles_DoesNotSayScanning()
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        _hub.BeginScan(1, "Torrent Downloads");
+
+        var (_, home) = await LoadedHome();
+
+        Assert.False(home.ShowBusy);
+        Assert.False(home.ShowNothingAdded);
+    }
+
+    [AvaloniaFact]
     public async Task Home_Rows_ShowTitlesAndOpenAllArrows()
     {
         _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));

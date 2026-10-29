@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Activity;
@@ -53,7 +52,6 @@ public sealed partial class HomeViewModel : PageViewModel
     private readonly PageActions _actions;
     private readonly Action _addFolder;
     private readonly Action _addKey;
-    private readonly ActivityHub _hub;
     private readonly BackgroundQuery _query;
     private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
 
@@ -61,14 +59,13 @@ public sealed partial class HomeViewModel : PageViewModel
         : base("Home")
     {
         _library = library;
-        _hub = hub;
         _posters = posters;
         _actions = actions;
         _addFolder = addFolder;
         _addKey = addKey;
         _query = new BackgroundQuery(hub, "Home");
-        HasNoKey = hub.Current.KeyState == KeyState.Missing;
-        hub.StatusChanged += _ => Dispatcher.UIThread.Post(SyncKey); // raised on background threads
+        SyncStatus(hub.Current);
+        _ = new StatusFeed(hub, SyncStatus);
     }
 
     [ObservableProperty]
@@ -103,12 +100,25 @@ public sealed partial class HomeViewModel : PageViewModel
     public partial IReadOnlyList<PosterCardViewModel> ContinueWatching { get; private set; } = [];
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(NothingAdded))]
+    [NotifyPropertyChangedFor(nameof(NothingAdded), nameof(ShowNothingAdded), nameof(ShowBusy))]
     public partial IReadOnlyList<PosterCardViewModel> RecentlyAdded { get; private set; } = [];
+
+    /// <summary>"Scanning folders…" or "Identifying 3 files…" while the library is filling; null otherwise.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNothingAdded), nameof(ShowBusy))]
+    public partial string? BusyTitle { get; private set; }
+
+    public string BusyLine => LibraryBusy.Line;
 
     public bool NothingInProgress => ContinueWatching.Count == 0;
 
     public bool NothingAdded => RecentlyAdded.Count == 0;
+
+    /// <summary>"Recently added" is empty and nothing is on its way.</summary>
+    public bool ShowNothingAdded => NothingAdded && BusyTitle is null;
+
+    /// <summary>"Recently added" is empty because the scan or identification has not got there yet.</summary>
+    public bool ShowBusy => NothingAdded && BusyTitle is not null;
 
     [RelayCommand]
     private void AddFolder() => _addFolder();
@@ -124,7 +134,11 @@ public sealed partial class HomeViewModel : PageViewModel
     [RelayCommand]
     private void OpenRecentAll() => _actions.OpenList(ListKind.RecentlyAdded);
 
-    private void SyncKey() => HasNoKey = _hub.Current.KeyState == KeyState.Missing;
+    private void SyncStatus(StatusSnapshot status)
+    {
+        HasNoKey = status.KeyState == KeyState.Missing;
+        BusyTitle = LibraryBusy.Title(status);
+    }
 
     // Before the first load the database may not be open yet; that load comes with the first library change.
     public override void Opened()

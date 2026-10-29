@@ -301,6 +301,137 @@ public sealed class FoldersViewModelTests : IDisposable
         Assert.Contains(_stack.Hub.Recent, e => e.Level == ActivityLevel.Error && e.Message.Contains("disk I/O error"));
     }
 
+    private FoldersViewModel CreateOver(FakeLibrary library) =>
+        new(library, _stack.Actions, _stack.Hub, () => Task.FromResult<string?>(null), _ => Task.FromResult(true));
+
+    [AvaloniaFact]
+    public async Task FolderWaitingForItsFirstScan_SaysWaiting_NotEmpty()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads")); // no files yet
+        using var queued = _stack.Hub.QueueScan(1);
+        var vm = CreateOver(library);
+
+        await vm.RefreshAsync();
+
+        var item = Assert.Single(vm.Folders);
+        Assert.Equal("Waiting to scan", item.Summary);
+        Assert.False(item.IsScanning); // no bar until its scan starts
+    }
+
+    [AvaloniaFact]
+    public async Task ScanningFolder_ShowsItsProgress_LiveWithoutARefresh()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
+        var vm = CreateOver(library);
+        await vm.RefreshAsync();
+        var item = Assert.Single(vm.Folders);
+        Assert.Equal("No videos found", item.Summary);
+
+        _stack.Hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+        Assert.Equal("Scanning…", item.Summary);
+        Assert.True(item.IsScanning);
+        Assert.True(item.IsScanIndeterminate); // the folder is still being listed
+
+        _stack.Hub.ReportScan(1, 120, 810);
+        Ui.Flush();
+        Assert.Equal("Scanning… 120 of 810 files", item.Summary);
+        Assert.False(item.IsScanIndeterminate);
+        Assert.Equal(120 * 100.0 / 810, item.ScanPercent, 3);
+    }
+
+    [AvaloniaFact]
+    public async Task ScanThatFinishes_ReloadsTheCounts()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
+        var vm = CreateOver(library);
+        await vm.RefreshAsync();
+        _stack.Hub.BeginScan(1, "Torrent Downloads");
+        _stack.Hub.ReportScan(1, 810, 810);
+        Ui.Flush();
+
+        library.FolderRows[0] = library.FolderRows[0] with { FileCount = 810 };
+        _stack.Hub.EndScan(1);
+        Ui.Flush();
+        // Until the new counts arrive the row keeps its last scan state rather than its stale count.
+        Assert.NotEqual("No videos found", vm.Folders[0].Summary);
+
+        await Ui.WaitUntil(() => vm.Folders[0].Summary == "810 files");
+        Assert.False(vm.Folders[0].IsScanning);
+    }
+
+    [AvaloniaFact]
+    public async Task FoldersWithTheSameName_EachShowTheirOwnState()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
+        library.FolderRows.Add(FakeLibrary.Folder(2, @"E:\Movies"));
+        _stack.Hub.BeginScan(1, "Movies");
+        _stack.Hub.ReportScan(1, 3, 10);
+        using var queued = _stack.Hub.QueueScan(2);
+        var vm = CreateOver(library);
+
+        await vm.RefreshAsync();
+
+        Assert.Equal("Scanning… 3 of 10 files", vm.Folders.Single(f => f.Id == 1).Summary);
+        Assert.Equal("Waiting to scan", vm.Folders.Single(f => f.Id == 2).Summary);
+    }
+
+    [AvaloniaFact]
+    public async Task ScanProgress_IsCoalesced_SoAFastScanDoesNotFloodTheUi()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
+        var vm = CreateOver(library);
+        await vm.RefreshAsync();
+        var item = Assert.Single(vm.Folders);
+        var changes = 0;
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(FolderItem.Summary)) changes++;
+        };
+
+        _stack.Hub.BeginScan(1, "Torrent Downloads");
+        // A burst from the scanner's thread while the UI thread is busy (blocked here, so nothing it queued runs yet).
+        var scanner = new Thread(() =>
+        {
+            for (var done = 25; done <= 2500; done += 25) _stack.Hub.ReportScan(1, done, 2500);
+        });
+        scanner.Start();
+        scanner.Join();
+        Ui.Flush();
+
+        Assert.Equal(1, changes);
+        Assert.Equal("Scanning… 2500 of 2500 files", item.Summary);
+    }
+
+    [AvaloniaFact]
+    public async Task AddFolder_SaysScanning_NotNoVideosFound_WhileItsFirstScanRuns()
+    {
+        var root = _stack.MakeLibrary("Movies", "Heat (1995).mkv");
+        var vm = await LoadedAsync();
+        // Hold the scan where it starts: the scanner announces itself on the hub from its own thread.
+        using var release = new ManualResetEventSlim();
+        var held = 0;
+        _stack.Hub.StatusChanged += s =>
+        {
+            if (s.IsScanning && Interlocked.Exchange(ref held, 1) == 0) release.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        _picked = root;
+        await vm.AddFolderCommand.ExecuteAsync(null);
+        Ui.Flush();
+
+        var item = Assert.Single(vm.Folders);
+        Assert.True(item.Summary is "Waiting to scan" or "Scanning…", item.Summary);
+        release.Set();
+        await Settle(vm);
+        await Ui.WaitUntil(() => vm.Folders[0].Summary == "1 file");
+    }
+
     [AvaloniaFact]
     public async Task Refresh_RunsTheQueryOffTheUiThread()
     {

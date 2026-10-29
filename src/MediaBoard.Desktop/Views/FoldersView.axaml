@@ -42,6 +42,11 @@
                                     <StackPanel Spacing="2">
                                         <TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                         <TextBlock Classes="muted" Text="{Binding Summary}" TextWrapping="Wrap" />
+                                        <ProgressBar Height="3" MinHeight="0" HorizontalAlignment="Stretch"
+                                                     Margin="0,4,0,0" Minimum="0" Maximum="100"
+                                                     Value="{Binding ScanPercent}"
+                                                     IsIndeterminate="{Binding IsScanIndeterminate}"
+                                                     IsVisible="{Binding IsScanning}" />
                                     </StackPanel>
                                 </DockPanel>
 

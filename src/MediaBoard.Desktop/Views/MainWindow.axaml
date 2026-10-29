@@ -59,6 +59,9 @@
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalAlignment" Value="Stretch" />
         </Style>
+        <Style Selector="StackPanel.busy > TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
         <Style Selector="Button.link">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
@@ -98,10 +101,19 @@
                                 <TextBlock Text="{Binding StatusBar.FailedScans}"
                                            Foreground="{DynamicResource ErrorTextBrush}"
                                            IsVisible="{Binding StatusBar.FailedScans, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                <TextBlock Text="{Binding StatusBar.Progress}"
-                                           IsVisible="{Binding StatusBar.Progress, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                <TextBlock Text="{Binding StatusBar.Identifying}"
-                                           IsVisible="{Binding StatusBar.Identifying, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                <!-- Scanning or identifying: a small bar and the accent colour, so it stands out from "Up to date". -->
+                                <StackPanel x:Name="BusySegment" Orientation="Horizontal" Spacing="8"
+                                            Classes.busy="{Binding StatusBar.IsBusy}">
+                                    <ProgressBar x:Name="BusyBar" Width="64" Height="4" MinHeight="0" MinWidth="0"
+                                                 VerticalAlignment="Center" Minimum="0" Maximum="100"
+                                                 Value="{Binding StatusBar.BusyPercent}"
+                                                 IsIndeterminate="{Binding StatusBar.IsBusyIndeterminate}"
+                                                 IsVisible="{Binding StatusBar.IsBusy}" />
+                                    <TextBlock Text="{Binding StatusBar.Progress}"
+                                               IsVisible="{Binding StatusBar.Progress, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                    <TextBlock Text="{Binding StatusBar.Identifying}" Margin="12,0,0,0"
+                                               IsVisible="{Binding StatusBar.Identifying, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                </StackPanel>
                                 <TextBlock Text="{Binding StatusBar.UnavailableFolders}"
                                            Foreground="{DynamicResource WarningTextBrush}"
                                            IsVisible="{Binding StatusBar.UnavailableFolders, Converter={x:Static ObjectConverters.IsNotNull}}" />

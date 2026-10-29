@@ -29,12 +29,26 @@ public sealed partial class ListViewModel : PageViewModel
         _posters = posters;
         _actions = actions;
         _query = new BackgroundQuery(hub, Title);
-        EmptyText = kind == ListKind.ContinueWatching ? "Nothing in progress" : "Nothing added yet";
+        // A scan only ever adds to the newest-first list; nothing it finds is in progress yet.
+        if (kind == ListKind.RecentlyAdded)
+        {
+            BusyTitle = LibraryBusy.Title(hub.Current);
+            _ = new StatusFeed(hub, status => BusyTitle = LibraryBusy.Title(status));
+        }
     }
 
     public ListKind Kind => _kind;
 
-    public string EmptyText { get; }
+    public string EmptyText => _kind == ListKind.ContinueWatching ? "Nothing in progress" : BusyTitle ?? "Nothing added yet";
+
+    /// <summary>"Titles appear as they're found." under <see cref="EmptyText"/> while the library is filling; empty otherwise.</summary>
+    public string EmptyHint => BusyTitle is null ? "" : LibraryBusy.Line;
+
+    public bool HasEmptyHint => EmptyHint.Length > 0;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EmptyText), nameof(EmptyHint), nameof(HasEmptyHint))]
+    private partial string? BusyTitle { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty))]
@@ -98,6 +112,8 @@ public sealed partial class TitleGridViewModel : PageViewModel
         _posters = posters;
         _actions = actions;
         _query = new BackgroundQuery(hub, Title);
+        BusyTitle = LibraryBusy.Title(hub.Current);
+        _ = new StatusFeed(hub, status => BusyTitle = LibraryBusy.Title(status));
     }
 
     public IReadOnlyList<SortOption> SortOptions => Sorts;
@@ -123,11 +139,19 @@ public sealed partial class TitleGridViewModel : PageViewModel
 
     public bool ShowEmpty => IsLoaded && Items.Count == 0;
 
-    public string EmptyTitle => _all.Count > 0 ? "Nothing matches" : _kind == TitleKind.Movie ? "No movies yet" : "No shows yet";
+    public string EmptyTitle => _all.Count > 0 ? "Nothing matches"
+        : BusyTitle ?? (_kind == TitleKind.Movie ? "No movies yet" : "No shows yet");
 
-    public string EmptyHint => _all.Count > 0 ? "" : _kind == TitleKind.Movie ? "Add a folder that has movies." : "Add a folder that has shows.";
+    public string EmptyHint => _all.Count > 0 ? ""
+        : BusyTitle is not null ? LibraryBusy.Line
+        : _kind == TitleKind.Movie ? "Add a folder that has movies." : "Add a folder that has shows.";
 
     public bool HasEmptyHint => EmptyHint.Length > 0;
+
+    /// <summary>"Scanning folders…" or "Identifying 3 files…" while the library is filling; null otherwise.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EmptyTitle), nameof(EmptyHint), nameof(HasEmptyHint))]
+    private partial string? BusyTitle { get; set; }
 
     public override bool RefreshesWhileHidden => false;
 

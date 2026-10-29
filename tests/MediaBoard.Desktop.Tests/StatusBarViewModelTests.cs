@@ -21,6 +21,59 @@ public class StatusBarViewModelTests
     }
 
     [AvaloniaFact]
+    public void Busy_IsOff_WhenNothingRuns()
+    {
+        var vm = Create();
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal("Up to date", vm.Progress);
+    }
+
+    [AvaloniaFact]
+    public void Busy_ShowsHowFarTheScanIs_WhenTheTotalIsKnown()
+    {
+        var vm = Create();
+
+        Scan(1, "Torrent Downloads", 120, 810);
+        Flush();
+
+        Assert.True(vm.IsBusy);
+        Assert.False(vm.IsBusyIndeterminate);
+        Assert.Equal(120 * 100.0 / 810, vm.BusyPercent, 3);
+        Assert.Equal("Scanning Torrent Downloads, 120 of 810", vm.Progress); // the wording is unchanged
+    }
+
+    [AvaloniaFact]
+    public void Busy_IsIndeterminate_WhileTheScanListsTheFolder()
+    {
+        var vm = Create();
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Flush();
+
+        Assert.True(vm.IsBusy);
+        Assert.True(vm.IsBusyIndeterminate);
+        Assert.Equal("Scanning Torrent Downloads", vm.Progress);
+    }
+
+    [AvaloniaFact]
+    public void Busy_IsIndeterminate_WhileOnlyIdentificationRuns()
+    {
+        var vm = Create();
+
+        _hub.SetPendingIdentification(120);
+        Flush();
+
+        Assert.True(vm.IsBusy);
+        Assert.True(vm.IsBusyIndeterminate);
+        Assert.Equal("Identifying 120", vm.Identifying);
+
+        _hub.SetPendingIdentification(0);
+        Flush();
+        Assert.False(vm.IsBusy);
+    }
+
+    [AvaloniaFact]
     public void Problem_ShowsTheLatestWarningOrError()
     {
         var vm = Create();

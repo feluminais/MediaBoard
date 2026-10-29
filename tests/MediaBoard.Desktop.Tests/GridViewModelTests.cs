@@ -125,6 +125,102 @@ public class GridViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task Grid_Empty_WhileAScanRuns_SaysScanning()
+    {
+        _hub.BeginScan(1, "Torrent Downloads");
+
+        var movies = await Loaded();
+        var shows = await Loaded(TitleKind.Show);
+
+        Assert.True(movies.ShowEmpty);
+        Assert.Equal("Scanning folders…", movies.EmptyTitle);
+        Assert.Equal("Titles appear as they're found.", movies.EmptyHint);
+        Assert.True(movies.HasEmptyHint);
+        Assert.Equal("Scanning folders…", shows.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_Empty_WhileAFolderWaitsToScan_SaysScanning()
+    {
+        using var queued = _hub.QueueScan(1);
+
+        var movies = await Loaded();
+
+        Assert.Equal("Scanning folders…", movies.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_Empty_WhileOnlyIdentificationRuns_SaysHowManyFiles()
+    {
+        _hub.SetPendingIdentification(3);
+        var movies = await Loaded();
+        Assert.Equal("Identifying 3 files…", movies.EmptyTitle);
+        Assert.Equal("Titles appear as they're found.", movies.EmptyHint);
+
+        _hub.SetPendingIdentification(1);
+        Ui.Flush();
+        Assert.Equal("Identifying 1 file…", movies.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_EmptyText_FollowsTheHubLive()
+    {
+        var movies = await Loaded();
+        Assert.Equal("No movies yet", movies.EmptyTitle);
+        var changed = new List<string?>();
+        movies.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+        Assert.Equal("Scanning folders…", movies.EmptyTitle);
+        Assert.Contains(nameof(TitleGridViewModel.EmptyTitle), changed);
+
+        _hub.EndScan(1);
+        Ui.Flush();
+        Assert.Equal("No movies yet", movies.EmptyTitle);
+        Assert.Equal("Add a folder that has movies.", movies.EmptyHint);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_FilterWithNoMatch_SaysNothingMatches_EvenWhileScanning()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        _hub.BeginScan(1, "Torrent Downloads");
+        var grid = await Loaded();
+
+        grid.FilterText = "zzz";
+
+        Assert.Equal("Nothing matches", grid.EmptyTitle);
+    }
+
+    [AvaloniaFact]
+    public async Task List_RecentlyAdded_Empty_WhileAScanRuns_SaysScanning()
+    {
+        var list = new ListViewModel(ListKind.RecentlyAdded, _library, _hub, Posters.None(), new PageActions(_ => { }, _ => { }, _ => { }));
+        await list.RefreshAsync();
+        Assert.Equal("Nothing added yet", list.EmptyText);
+        Assert.False(list.HasEmptyHint);
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+
+        Assert.True(list.ShowEmpty);
+        Assert.Equal("Scanning folders…", list.EmptyText);
+        Assert.Equal("Titles appear as they're found.", list.EmptyHint);
+        Assert.True(list.HasEmptyHint);
+    }
+
+    [AvaloniaFact]
+    public async Task List_ContinueWatching_Empty_StaysNothingInProgress_WhileScanning()
+    {
+        _hub.BeginScan(1, "Torrent Downloads");
+        var list = new ListViewModel(ListKind.ContinueWatching, _library, _hub, Posters.None(), new PageActions(_ => { }, _ => { }, _ => { }));
+        await list.RefreshAsync();
+
+        Assert.Equal("Nothing in progress", list.EmptyText); // a scan never adds anything to this list
+    }
+
+    [AvaloniaFact]
     public async Task Grid_NothingShownBeforeTheFirstLoad()
     {
         var grid = Create();

@@ -8,8 +8,12 @@
         <TextBlock DockPanel.Dock="Top" Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,16" />
 
         <Panel>
-            <TextBlock Classes="muted" Text="{Binding EmptyText}" IsVisible="{Binding ShowEmpty}"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <StackPanel IsVisible="{Binding ShowEmpty}" Spacing="6"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Classes="muted" Text="{Binding EmptyText}" HorizontalAlignment="Center" />
+                <TextBlock Classes="muted" Text="{Binding EmptyHint}" HorizontalAlignment="Center"
+                           IsVisible="{Binding HasEmptyHint}" />
+            </StackPanel>
 
             <!-- The ListBox's panel only builds the rows in view. -->
             <ListBox x:Name="Rows" ItemsSource="{Binding Items}" Background="Transparent" Padding="0">

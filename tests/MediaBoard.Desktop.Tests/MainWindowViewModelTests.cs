@@ -276,6 +276,38 @@ public partial class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
+    public void Scanning_ShowsABarAndTheAccentColourInTheStatusBar()
+    {
+        var vm = Create();
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        var bar = window.FindControl<ProgressBar>("BusyBar")!;
+        var segment = window.FindControl<StackPanel>("BusySegment")!;
+        Assert.False(bar.IsEffectivelyVisible); // "Up to date" stays plain
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        _hub.ReportScan(1, 120, 810);
+        Flush();
+
+        Assert.True(bar.IsEffectivelyVisible);
+        Assert.False(bar.IsIndeterminate);
+        Assert.Equal(120 * 100.0 / 810, bar.Value, 3);
+        var text = segment.Children.OfType<TextBlock>().First();
+        Assert.Equal("Scanning Torrent Downloads, 120 of 810", text.Text);
+        Assert.True(window.TryFindResource("AccentTextBrush", window.ActualThemeVariant, out var accent));
+        Assert.Same(accent, text.Foreground);
+        Assert.True(window.TryFindResource("SystemAccentColorDark1", window.ActualThemeVariant, out var dark1));
+        Assert.True(window.TryFindResource("SystemAccentColorLight2", window.ActualThemeVariant, out var light2));
+        var colour = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(accent).Color;
+        Assert.Contains(colour, new[] { dark1, light2 }.OfType<Avalonia.Media.Color>()); // follows the system accent
+
+        _hub.EndScan(1);
+        Flush();
+        Assert.False(bar.IsEffectivelyVisible);
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public void StatusBarClick_TogglesActivityPanel()
     {
         var vm = Create();

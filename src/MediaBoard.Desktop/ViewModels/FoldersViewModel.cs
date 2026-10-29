@@ -1,3 +1,4 @@
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Activity;
@@ -8,13 +9,19 @@ namespace MediaBoard.Desktop.ViewModels;
 /// <summary>A top-level folder a scan skipped because no video is below it.</summary>
 public sealed record IgnoredFolder(string Name, string Label);
 
-/// <summary>One library folder as the Folders page shows it.</summary>
-public sealed class FolderItem
+/// <summary>
+/// One library folder as the Folders page shows it. The row comes from the library; the scan state comes from the hub
+/// and changes in place while a scan runs (<see cref="SetScan"/>), so the row's progress bar is not rebuilt.
+/// </summary>
+public sealed partial class FolderItem : ObservableObject
 {
     public const string IgnoredLabel = "Ignored: no video";
 
+    private readonly string _idleSummary;
+
     /// <param name="scanFailed">The folder's last scan threw (the status bar says so too).</param>
-    public FolderItem(FolderRow row, bool scanFailed = false)
+    /// <param name="scan">Where the folder's scan is; null when none runs or waits.</param>
+    public FolderItem(FolderRow row, bool scanFailed = false, FolderScan? scan = null)
     {
         Id = row.Id;
         Path = row.Path;
@@ -22,11 +29,12 @@ public sealed class FolderItem
         IsUnavailable = row.Unavailable;
         Name = NameOf(row.Path);
         Ignored = row.IgnoredFolders.Select(name => new IgnoredFolder(name, IgnoredLabel)).ToList();
-        Summary = row.Unavailable
+        _idleSummary = row.Unavailable
             ? "Unavailable. Reconnect the drive, or locate the folder."
             : scanFailed ? "Scan failed"
             : !row.Enabled ? "Disabled"
             : row.FileCount switch { 0 => "No videos found", 1 => "1 file", var n => $"{n} files" };
+        SetScan(scan);
     }
 
     public int Id { get; }
@@ -45,11 +53,44 @@ public sealed class FolderItem
 
     public string ToggleLabel => IsEnabled ? "Disable" : "Enable";
 
-    public string Summary { get; }
+    /// <summary>"Scanning… 120 of 810 files", "Waiting to scan", "No videos found", "12 files"…</summary>
+    [ObservableProperty]
+    public partial string Summary { get; private set; } = "";
+
+    /// <summary>The scan state shown, or null when the row shows its counts.</summary>
+    public FolderScan? Scan { get; private set; }
+
+    /// <summary>A scan of this folder is running: a thin progress bar sits under the summary.</summary>
+    [ObservableProperty]
+    public partial bool IsScanning { get; private set; }
+
+    /// <summary>The scan is still listing the folder, so how far it is can't be told yet.</summary>
+    [ObservableProperty]
+    public partial bool IsScanIndeterminate { get; private set; }
+
+    /// <summary>0 to 100 while a scan with a known total runs.</summary>
+    [ObservableProperty]
+    public partial double ScanPercent { get; private set; }
 
     public IReadOnlyList<IgnoredFolder> Ignored { get; }
 
     public bool HasIgnored => Ignored.Count > 0;
+
+    /// <summary>Shows a scan that runs or waits, or (null) the folder's counts again.</summary>
+    public void SetScan(FolderScan? scan)
+    {
+        Scan = scan;
+        Summary = scan switch
+        {
+            null => _idleSummary,
+            { State: FolderScanState.Waiting } => "Waiting to scan",
+            { Total: > 0 } => string.Create(CultureInfo.InvariantCulture, $"Scanning… {scan.Done} of {scan.Total} files"),
+            _ => "Scanning…",
+        };
+        IsScanning = scan?.State == FolderScanState.Scanning;
+        IsScanIndeterminate = IsScanning && scan!.Total <= 0;
+        ScanPercent = IsScanning && !IsScanIndeterminate ? Math.Clamp(scan!.Done * 100.0 / scan.Total, 0, 100) : 0;
+    }
 
     /// <summary>The last part of a path; a drive root has no name of its own, so it is the path.</summary>
     public static string NameOf(string path)
@@ -72,6 +113,7 @@ public sealed partial class FoldersViewModel : PageViewModel
     private readonly Func<Task<string?>> _pickFolder;
     private readonly Func<string, Task<bool>> _confirm;
     private readonly BackgroundQuery _query;
+    private bool _reloadingAfterScan;
 
     public FoldersViewModel(
         ILibrary library,
@@ -87,6 +129,7 @@ public sealed partial class FoldersViewModel : PageViewModel
         _pickFolder = pickFolder;
         _confirm = confirm;
         _query = new BackgroundQuery(hub, "the folders");
+        _ = new StatusFeed(hub, ApplyScans);
     }
 
     [ObservableProperty]
@@ -114,11 +157,43 @@ public sealed partial class FoldersViewModel : PageViewModel
 
     public override Task RefreshAsync() => _query.RunAsync(_library.Folders, rows =>
     {
-        var failed = _hub.Current.FailedScans;
+        var status = _hub.Current;
         // The status bar lists failed scans by folder name, so match on that.
-        Folders = rows.Select(row => new FolderItem(row, failed.Contains(FolderItem.NameOf(row.Path), StringComparer.OrdinalIgnoreCase))).ToList();
+        Folders = rows.Select(row => new FolderItem(
+            row,
+            status.FailedScans.Contains(FolderItem.NameOf(row.Path), StringComparer.OrdinalIgnoreCase),
+            status.ScanOf(row.Id))).ToList();
         IsLoaded = true;
     });
+
+    // UI thread, while scans run. A row whose scan just ended keeps showing it until the reload brings its new counts;
+    // its old count would say "No videos found" for a folder that was just added.
+    private void ApplyScans(StatusSnapshot status)
+    {
+        var finished = false;
+        foreach (var item in Folders)
+        {
+            var scan = status.ScanOf(item.Id);
+            if (scan is null && item.Scan is not null) finished = true;
+            else item.SetScan(scan);
+        }
+
+        // One reload at a time: progress of another folder's scan must not keep restarting it, or it would never land.
+        if (finished && !_reloadingAfterScan) _ = ReloadAfterScanAsync();
+    }
+
+    private async Task ReloadAfterScanAsync()
+    {
+        _reloadingAfterScan = true;
+        try
+        {
+            await RefreshAsync();
+        }
+        finally
+        {
+            _reloadingAfterScan = false;
+        }
+    }
 
     [RelayCommand]
     private Task AddFolderAsync() => ActAsync(async () =>

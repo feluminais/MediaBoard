@@ -7,23 +7,19 @@ using MediaBoard.Core.Activity;
 namespace MediaBoard.Desktop.ViewModels;
 
 /// <summary>
-/// The always-visible bottom strip. Each property is one segment; a null segment is hidden. The hub raises
-/// <see cref="ActivityHub.StatusChanged"/> on background threads, so changes are posted to the UI thread and
-/// applied from <see cref="ActivityHub.Current"/>, which is always the latest snapshot even when two threads'
+/// The always-visible bottom strip. Each property is one segment; a null segment is hidden. Hub changes arrive on
+/// the UI thread through a <see cref="StatusFeed"/>, which applies the latest snapshot even when two threads'
 /// events arrive out of order.
 /// </summary>
 public sealed partial class StatusBarViewModel : ObservableObject
 {
-    private readonly ActivityHub _hub;
-    private int _applyQueued;
     private int _unseenProblems;
     private string? _latestProblem;
 
     public StatusBarViewModel(ActivityHub hub)
     {
-        _hub = hub;
         Apply(hub.Current);
-        hub.StatusChanged += OnStatusChanged;
+        _ = new StatusFeed(hub, Apply);
         hub.EntryLogged += OnEntryLogged;
     }
 
@@ -37,6 +33,18 @@ public sealed partial class StatusBarViewModel : ObservableObject
     /// <summary>"Identifying 37", or null when nothing waits.</summary>
     [ObservableProperty]
     public partial string? Identifying { get; private set; }
+
+    /// <summary>A scan or identification is running: the strip draws a progress bar and the accent colour.</summary>
+    [ObservableProperty]
+    public partial bool IsBusy { get; private set; }
+
+    /// <summary>The scan's total is not known yet, or only identification runs (it has no total).</summary>
+    [ObservableProperty]
+    public partial bool IsBusyIndeterminate { get; private set; }
+
+    /// <summary>How far the scan is, 0 to 100, when <see cref="IsBusyIndeterminate"/> is false.</summary>
+    [ObservableProperty]
+    public partial double BusyPercent { get; private set; }
 
     [ObservableProperty]
     public partial string Connection { get; private set; } = "";
@@ -103,18 +111,11 @@ public sealed partial class StatusBarViewModel : ObservableObject
         });
     }
 
-    private void OnStatusChanged(StatusSnapshot _)
-    {
-        if (Interlocked.Exchange(ref _applyQueued, 1) == 1) return;
-        Dispatcher.UIThread.Post(() =>
-        {
-            Volatile.Write(ref _applyQueued, 0);
-            Apply(_hub.Current);
-        });
-    }
-
     private void Apply(StatusSnapshot s)
     {
+        IsBusy = s.IsScanning || s.PendingIdentification > 0;
+        IsBusyIndeterminate = !(s.IsScanning && s.ScanTotal > 0);
+        BusyPercent = IsBusyIndeterminate ? 0 : Math.Clamp(s.ScanDone * 100.0 / s.ScanTotal, 0, 100);
         Progress = s switch
         {
             { ScanFolder: { } folder, ScanTotal: > 0 } => string.Create(CultureInfo.InvariantCulture,
