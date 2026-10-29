@@ -1,8 +1,10 @@
+using System.Globalization;
 using Dapper;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Identification;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Probing;
 using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Settings;
@@ -419,6 +421,75 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.Equal("Brand New One", Scalar<string>(
             "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
             new { id = file.Id }));
+    }
+
+    [Fact]
+    public async Task OlderParserVersion_RedoesTheParse_AndRequeuesAllButUserAndRuleFiles()
+    {
+        const string southPark = @"South Park (1997)\Season 06\E01. Jared Has Aides (2002).mkv";
+        const string lost = @"Lost\Season 1\Lost.S01E01.mkv";
+        _lib.File(southPark);
+        _lib.File(lost);
+        await Scan();
+        var sp = Row(southPark);
+        var lostRow = Row(lost);
+        var lostId = _titles.Upsert(ShowTitle(4607, "Lost", 2004, 1));
+        _matches.SetUserMatch(lostRow.Id, lostId, [], null);
+
+        // A row stored before AirYear: the air year was the show year, and the file went to review on it.
+        using (var conn = _db.Open())
+        {
+            conn.Execute(
+                "UPDATE files SET status = 'review', parsed_json = @json WHERE id = @id",
+                new { id = sp.Id, json = """{"Kind":"Episode","Title":"South Park","Year":2002,"Season":6,"Episodes":[1],"EpisodeTitles":["Jared Has Aides"],"ShowFolder":"South Park (1997)","TmdbId":null,"ImdbId":null}""" });
+            conn.Execute("DELETE FROM meta");
+        }
+
+        _tmdb.OnSearch("South Park", 1997, TitleKind.Show, ShowHit(2190, "South Park", 1997))
+            .OnTitle(ShowTitle(2190, "South Park", 1997, 6))
+            .OnSeason(2190, Season(6, "Jared Has Aides"));
+
+        await Run();
+
+        var redone = Row(southPark);
+        Assert.Equal((1997, 2002), (redone.Parsed.Year, redone.Parsed.AirYear));
+        Assert.Equal("matched", redone.Status);
+        Assert.Equal("South Park", LinkedTitleName(redone.Id));
+        Assert.Equal([("South Park", (int?)1997, TitleKind.Show)], _tmdb.Searches);
+
+        // The user's match is left alone: not requeued, not asked about.
+        Assert.Equal("matched", Row(lost).Status);
+        Assert.Equal("user", LinkSource(lostRow.Id));
+        Assert.Equal(PathParser.Version.ToString(CultureInfo.InvariantCulture),
+            Scalar<string>("SELECT value FROM meta WHERE key = 'parser_version'"));
+    }
+
+    [Fact]
+    public async Task OlderParserVersion_RequeuesAnAutomaticMatch_ButNotRuleOrNotMediaFiles()
+    {
+        KnowLost();
+        _lib.File(@"Lost\Season 1\Lost.S01E01.mkv");
+        _lib.File(@"Mystery\Season 1\Mystery.S01E01.mkv");
+        _lib.File("Heat (1995).mkv");
+        await Scan();
+        var ruleShow = _titles.Upsert(ShowTitle(777, "Mystery", 2010, 1));
+        _titles.UpsertEpisodes(ruleShow, Season(1, "First"));
+        _matches.AddRule(_folder.Id, "Mystery", "Mystery", ruleShow);
+        await Run();
+        Assert.Equal("auto", LinkSource(Row(@"Lost\Season 1\Lost.S01E01.mkv").Id));
+        Assert.Equal("rule", LinkSource(Row(@"Mystery\Season 1\Mystery.S01E01.mkv").Id));
+        _matches.SetNotMedia(Row("Heat (1995).mkv").Id);
+        // Without its rule, a requeued Mystery file would be searched for and end in review.
+        using (var conn = _db.Open()) conn.Execute("DELETE FROM meta; DELETE FROM match_rules;");
+        ClearProviderCalls();
+
+        await Run();
+
+        Assert.Equal(["Lost"], _tmdb.Searches.Select(s => s.Title).Distinct());
+        Assert.Equal("matched", Row(@"Lost\Season 1\Lost.S01E01.mkv").Status);
+        Assert.Equal("matched", Row(@"Mystery\Season 1\Mystery.S01E01.mkv").Status);
+        Assert.Equal("rule", LinkSource(Row(@"Mystery\Season 1\Mystery.S01E01.mkv").Id));
+        Assert.Equal("not_media", Row("Heat (1995).mkv").Status);
     }
 
     [Fact]

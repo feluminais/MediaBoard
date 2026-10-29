@@ -8,6 +8,13 @@ namespace MediaBoard.Core.Parsing;
 /// </summary>
 public static class PathParser
 {
+    /// <summary>
+    /// Raised whenever the same path starts to parse differently in a way that matters; stored parses from an
+    /// older version are redone once (see Storage.ParseUpgrade). 2: an episode's air year is kept apart from the
+    /// show's year, and "[6x23-24]" is a double episode.
+    /// </summary>
+    public const int Version = 2;
+
     private const int MinSiblingsForBareNumber = 2;
     private static readonly char[] Stray = [' ', '-', '–', '_', ',', '.'];
 

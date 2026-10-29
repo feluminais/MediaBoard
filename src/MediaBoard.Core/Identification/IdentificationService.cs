@@ -18,6 +18,7 @@ public sealed class IdentificationService : IDisposable
 {
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
+    private readonly LibraryDatabase _db;
     private readonly IMetadataProvider _provider;
     private readonly IDurationProbe _probe;
     private readonly Connectivity _connectivity;
@@ -45,6 +46,7 @@ public sealed class IdentificationService : IDisposable
         ActivityHub hub,
         TimeProvider? timeProvider = null)
     {
+        _db = db;
         _provider = provider;
         _probe = probe;
         _connectivity = connectivity;
@@ -203,6 +205,9 @@ public sealed class IdentificationService : IDisposable
 
     private async Task ProcessAsync(CancellationToken ct)
     {
+        // Parses stored by an older parser are redone first, and the files they may have misled are queued again.
+        ParseUpgrade.Run(_db);
+
         var renamed = RenamedPlaceholders();
         // Disabled folders wait until they are switched on again; removed ones have no files left.
         var work = _files.ByStatusInEnabledFolders("pending").Concat(_files.ByStatusInEnabledFolders("offline"))

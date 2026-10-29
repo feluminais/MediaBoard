@@ -1,4 +1,6 @@
+using System.Globalization;
 using Dapper;
+using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Storage;
 using Microsoft.Data.Sqlite;
 
@@ -9,7 +11,7 @@ public sealed class LibraryDatabaseTests : IDisposable
     private static readonly string[] ExpectedTables =
     [
         "episodes", "file_episodes", "file_titles", "files", "folders",
-        "match_rules", "overrides", "progress", "review_candidates", "titles",
+        "match_rules", "meta", "overrides", "progress", "review_candidates", "titles",
     ];
 
     private const string InsertFolder =
@@ -35,12 +37,12 @@ public sealed class LibraryDatabaseTests : IDisposable
 
         using (var first = db.Open())
         {
-            Assert.Equal(1, first.ExecuteScalar<int>("PRAGMA user_version"));
+            Assert.Equal(2, first.ExecuteScalar<int>("PRAGMA user_version"));
             first.Execute("INSERT INTO folders(path, enabled, added_at) VALUES ('X:\\Media', 1, '2026-01-01')");
         }
 
         using var second = db.Open();
-        Assert.Equal(1, second.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(2, second.ExecuteScalar<int>("PRAGMA user_version"));
         // A second open must not re-run the schema.
         Assert.Equal(1, second.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
 
@@ -56,8 +58,38 @@ public sealed class LibraryDatabaseTests : IDisposable
             conn.Execute("INSERT INTO folders(path, enabled, added_at) VALUES ('X:\\Media', 1, '2026-01-01')");
 
         using var again = new LibraryDatabase(DbPath).Open();
-        Assert.Equal(1, again.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(2, again.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal(1, again.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
+    }
+
+    [Fact]
+    public void Open_NewDatabase_RecordsTheCurrentParserVersion()
+    {
+        using var conn = new LibraryDatabase(DbPath).Open();
+
+        Assert.Equal(PathParser.Version.ToString(CultureInfo.InvariantCulture),
+            conn.ExecuteScalar<string>("SELECT value FROM meta WHERE key = 'parser_version'"));
+    }
+
+    [Fact]
+    public void Open_VersionOneDatabase_MigratesKeepingItsData_AndLeavesTheParserVersionUnknown()
+    {
+        using (var conn = new LibraryDatabase(DbPath).Open())
+        {
+            var folderId = conn.ExecuteScalar<long>(InsertFolder);
+            conn.Execute(
+                "INSERT INTO files(folder_id, rel_path, size, mtime, first_seen, missing, parsed_json, status) " +
+                "VALUES (@folderId, 'a.mkv', 1, 1, '2026-01-01', 0, '{}', 'matched')", new { folderId });
+            // What a database written before the parser version existed looks like.
+            conn.Execute("DROP TABLE meta; PRAGMA user_version = 1;");
+        }
+
+        SqliteConnection.ClearAllPools();
+        using var again = new LibraryDatabase(DbPath).Open();
+
+        Assert.Equal(2, again.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal("matched", again.ExecuteScalar<string>("SELECT status FROM files WHERE rel_path = 'a.mkv'"));
+        Assert.Null(again.ExecuteScalar<string?>("SELECT value FROM meta WHERE key = 'parser_version'"));
     }
 
     [Fact]
@@ -66,7 +98,7 @@ public sealed class LibraryDatabaseTests : IDisposable
         await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() =>
         {
             using var conn = new LibraryDatabase(DbPath).Open();
-            Assert.Equal(1, conn.ExecuteScalar<int>("PRAGMA user_version"));
+            Assert.Equal(2, conn.ExecuteScalar<int>("PRAGMA user_version"));
         })));
     }
 

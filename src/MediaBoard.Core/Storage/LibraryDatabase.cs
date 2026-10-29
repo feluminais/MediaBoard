@@ -1,3 +1,5 @@
+using System.Globalization;
+using MediaBoard.Core.Parsing;
 using Microsoft.Data.Sqlite;
 
 namespace MediaBoard.Core.Storage;
@@ -8,7 +10,7 @@ namespace MediaBoard.Core.Storage;
 /// </summary>
 public sealed class LibraryDatabase
 {
-    private const int CurrentVersion = 1;
+    private const int CurrentVersion = 2;
     private const string SchemaResource = "Schema.sql";
 
     private readonly string _connectionString;
@@ -72,9 +74,22 @@ public sealed class LibraryDatabase
         // Not deferred: BEGIN IMMEDIATE takes the write lock up front, so two instances
         // opening a new file cannot both apply the schema.
         using var transaction = connection.BeginTransaction(deferred: false);
-        if (ReadVersion(connection) >= CurrentVersion) return;
+        var version = ReadVersion(connection);
+        if (version >= CurrentVersion) return;
 
-        Execute(connection, LoadSchema());
+        if (version == 0)
+        {
+            Execute(connection, LoadSchema());
+            // A new database holds no parses yet, so none of them is out of date.
+            Execute(connection,
+                $"INSERT INTO meta(key, value) VALUES ('parser_version', '{PathParser.Version.ToString(CultureInfo.InvariantCulture)}')");
+        }
+        else
+        {
+            // v1 to v2: the meta table. No parser version is recorded, so the stored parses are redone once.
+            Execute(connection, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        }
+
         Execute(connection, $"PRAGMA user_version = {CurrentVersion}");
         transaction.Commit();
     }

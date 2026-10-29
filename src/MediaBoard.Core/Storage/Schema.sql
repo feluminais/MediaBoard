@@ -1,4 +1,5 @@
--- Schema v1. Applied once by LibraryDatabase when PRAGMA user_version < 1.
+-- Schema v2 for a new database. Applied once by LibraryDatabase when PRAGMA user_version is 0; an older
+-- database is migrated step by step there instead.
 -- Timestamps are ISO 8601 text; booleans are 0/1 integers.
 -- Tables an overrides row can point at use AUTOINCREMENT so a deleted id is never reused (overrides has no foreign key).
 
@@ -101,4 +102,10 @@ CREATE TABLE review_candidates (
     year    INTEGER,
     score   REAL    NOT NULL,
     PRIMARY KEY (file_id, kind, tmdb_id)
+);
+
+-- Small key/value facts about the stored data, such as the parser version the stored parses come from.
+CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
