@@ -50,6 +50,7 @@ public sealed class AppHost(
         settings.Changed += OnSettingsChanged;
         hub.StatusChanged += OnStatusChanged;
         watcher.Rescanned += OnRescanned;
+        watcher.RescanFailed += ShowScanFailed; // the watcher logs it
         playback.ProgressChanged += OnProgressChanged;
 
         _startup = Task.Run(() => RunStartupAsync(_stopping.Token));
@@ -65,6 +66,7 @@ public sealed class AppHost(
         settings.Changed -= OnSettingsChanged;
         hub.StatusChanged -= OnStatusChanged;
         watcher.Rescanned -= OnRescanned;
+        watcher.RescanFailed -= ShowScanFailed;
         playback.ProgressChanged -= OnProgressChanged;
         await _stopping.CancelAsync().ConfigureAwait(false);
         if (_recheckTimer is { } timer) await timer.DisposeAsync().ConfigureAwait(false);
@@ -165,13 +167,19 @@ public sealed class AppHost(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             hub.Log(ActivityLevel.Error, $"Couldn't scan {folder.Path}: {e.Message}", "Restart MediaBoard to scan it again.");
-            SetScanFailed(folder.Id, FolderName(folder.Path));
-            library.NotifyChanged(); // the Folders page shows the failure
+            ShowScanFailed(folder);
             return false;
         }
 
         SetScanFailed(folder.Id, null);
         return true;
+    }
+
+    // The status bar names the folder, and the Folders page reloads: its row leaves its scan text for "Scan failed".
+    private void ShowScanFailed(LibraryFolder folder)
+    {
+        SetScanFailed(folder.Id, FolderName(folder.Path));
+        library.NotifyChanged();
     }
 
     /// <summary>Records that a folder's last scan threw (a name) or worked (null), and publishes the failed folders.</summary>
@@ -259,10 +267,28 @@ public sealed class AppHost(
         for (var i = 0; i < line.Folders.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var folder = folders.All().FirstOrDefault(f => f.Id == line.Folders[i].Id);
+            var folder = ReadAgain(line.Folders[i]);
             var worked = folder is { Enabled: true } && await ScanAsync(folder, ct).ConfigureAwait(false);
             line.Leave(i);
             if (worked) scanned(folder!);
+        }
+    }
+
+    /// <summary>
+    /// The folder as it is now, or null when it was removed. A read that fails counts as a failed scan of that folder,
+    /// so the rest of the line, the watcher and the recheck timer still start.
+    /// </summary>
+    private LibraryFolder? ReadAgain(LibraryFolder queued)
+    {
+        try
+        {
+            return folders.All().FirstOrDefault(f => f.Id == queued.Id);
+        }
+        catch (Exception e)
+        {
+            hub.Log(ActivityLevel.Error, $"Couldn't scan {queued.Path}: {e.Message}", "Restart MediaBoard to scan it again.");
+            ShowScanFailed(queued);
+            return null;
         }
     }
 

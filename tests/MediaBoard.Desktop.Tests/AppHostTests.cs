@@ -278,6 +278,93 @@ public sealed class AppHostTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task FailedWatcherRescan_TakesTheFolderRowOffScanning_AndSaysScanFailed()
+    {
+        var movies = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(movies, "Heat.1995.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var folder = services.GetRequiredService<FolderStore>().Add(movies);
+
+        await RunAsync(services, async vm =>
+        {
+            vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
+            var page = Assert.IsType<FoldersViewModel>(vm.CurrentPage);
+            await Ui.WaitUntil(() => page.Folders.Count == 1 && page.Folders[0].Summary == "1 file");
+            // Every insert into files fails from now on, as a full disk would make it.
+            using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "CREATE TRIGGER fail_scan BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;";
+                command.ExecuteNonQuery();
+            }
+
+            using var gate = new FirstScanGate(services.GetRequiredService<ActivityHub>()); // holds the rescan once started
+            await File.WriteAllBytesAsync(Path.Combine(movies, "Alien.1979.mkv"), new byte[4096]); // the watcher rescans
+            await Ui.WaitUntil(() => page.Folders[0].IsScanning);
+            gate.Release();
+
+            await Ui.WaitUntil(() => page.Folders[0].Summary == "Scan failed");
+            Assert.False(page.Folders[0].IsScanning);
+            Assert.Equal([folder.Id], services.GetRequiredService<ActivityHub>().Current.FailedScanIds);
+            Assert.Equal("Scan failed: Movies", vm.StatusBar.FailedScans);
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task FolderThatCantBeReadAtItsTurn_IsSkipped_AndStartupCarriesOn()
+    {
+        var clock = new ManualClock();
+        var first = Directory.CreateDirectory(Path.Combine(_dir, "First")).FullName;
+        var broken = Directory.CreateDirectory(Path.Combine(_dir, "Broken")).FullName;
+        var last = Directory.CreateDirectory(Path.Combine(_dir, "Last")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(broken, "Lost.S01E01.mkv"), new byte[4096]);
+        await File.WriteAllBytesAsync(Path.Combine(last, "Heat.1995.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"), clock);
+        var store = services.GetRequiredService<FolderStore>();
+        store.Add(first);
+        var brokenFolder = store.Add(broken);
+        var lastFolder = store.Add(last);
+        var hub = services.GetRequiredService<ActivityHub>();
+        var db = services.GetRequiredService<LibraryDatabase>();
+        void Sql(string sql)
+        {
+            using var connection = db.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.ExecuteNonQuery();
+        }
+
+        // While the first folder scans, the folders table goes away, so the next folder's turn can't read it. The
+        // table comes back as soon as that failure is logged, so the folder after it can be read again.
+        hub.EntryLogged += entry =>
+        {
+            if (entry.Message.StartsWith("Couldn't scan", StringComparison.Ordinal) && entry.Message.Contains("Broken"))
+                Sql("ALTER TABLE folders_away RENAME TO folders");
+        };
+        using var gate = new FirstScanGate(hub);
+        var files = services.GetRequiredService<FileStore>();
+
+        await RunAsync(services, async _ =>
+        {
+            Assert.Empty(files.ByFolder(brokenFolder.Id)); // skipped
+            Assert.Single(files.ByFolder(lastFolder.Id)); // the others still scanned
+            Assert.Contains(brokenFolder.Id, hub.Current.FailedScanIds);
+            Assert.Empty(hub.Current.FolderScans);
+            Assert.DoesNotContain(hub.Recent, e => e.Message.StartsWith("Library update stopped", StringComparison.Ordinal));
+            Assert.Equal(1, clock.PendingTimers); // the recheck timer is armed
+
+            await File.WriteAllBytesAsync(Path.Combine(last, "Alien.1979.mkv"), new byte[4096]);
+            await Ui.WaitUntil(() => files.ByFolder(lastFolder.Id).Count == 2); // and the watcher runs
+        }, beforeStartupEnds: () =>
+        {
+            Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)), "startup never scanned");
+            Sql("ALTER TABLE folders RENAME TO folders_away");
+            gate.Dispose();
+            return Task.CompletedTask;
+        });
+    }
+
+    [AvaloniaFact]
     public async Task FailedScan_IsPublishedWithItsFolderId()
     {
         var library = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;

@@ -44,6 +44,9 @@ public sealed class LibraryWatcher : IDisposable
     /// <summary>Raised on a background thread after a folder's rescan finished, with the folder id.</summary>
     public event Action<int>? Rescanned;
 
+    /// <summary>Raised on a background thread after a folder's rescan threw (it is logged too). Not raised when stopping.</summary>
+    public event Action<LibraryFolder>? RescanFailed;
+
     /// <summary>Starts watching every enabled folder that exists. Does nothing when already started.</summary>
     public void Start()
     {
@@ -229,10 +232,11 @@ public sealed class LibraryWatcher : IDisposable
     {
         while (true)
         {
+            var scanned = false;
             try
             {
                 await _scanner.ScanAsync(watch.Folder, watch.Cancel.Token).ConfigureAwait(false);
-                if (!watch.Closed) Rescanned?.Invoke(watch.Folder.Id);
+                scanned = true;
             }
             catch (OperationCanceledException) when (watch.Cancel.IsCancellationRequested)
             {
@@ -240,9 +244,12 @@ public sealed class LibraryWatcher : IDisposable
             }
             catch (Exception ex)
             {
-                // A failed scan or a failing Rescanned subscriber must not end the watcher.
+                // A failed scan must not end the watcher.
                 _hub.Log(ActivityLevel.Error, $"Rescan of {Path.GetFileName(watch.Folder.Path)} failed.", ex.Message);
+                if (!watch.Closed) Notify(() => RescanFailed?.Invoke(watch.Folder));
             }
+
+            if (scanned && !watch.Closed) Notify(() => Rescanned?.Invoke(watch.Folder.Id));
 
             lock (_gate)
             {
@@ -255,6 +262,19 @@ public sealed class LibraryWatcher : IDisposable
                 watch.Scanning = false;
                 return;
             }
+        }
+    }
+
+    // A failing subscriber must not end the watcher either.
+    private void Notify(Action raise)
+    {
+        try
+        {
+            raise();
+        }
+        catch (Exception ex)
+        {
+            _hub.Log(ActivityLevel.Error, "Couldn't act on a folder rescan.", ex.Message);
         }
     }
 

@@ -344,6 +344,45 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task FailedRescan_RaisesRescanFailed_WithTheFolder()
+    {
+        var folder = _folders.Add(_lib.Root);
+        _watcher.Start();
+        var failed = new TaskCompletionSource<LibraryFolder>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _watcher.RescanFailed += f => failed.TrySetResult(f);
+        // Every insert into files fails, as a full disk would make it.
+        using (var connection = _db.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "CREATE TRIGGER fail_scan BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;";
+            command.ExecuteNonQuery();
+        }
+
+        _lib.File(@"Movies\Heat.1995.mkv");
+
+        Assert.Equal(folder.Id, (await Within(failed.Task, Deadline)).Id);
+        Assert.Equal(0, RescanCount()); // it did not work, so no Rescanned
+        Assert.Null(_hub.Current.ScanOf(folder.Id));
+    }
+
+    [Fact]
+    public async Task FailingRescannedSubscriber_IsNotAFailedRescan()
+    {
+        _folders.Add(_lib.Root);
+        _watcher.Start();
+        var failures = 0;
+        _watcher.RescanFailed += _ => Interlocked.Increment(ref failures);
+        _throwOnce = 1;
+        var rescan = NextRescan();
+
+        _lib.File(@"Movies\Heat.1995.mkv");
+        await Within(rescan, Deadline);
+        await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error));
+
+        Assert.Equal(0, Volatile.Read(ref failures)); // the scan worked; only a subscriber broke
+    }
+
+    [Fact]
     public async Task FailingSubscriber_IsLogged_AndWatchingContinues()
     {
         _folders.Add(_lib.Root);
