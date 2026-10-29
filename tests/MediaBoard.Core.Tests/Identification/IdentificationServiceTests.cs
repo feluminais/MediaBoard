@@ -401,6 +401,26 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rule_TitleNamingNoEpisode_IsMatchedToTheShowWithoutAnEpisode()
+    {
+        _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 0, 4, 5))
+            .OnSeason(615, Season(0, "Futurama: The Lost Adventure"))
+            .OnSeason(615, Season(4, "Roswell That Ends Well", "A Tale of Two Santas"))
+            .OnSeason(615, Season(5, "Crimes of the Hot"));
+        _lib.File(@"Futurama\Season 04\S04E01 Not An Episode Anywhere.mkv");
+        await Scan();
+        var showId = _titles.Upsert(ShowTitle(615, "Futurama", 1999, 0, 4, 5));
+        _matches.AddRule(_folder.Id, "Futurama", "Futurama", showId);
+
+        await Run();
+
+        var file = Row(@"Futurama\Season 04\S04E01 Not An Episode Anywhere.mkv");
+        Assert.Equal("matched", file.Status);
+        Assert.Equal("Futurama", LinkedTitleName(file.Id));
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_episodes WHERE file_id = @id", new { id = file.Id }));
+    }
+
+    [Fact]
     public async Task Rule_NewEpisodeWithATitle_RefreshesTheStaleStoredSeason()
     {
         _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 0, 1, 4))

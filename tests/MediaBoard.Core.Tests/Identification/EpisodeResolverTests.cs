@@ -18,6 +18,19 @@ public class EpisodeResolverTests
     private static int[] Numbers(IReadOnlyList<EpisodeDetails>? result) =>
         result!.Select(e => e.Number).ToArray();
 
+    private static (int Season, int Number)[] Keys(IReadOnlyList<EpisodeDetails>? result) =>
+        result!.Select(e => (e.Season, e.Number)).ToArray();
+
+    /// <summary><see cref="EpisodeResolver.ResolveAsync"/> over a show that has exactly these seasons.</summary>
+    private static Task<IReadOnlyList<EpisodeDetails>?> ResolveAsync(ParsedMedia parsed, params SeasonDetails[] seasons)
+    {
+        var byNumber = seasons.ToDictionary(s => s.Season);
+        return EpisodeResolver.ResolveAsync(
+            parsed,
+            number => Task.FromResult(byNumber.GetValueOrDefault(number)),
+            () => Task.FromResult<IReadOnlyList<int>>([.. byNumber.Keys.Order()]));
+    }
+
     [Fact]
     public void NumberMatch_NoTitle_ReturnsByNumber()
     {
@@ -265,5 +278,148 @@ public class EpisodeResolverTests
         var episodes = SeasonWith(6, (44, "No Hat for Pat")).Episodes;
 
         Assert.False(EpisodeResolver.TitleDisagrees(Parsed(6, [44], "No Hat For Pat & Toy Store of Doom"), episodes));
+    }
+
+    [Fact]
+    public void TitleDisagrees_TheShowsOwnName_IsNoEpisodeTitle()
+    {
+        // "S24E01. South Park (2020)": the name after the marker is the show's, not the episode's.
+        Assert.False(EpisodeResolver.TitleDisagrees(Parsed(24, [1], "Show"), Season(24, "The Pandemic Special").Episodes));
+    }
+
+    // ---- Segments ("A & B"): each links its own episode ----
+
+    [Fact]
+    public async Task Segments_EachLinksItsOwnEpisode_InTheSeasonFirst_ThenInOtherSeasons()
+    {
+        var four = SeasonWith(4, (36, "Rise and Shine"), (37, "Waiting"));
+        var five = SeasonWith(5, (3, "Boat Smarts"), (27, "Fungus Among Us"));
+
+        var result = await ResolveAsync(Parsed(5, [3], "Rise and Shine & Waiting & Fungus Among Us"), four, five);
+
+        Assert.Equal([(4, 36), (4, 37), (5, 27)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_ASegmentThatFindsNothing_IsSkipped()
+    {
+        var five = SeasonWith(5, (8, "Krabs a la Mode"), (15, "Money Talks"), (17, "Slimy Dancing"));
+
+        var result = await ResolveAsync(Parsed(5, [8], "Money Talks & Nothing Like It & Slimy Dancing"), five);
+
+        Assert.Equal([(5, 15), (5, 17)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_OneOnTheNumber_TheOthersAreLinkedToo()
+    {
+        var six = SeasonWith(6, (1, "Krabby Road"));
+        var seven = SeasonWith(7, (1, "Tentacle-Vision"), (2, "Growth Spout"));
+
+        var result = await ResolveAsync(Parsed(7, [1], "Tentacle-Vision & Krabby Road"), six, seven);
+
+        Assert.Equal([(6, 1), (7, 1)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_FoundInTwoSeasons_IsSkipped()
+    {
+        var four = SeasonWith(4, (1, "Waiting"));
+        var five = SeasonWith(5, (3, "Boat Smarts"), (27, "Fungus Among Us"));
+        var six = SeasonWith(6, (1, "Waiting"));
+
+        var result = await ResolveAsync(Parsed(5, [3], "Waiting & Fungus Among Us"), four, five, six);
+
+        Assert.Equal([(5, 27)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_CommaSeparatedEpisodeNames_AreSegmentsToo()
+    {
+        var seven = SeasonWith(7, (9, "Truth or Square"), (16, "Back to the Past"), (17, "The Bad Guy Club for Villains"));
+
+        var result = await ResolveAsync(Parsed(7, [9], "Back to the Past, The Bad Guy Club for Villains"), seven);
+
+        Assert.Equal([(7, 16), (7, 17)], Keys(result));
+    }
+
+    [Fact]
+    public async Task Segments_CommaWhereOnePieceIsNoEpisode_IsNotASplit()
+    {
+        var one = SeasonWith(1, (1, "Pilot"), (2, "Goodbye"));
+
+        var result = await ResolveAsync(Parsed(1, [1], "Hello, Goodbye"), one);
+
+        Assert.Empty(result!);
+    }
+
+    // ---- Parts ("Film. Part 1" of a film TMDB lists whole) ----
+
+    [Theory]
+    [InlineData("Bender's Big Score. Part 1")]
+    [InlineData("Bender's Big Score Part 4")]
+    [InlineData("Bender's Big Score - Part II")]
+    public async Task PartTitle_FindsTheWholeEpisode_InSpecials(string title)
+    {
+        var specials = SeasonWith(0, (1, "Bender's Big Score"), (5, "Bender's Game"));
+        var five = SeasonWith(5, (1, "Crimes of the Hot"), (4, "A Taste of Freedom"));
+
+        var result = await ResolveAsync(Parsed(5, [1], title), specials, five);
+
+        Assert.Equal([(0, 1)], Keys(result));
+    }
+
+    [Theory]
+    [InlineData("Bender's Big Score. Part 1", "Bender's Big Score")]
+    [InlineData("Into the Wild Green Yonder Part IV", "Into the Wild Green Yonder")]
+    [InlineData("Imaginationland - part two", "Imaginationland")]
+    [InlineData("Counterpart", null)]
+    [InlineData("Part 2", null)]
+    [InlineData("Cartoon Wars (1)", null)]
+    public void WithoutPart_DropsATrailingPartNumber(string title, string? expected)
+    {
+        Assert.Equal(expected, EpisodeResolver.WithoutPart(title));
+    }
+
+    [Fact]
+    public async Task PartTitle_SeasonTmdbLacks_StillSearchesSeasonZero()
+    {
+        var specials = SeasonWith(0, (5, "Bender's Game"));
+        var five = SeasonWith(5, (1, "Crimes of the Hot"));
+
+        var result = await ResolveAsync(Parsed(9, [2], "Bender's Game. Part 2"), specials, five);
+
+        Assert.Equal([(0, 5)], Keys(result));
+    }
+
+    [Fact]
+    public async Task PartOnBothSides_StaysOnThatPart()
+    {
+        var ten = SeasonWith(10, (3, "Cartoon Wars (1)"), (4, "Cartoon Wars (2)"));
+
+        var result = await ResolveAsync(Parsed(10, [4], "Cartoon Wars. Part 2"), ten);
+
+        Assert.Equal([(10, 4)], Keys(result));
+    }
+
+    // ---- No silent fallback to the number ----
+
+    [Fact]
+    public async Task TitleNamingNoEpisode_LinksNoEpisode_NotTheOneAtItsNumber()
+    {
+        var six = SeasonWith(6, (11, "A Life in a Day"), (37, "SpongeBob SquarePants vs. The Big One"));
+
+        var result = await ResolveAsync(Parsed(6, [11], "SpongeBob SquarePants and the big wave"), six);
+
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task TheShowsOwnNameAsTitle_KeepsTheNumber()
+    {
+        var result = await ResolveAsync(Parsed(24, [1], "Show"), SeasonWith(24, (1, "The Pandemic Special")));
+
+        Assert.Equal([(24, 1)], Keys(result));
     }
 }

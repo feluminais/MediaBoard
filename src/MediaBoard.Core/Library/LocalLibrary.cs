@@ -137,7 +137,8 @@ public sealed partial class LocalLibrary : ILibrary
     /// <summary>
     /// The episodes the file holds in the chosen show, found the way identification finds them (titles and
     /// numbers, the other seasons for a release numbered differently; see <see cref="EpisodeResolver.ResolveAsync"/>).
-    /// When that cannot decide, the numbers parsed from the name are used as they are. The seasons returned for
+    /// When that cannot decide, the numbers parsed from the name are used as they are; a title that names no episode
+    /// TMDB has links none, not the one at the number. The seasons returned for
     /// storing are the file's own, the specials and those its episodes are in, not every season looked through.
     /// </summary>
     private async Task<(IReadOnlyList<EpisodeDetails> Episodes, List<SeasonDetails> Seasons)> ResolveEpisodesAsync(

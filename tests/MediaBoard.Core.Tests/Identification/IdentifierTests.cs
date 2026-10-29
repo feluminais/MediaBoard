@@ -555,7 +555,7 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
-    public async Task EpisodeTitleDisagreeingWithItsNumber_NoStrongMatchElsewhere_StaysOnItsNumber()
+    public async Task EpisodeTitleDisagreeingWithItsNumber_NoStrongMatchElsewhere_IsTheShowWithNoEpisode()
     {
         KnowFuturama();
         var parsed = Episode("Futurama", null, 4, 2) with { EpisodeTitles = ["Not An Episode"] };
@@ -563,7 +563,8 @@ public class IdentifierTests : IDisposable
         var result = await Identify(parsed);
 
         Assert.Equal(IdentificationStatus.Matched, result.Status);
-        Assert.Equal((4, 2), (result.Episodes.Single().Season, result.Episodes.Single().Number));
+        Assert.Equal(615, result.Title!.TmdbId);
+        Assert.Empty(result.Episodes);
     }
 
     [Fact]

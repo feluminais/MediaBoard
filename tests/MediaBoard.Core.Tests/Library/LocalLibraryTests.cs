@@ -709,6 +709,24 @@ public sealed class LocalLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task FixMatch_TitleNamingNoEpisode_LinksTheShowWithoutTheEpisodeAtItsNumber()
+    {
+        const string rel = @"Futurama\Season 04\S04E01 Not An Episode Anywhere.mkv";
+        _lib.File(rel, 4096);
+        await Scan();
+        var file = Row(rel);
+        _tmdb.OnTitle(new TitleDetails(615, TitleKind.Show, "Futurama", 1999, null, null, 8.4, null, 22, [4, 5]))
+            .OnSeason(615, new SeasonDetails(4, [new EpisodeDetails(4, 1, "Roswell That Ends Well", 22, null)]))
+            .OnSeason(615, new SeasonDetails(5, [new EpisodeDetails(5, 1, "Crimes of the Hot", 22, null)]));
+
+        await _library.FixMatchAsync(file.Id, 615, TitleKind.Show, Ct);
+
+        Assert.Equal("matched", Row(rel).Status);
+        Assert.Equal(1, Scalar<int>("SELECT COUNT(*) FROM file_titles WHERE file_id = @id", new { id = file.Id }));
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_episodes WHERE file_id = @id", new { id = file.Id }));
+    }
+
+    [Fact]
     public async Task FixMatch_UnknownFile_Throws()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _library.FixMatchAsync(12345, 1, TitleKind.Show, Ct));
