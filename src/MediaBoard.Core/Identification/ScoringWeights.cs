@@ -50,4 +50,8 @@ public static class ScoringWeights
     // An episode whose number TMDB does not have is looked up by title in the show's other seasons, where nothing
     // backs the title up, so the match must be closer.
     public const double OtherSeasonTitleThreshold = 0.90;
+
+    // An episode title this far from every TMDB episode at the file's numbers names a different episode, so the
+    // other seasons are searched for it too.
+    public const double EpisodeTitleDisagreeThreshold = 0.60;
 }

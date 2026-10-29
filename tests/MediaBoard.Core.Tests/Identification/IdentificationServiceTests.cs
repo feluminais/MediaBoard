@@ -370,6 +370,35 @@ public sealed class IdentificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rule_FindsEpisodesByTitle_WhenTheNumberDisagreesOrIsMissing()
+    {
+        _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 0, 1, 4, 5))
+            .OnSeason(615, Season(0, "Futurama: The Lost Adventure"))
+            .OnSeason(615, Season(1, "Space Pilot 3000"))
+            .OnSeason(615, Season(4, "Roswell That Ends Well", "A Tale of Two Santas"))
+            .OnSeason(615, Season(5, "Crimes of the Hot", "Kif Gets Knocked Up a Notch", "Obsoletely Fabulous"));
+        _lib.File(@"Futurama\Season 04\S04E01 Kif Gets Knocked Up a Notch.mkv");
+        _lib.File(@"Futurama\Season 04\S04E13 Obsoletely Fabulous.mkv");
+        _lib.File(@"Futurama\Season 04\S04E02 A Tale of Two Santas.mkv");
+        await Scan();
+        var showId = _titles.Upsert(ShowTitle(615, "Futurama", 1999, 0, 1, 4, 5));
+        _titles.UpsertEpisodes(showId, Season(4, "Roswell That Ends Well", "A Tale of Two Santas"));
+        _matches.AddRule(_folder.Id, "Futurama", "Futurama", showId);
+
+        await Run();
+
+        string EpisodeOf(string rel) => Scalar<string>(
+            "SELECT e.season || 'x' || e.number || ' ' || e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
+            new { id = Row(rel).Id });
+        Assert.All(_files.ByFolder(_folder.Id), f => Assert.Equal("matched", f.Status));
+        Assert.Equal("5x2 Kif Gets Knocked Up a Notch", EpisodeOf(@"Futurama\Season 04\S04E01 Kif Gets Knocked Up a Notch.mkv"));
+        Assert.Equal("5x3 Obsoletely Fabulous", EpisodeOf(@"Futurama\Season 04\S04E13 Obsoletely Fabulous.mkv"));
+        Assert.Equal("4x2 A Tale of Two Santas", EpisodeOf(@"Futurama\Season 04\S04E02 A Tale of Two Santas.mkv"));
+        // Each season once in the run; season 4 came from the stored episodes.
+        Assert.Equal([(615, 0), (615, 1), (615, 5)], _tmdb.SeasonFetches.Order());
+    }
+
+    [Fact]
     public async Task SeasonsFetchedOncePerShow()
     {
         KnowLost();

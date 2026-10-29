@@ -31,6 +31,78 @@ public static class EpisodeResolver
     }
 
     /// <summary>
+    /// <see cref="Resolve"/> with the show's other seasons as a fallback, for a release numbered differently
+    /// from TMDB (Amazon's Futurama "S04E13 Bend Her" is TMDB's S05E13). The file's episode title is looked up
+    /// in the other seasons (<see cref="ResolveAcrossSeasons"/>) when its number does not exist on TMDB, or when
+    /// the episode at its number has a clearly different name; with no strong match there, a number that exists
+    /// is kept. <paramref name="season"/> returns null for a season the show does not have.
+    /// <paramref name="seasonNumbers"/> is asked only when the other seasons are needed.
+    /// </summary>
+    public static async Task<IReadOnlyList<EpisodeDetails>?> ResolveAsync(
+        ParsedMedia parsed, Func<int, Task<SeasonDetails?>> season, Func<Task<IReadOnlyList<int>>> seasonNumbers)
+    {
+        var number = parsed.Season ?? 1;
+        var own = await season(number).ConfigureAwait(false);
+        if (own is null) return await InOtherSeasonsAsync(null).ConfigureAwait(false);
+
+        // Season 0 is read only to match an episode title, so a file without one never needs it.
+        var specials = number != 0 && HasTitles(parsed) ? await season(0).ConfigureAwait(false) : null;
+
+        var episodes = Resolve(parsed, own, specials);
+        if (episodes is null)
+        {
+            // Numbers TMDB has, with a title that ties or fits nothing: no sign of a different numbering.
+            return parsed.Episodes.All(n => own.Episodes.Any(e => e.Number == n))
+                ? null
+                : await InOtherSeasonsAsync(specials).ConfigureAwait(false);
+        }
+
+        return TitleDisagrees(parsed, episodes)
+            ? await InOtherSeasonsAsync(specials).ConfigureAwait(false) ?? episodes
+            : episodes;
+
+        async Task<IReadOnlyList<EpisodeDetails>?> InOtherSeasonsAsync(SeasonDetails? fetchedSpecials)
+        {
+            if (!HasTitles(parsed)) return null;
+
+            var seasons = new List<SeasonDetails>();
+            if (fetchedSpecials is not null) seasons.Add(fetchedSpecials);
+            foreach (var other in await seasonNumbers().ConfigureAwait(false))
+            {
+                if (other == 0 || other == number) continue;
+                try
+                {
+                    if (await season(other).ConfigureAwait(false) is { } details) seasons.Add(details);
+                }
+                catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+                {
+                    // A season TMDB lists but cannot serve is left out.
+                }
+            }
+
+            return ResolveAcrossSeasons(parsed, seasons);
+        }
+    }
+
+    /// <summary>
+    /// True when the file has an episode title and it is far from every one of <paramref name="episodes"/>
+    /// (below <see cref="ScoringWeights.EpisodeTitleDisagreeThreshold"/>): it names some other episode. A title
+    /// of segments ("A &amp; B") agrees when any segment does.
+    /// </summary>
+    public static bool TitleDisagrees(ParsedMedia parsed, IReadOnlyList<EpisodeDetails> episodes)
+    {
+        var titles = parsed.EpisodeTitles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        if (titles.Count == 0) return false;
+
+        var names = titles
+            .SelectMany(t => t.Split(SegmentSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Append(t))
+            .ToList();
+        return !episodes.Any(e => names.Any(n => TitleSimilarity.Score(n, e.Name) >= ScoringWeights.EpisodeTitleDisagreeThreshold));
+    }
+
+    private static bool HasTitles(ParsedMedia parsed) => parsed.EpisodeTitles.Any(t => !string.IsNullOrWhiteSpace(t));
+
+    /// <summary>
     /// A title that names only part of a parsed range ("S01E01-E02 Pilot") does not disagree with the numbers:
     /// the file holds the whole range. True when every title match sits in the requested season, inside the
     /// parsed numbers, and every parsed number exists in that season.

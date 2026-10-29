@@ -446,9 +446,12 @@ public sealed class IdentificationService : IDisposable
                 return new Outcome(new IdentificationResult(IdentificationStatus.NeedsReview, null, [], 1.0, [candidate], "rule"));
             }
 
+            // Other seasons read only to look a title up are not stored unless the file landed in one.
+            var number = parsed.Season ?? 1;
+            var keep = fetched.Where(s => s.Season == number || s.Season == 0 || episodes.Any(e => e.Season == s.Season)).ToList();
             var details = new TitleDetails(
                 show.TmdbId!.Value, TitleKind.Show, show.Name, show.Year, show.EndYear, show.Overview, show.Rating, show.PosterPath, null, []);
-            return new Outcome(new IdentificationResult(IdentificationStatus.Matched, details, episodes, 1.0, [], "rule"), show.Id, fetched);
+            return new Outcome(new IdentificationResult(IdentificationStatus.Matched, details, episodes, 1.0, [], "rule"), show.Id, keep);
         }
         catch (MetadataUnavailableException e)
         {
@@ -462,19 +465,28 @@ public sealed class IdentificationService : IDisposable
         }
     }
 
-    private async Task<IReadOnlyList<EpisodeDetails>?> ResolveRuleEpisodesAsync(
-        TitleRow show, ParsedMedia parsed, bool preferStored, List<SeasonDetails> fetched, Run run, CancellationToken ct)
+    /// <summary>
+    /// The same episode lookup as the identifier's, other seasons included, reading stored seasons first when
+    /// <paramref name="preferStored"/> is set. The show's season list is asked of TMDB only when a title has
+    /// to be looked up in the other seasons.
+    /// </summary>
+    private Task<IReadOnlyList<EpisodeDetails>?> ResolveRuleEpisodesAsync(
+        TitleRow show, ParsedMedia parsed, bool preferStored, List<SeasonDetails> fetched, Run run, CancellationToken ct) =>
+        EpisodeResolver.ResolveAsync(
+            parsed,
+            number => RuleSeasonAsync(show, number, preferStored, fetched, run, ct),
+            () => RuleSeasonNumbersAsync(show, run, ct));
+
+    private static async Task<IReadOnlyList<int>> RuleSeasonNumbersAsync(TitleRow show, Run run, CancellationToken ct)
     {
-        var number = parsed.Season ?? 1;
-        var season = await RuleSeasonAsync(show, number, preferStored, fetched, run, ct).ConfigureAwait(false);
-        if (season is null) return null;
-
-        // The resolver reads season 0 only to match an episode title.
-        var specials = number != 0 && parsed.EpisodeTitles.Count > 0
-            ? await RuleSeasonAsync(show, 0, preferStored, fetched, run, ct).ConfigureAwait(false)
-            : null;
-
-        return EpisodeResolver.Resolve(parsed, season, specials);
+        try
+        {
+            return (await run.Provider.GetTitleAsync(show.TmdbId!.Value, TitleKind.Show, ct).ConfigureAwait(false)).SeasonNumbers;
+        }
+        catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+        {
+            return [];
+        }
     }
 
     private async Task<SeasonDetails?> RuleSeasonAsync(

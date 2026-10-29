@@ -233,4 +233,37 @@ public class EpisodeResolverTests
     {
         Assert.Null(EpisodeResolver.ResolveAcrossSeasons(Parsed(4, [13]), [Season(5, "Bend Her")]));
     }
+
+    [Theory]
+    [InlineData("Kif Gets Knocked Up a Notch", true)]
+    [InlineData("Roswell That Ends Well", false)]
+    [InlineData("Roswell that Ends Well!", false)]
+    public void TitleDisagrees_WhenTheTitleIsFarFromTheEpisodeAtTheNumber(string title, bool expected)
+    {
+        var episodes = Season(4, "Roswell That Ends Well").Episodes;
+
+        Assert.Equal(expected, EpisodeResolver.TitleDisagrees(Parsed(4, [1], title), episodes));
+    }
+
+    [Fact]
+    public void TitleDisagrees_NoTitle_NeverDisagrees()
+    {
+        Assert.False(EpisodeResolver.TitleDisagrees(Parsed(4, [1]), Season(4, "Roswell That Ends Well").Episodes));
+    }
+
+    [Theory]
+    [InlineData("Pilot", false)]
+    [InlineData("Something Else Entirely", true)]
+    public void TitleDisagrees_MultiEpisode_AgreesWhenAnyEpisodeFits(string title, bool expected)
+    {
+        Assert.Equal(expected, EpisodeResolver.TitleDisagrees(Parsed(1, [1, 2], title), Season(1, "Pilot", "Two").Episodes));
+    }
+
+    [Fact]
+    public void TitleDisagrees_SegmentTitle_AgreesWhenOneSegmentFits()
+    {
+        var episodes = SeasonWith(6, (44, "No Hat for Pat")).Episodes;
+
+        Assert.False(EpisodeResolver.TitleDisagrees(Parsed(6, [44], "No Hat For Pat & Toy Store of Doom"), episodes));
+    }
 }
