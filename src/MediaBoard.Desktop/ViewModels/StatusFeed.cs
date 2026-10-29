@@ -8,12 +8,14 @@ namespace MediaBoard.Desktop.ViewModels;
 /// Hands a view model the hub's status on the UI thread. The hub raises <see cref="ActivityHub.StatusChanged"/> on
 /// background threads, as often as every 25 files of a scan; however many changes arrive before the dispatcher gets
 /// to it, one post runs, and it applies <see cref="ActivityHub.Current"/>, which is always the latest snapshot.
+/// The hub lives as long as the app: a view model that lives shorter disposes its feed, or the hub keeps it alive.
 /// </summary>
-public sealed class StatusFeed
+public sealed class StatusFeed : IDisposable
 {
     private readonly ActivityHub _hub;
     private readonly Action<StatusSnapshot> _apply;
     private int _queued;
+    private volatile bool _disposed;
 
     public StatusFeed(ActivityHub hub, Action<StatusSnapshot> apply)
     {
@@ -22,13 +24,20 @@ public sealed class StatusFeed
         hub.StatusChanged += OnStatusChanged;
     }
 
+    /// <summary>Stops listening; a post already queued does nothing.</summary>
+    public void Dispose()
+    {
+        _disposed = true;
+        _hub.StatusChanged -= OnStatusChanged;
+    }
+
     private void OnStatusChanged(StatusSnapshot _)
     {
         if (Interlocked.Exchange(ref _queued, 1) == 1) return;
         Dispatcher.UIThread.Post(() =>
         {
             Volatile.Write(ref _queued, 0);
-            _apply(_hub.Current);
+            if (!_disposed) _apply(_hub.Current);
         });
     }
 }

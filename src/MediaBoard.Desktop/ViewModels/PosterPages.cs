@@ -19,7 +19,9 @@ public sealed partial class ListViewModel : PageViewModel
     private readonly PosterLoader _posters;
     private readonly PageActions _actions;
     private readonly BackgroundQuery _query;
+    private readonly ActivityHub _hub;
     private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
+    private StatusFeed? _feed;
 
     public ListViewModel(ListKind kind, ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions)
         : base(kind == ListKind.ContinueWatching ? "Continue watching" : "Recently added")
@@ -28,13 +30,8 @@ public sealed partial class ListViewModel : PageViewModel
         _library = library;
         _posters = posters;
         _actions = actions;
+        _hub = hub;
         _query = new BackgroundQuery(hub, Title);
-        // A scan only ever adds to the newest-first list; nothing it finds is in progress yet.
-        if (kind == ListKind.RecentlyAdded)
-        {
-            BusyTitle = LibraryBusy.Title(hub.Current);
-            _ = new StatusFeed(hub, status => BusyTitle = LibraryBusy.Title(status));
-        }
     }
 
     public ListKind Kind => _kind;
@@ -60,8 +57,10 @@ public sealed partial class ListViewModel : PageViewModel
 
     public bool ShowEmpty => IsLoaded && Items.Count == 0;
 
+    // The shell opens a list (and brings one back from the back stack) through RefreshAsync.
     public override Task RefreshAsync()
     {
+        FollowScans();
         var known = _known;
         return _query.RunAsync(() => Load(known), cards =>
         {
@@ -69,6 +68,21 @@ public sealed partial class ListViewModel : PageViewModel
             _known = PosterCards.Index(cards);
             IsLoaded = true;
         });
+    }
+
+    // A new list is made for each visit, and the hub lives as long as the app: leaving lets go of it.
+    public override void Closed()
+    {
+        _feed?.Dispose();
+        _feed = null;
+    }
+
+    // A scan only ever adds to the newest-first list; nothing it finds is in progress yet.
+    private void FollowScans()
+    {
+        if (_kind != ListKind.RecentlyAdded || _feed is not null) return;
+        BusyTitle = LibraryBusy.Title(_hub.Current);
+        _feed = new StatusFeed(_hub, status => BusyTitle = LibraryBusy.Title(status));
     }
 
     // Thread pool. int.MaxValue asks for everything.

@@ -308,6 +308,74 @@ public partial class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task FoldersPage_ShowsTheNewCounts_OnceTheScanIsRecorded()
+    {
+        _library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
+        var vm = Create();
+        vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
+        var folders = Assert.IsType<FoldersViewModel>(vm.CurrentPage);
+        await Ui.WaitUntil(() => folders.Folders.Count == 1);
+        _hub.BeginScan(1, "Torrent Downloads");
+        _hub.ReportScan(1, 810, 810);
+        Flush();
+        _hub.EndScan(1);
+        Flush();
+        Assert.Equal("Scanning… 810 of 810 files", folders.Folders[0].Summary);
+
+        // What AppHost does next: record the result, which tells the library it changed.
+        _library.FolderRows[0] = _library.FolderRows[0] with { FileCount = 810 };
+        _library.RaiseChanged();
+
+        await Ui.WaitUntil(() => folders.Folders[0].Summary == "810 files");
+    }
+
+    // The hub outlives every page; a page made for one visit must not stay on its event.
+    private int StatusSubscribers()
+    {
+        var field = typeof(ActivityHub).GetField(nameof(ActivityHub.StatusChanged),
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (field.GetValue(_hub) as Delegate)?.GetInvocationList().Length ?? 0;
+    }
+
+    [AvaloniaFact]
+    public async Task RecentlyAddedList_LeavesTheHub_WhenItIsLeft()
+    {
+        var vm = Create();
+        var before = StatusSubscribers();
+
+        for (var visit = 0; visit < 3; visit++)
+        {
+            vm.NavigateCommand.Execute(MainWindowViewModel.HomePage);
+            var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+            home.OpenRecentAllCommand.Execute(null);
+            var list = Assert.IsType<ListViewModel>(vm.CurrentPage);
+            await Ui.WaitUntil(() => list.IsLoaded);
+            Assert.Equal(before + 1, StatusSubscribers()); // it follows the scans while open
+
+            vm.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+            Assert.Equal(before, StatusSubscribers());
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task RecentlyAddedList_FollowsTheHubAgain_WhenComingBackToIt()
+    {
+        var vm = Create();
+        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
+        home.OpenRecentAllCommand.Execute(null);
+        var list = Assert.IsType<ListViewModel>(vm.CurrentPage);
+        await Ui.WaitUntil(() => list.IsLoaded);
+        vm.OpenOnlineTitle(603, MediaBoard.Core.Metadata.TitleKind.Movie); // the list goes on the back stack
+        Assert.IsType<TitleViewModel>(vm.CurrentPage).BackCommand.Execute(null);
+        Assert.Same(list, vm.CurrentPage);
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Flush();
+
+        Assert.Equal("Scanning folders…", list.EmptyText);
+    }
+
+    [AvaloniaFact]
     public void StatusBarClick_TogglesActivityPanel()
     {
         var vm = Create();

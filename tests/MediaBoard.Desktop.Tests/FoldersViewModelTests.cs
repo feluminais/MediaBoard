@@ -343,7 +343,7 @@ public sealed class FoldersViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task ScanThatFinishes_ReloadsTheCounts()
+    public async Task ScanThatFinishes_KeepsItsScanText_UntilTheRecordedResultReloadsTheCounts()
     {
         var library = new FakeLibrary();
         library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
@@ -352,15 +352,44 @@ public sealed class FoldersViewModelTests : IDisposable
         _stack.Hub.BeginScan(1, "Torrent Downloads");
         _stack.Hub.ReportScan(1, 810, 810);
         Ui.Flush();
+        var reads = 0;
+        library.OnQuery = _ => Interlocked.Increment(ref reads);
 
-        library.FolderRows[0] = library.FolderRows[0] with { FileCount = 810 };
-        _stack.Hub.EndScan(1);
+        _stack.Hub.EndScan(1); // the scanner's finally: the result is not recorded yet
         Ui.Flush();
-        // Until the new counts arrive the row keeps its last scan state rather than its stale count.
-        Assert.NotEqual("No videos found", vm.Folders[0].Summary);
+        await Task.Delay(100);
+        Ui.Flush();
+        // The page does not reload on its own here (it would read the library before the result is in), and its old
+        // count would say "No videos found".
+        Assert.Equal("Scanning… 810 of 810 files", vm.Folders[0].Summary);
+        Assert.Equal(0, Volatile.Read(ref reads));
 
-        await Ui.WaitUntil(() => vm.Folders[0].Summary == "810 files");
+        // Recording the result raises the library's Changed, and the shell reloads the page.
+        library.FolderRows[0] = library.FolderRows[0] with { FileCount = 810 };
+        await vm.RefreshAsync();
+
+        Assert.Equal("810 files", vm.Folders[0].Summary);
         Assert.False(vm.Folders[0].IsScanning);
+    }
+
+    [AvaloniaFact]
+    public async Task RowsReadWhileTheFolderScanned_KeepTheScanText_WhenTheScanEndsBeforeTheyArrive()
+    {
+        using var release = new ManualResetEventSlim();
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads"));
+        var vm = CreateOver(library);
+        await vm.RefreshAsync();
+        _stack.Hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+        library.OnQuery = _ => release.Wait(TimeSpan.FromSeconds(10));
+
+        var refresh = vm.RefreshAsync(); // reads the rows from before the scan's result
+        _stack.Hub.EndScan(1);
+        release.Set();
+        await refresh;
+
+        Assert.Equal("Scanning…", vm.Folders[0].Summary); // not its stale "No videos found"
     }
 
     [AvaloniaFact]
@@ -416,20 +445,57 @@ public sealed class FoldersViewModelTests : IDisposable
         // Hold the scan where it starts: the scanner announces itself on the hub from its own thread.
         using var release = new ManualResetEventSlim();
         var held = 0;
-        _stack.Hub.StatusChanged += s =>
+        void Hold(StatusSnapshot s)
         {
             if (s.IsScanning && Interlocked.Exchange(ref held, 1) == 0) release.Wait(TimeSpan.FromSeconds(10));
-        };
+        }
 
-        _picked = root;
-        await vm.AddFolderCommand.ExecuteAsync(null);
-        Ui.Flush();
+        _stack.Hub.StatusChanged += Hold;
+        try
+        {
+            _picked = root;
+            await vm.AddFolderCommand.ExecuteAsync(null);
+            Ui.Flush();
 
-        var item = Assert.Single(vm.Folders);
-        Assert.True(item.Summary is "Waiting to scan" or "Scanning…", item.Summary);
-        release.Set();
+            var item = Assert.Single(vm.Folders);
+            Assert.True(item.Summary is "Waiting to scan" or "Scanning…", item.Summary);
+        }
+        finally
+        {
+            release.Set();
+            _stack.Hub.StatusChanged -= Hold;
+        }
+
         await Settle(vm);
-        await Ui.WaitUntil(() => vm.Folders[0].Summary == "1 file");
+        Assert.Equal("1 file", Assert.Single(vm.Folders).Summary); // an awaited refresh shows current data
+    }
+
+    [AvaloniaFact]
+    public async Task DisabledFolder_StillInLineForAStartupScan_SaysDisabled()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\Torrent Downloads") with { Enabled = false });
+        using var queued = _stack.Hub.QueueScan(1);
+        var vm = CreateOver(library);
+
+        await vm.RefreshAsync();
+
+        Assert.Equal("Disabled", Assert.Single(vm.Folders).Summary);
+    }
+
+    [AvaloniaFact]
+    public async Task FailedScan_MarksOnlyThatFolder_WhenTwoShareAName()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
+        library.FolderRows.Add(FakeLibrary.Folder(2, @"E:\Movies"));
+        _stack.Hub.SetFailedScans(["Movies"], [1]);
+        var vm = CreateOver(library);
+
+        await vm.RefreshAsync();
+
+        Assert.Equal("Scan failed", vm.Folders.Single(f => f.Id == 1).Summary);
+        Assert.Equal("No videos found", vm.Folders.Single(f => f.Id == 2).Summary);
     }
 
     [AvaloniaFact]

@@ -79,6 +79,8 @@ public sealed partial class FolderItem : ObservableObject
     /// <summary>Shows a scan that runs or waits, or (null) the folder's counts again.</summary>
     public void SetScan(FolderScan? scan)
     {
+        // A folder switched off while still in line for a startup scan is skipped when its turn comes.
+        if (!IsEnabled && scan?.State == FolderScanState.Waiting) scan = null;
         Scan = scan;
         Summary = scan switch
         {
@@ -113,7 +115,6 @@ public sealed partial class FoldersViewModel : PageViewModel
     private readonly Func<Task<string?>> _pickFolder;
     private readonly Func<string, Task<bool>> _confirm;
     private readonly BackgroundQuery _query;
-    private bool _reloadingAfterScan;
 
     public FoldersViewModel(
         ILibrary library,
@@ -155,43 +156,36 @@ public sealed partial class FoldersViewModel : PageViewModel
         _ = RefreshAsync();
     }
 
-    public override Task RefreshAsync() => _query.RunAsync(_library.Folders, rows =>
+    public override Task RefreshAsync()
     {
-        var status = _hub.Current;
-        // The status bar lists failed scans by folder name, so match on that.
-        Folders = rows.Select(row => new FolderItem(
-            row,
-            status.FailedScans.Contains(FolderItem.NameOf(row.Path), StringComparer.OrdinalIgnoreCase),
-            status.ScanOf(row.Id))).ToList();
-        IsLoaded = true;
-    });
+        // Folders that are busy now may have their result recorded before the rows are read, or after.
+        var busy = _hub.Current;
+        return _query.RunAsync(_library.Folders, rows =>
+        {
+            var status = _hub.Current;
+            var shown = Folders.ToDictionary(f => f.Id);
+            Folders = rows.Select(row => new FolderItem(
+                row,
+                status.FailedScanIds.Contains(row.Id),
+                status.ScanOf(row.Id) ?? HeldScan(row.Id, busy, shown))).ToList();
+            IsLoaded = true;
+        });
+    }
 
-    // UI thread, while scans run. A row whose scan just ended keeps showing it until the reload brings its new counts;
-    // its old count would say "No videos found" for a folder that was just added.
+    // A folder that was busy when these rows were read and is idle now may come with counts from before its scan, and
+    // for a folder just added that says "No videos found". Its row keeps the scan it showed; recording the scan's
+    // result tells the library it changed, and the reload that follows reads the new counts with the folder idle.
+    private static FolderScan? HeldScan(int folderId, StatusSnapshot busy, Dictionary<int, FolderItem> shown) =>
+        busy.ScanOf(folderId) is { } then ? shown.GetValueOrDefault(folderId)?.Scan ?? then : null;
+
+    // UI thread, while scans run. A row whose scan just ended keeps showing it until the reload after the recorded
+    // result brings its new counts: reloading here would read the library before that result is in.
     private void ApplyScans(StatusSnapshot status)
     {
-        var finished = false;
         foreach (var item in Folders)
         {
             var scan = status.ScanOf(item.Id);
-            if (scan is null && item.Scan is not null) finished = true;
-            else item.SetScan(scan);
-        }
-
-        // One reload at a time: progress of another folder's scan must not keep restarting it, or it would never land.
-        if (finished && !_reloadingAfterScan) _ = ReloadAfterScanAsync();
-    }
-
-    private async Task ReloadAfterScanAsync()
-    {
-        _reloadingAfterScan = true;
-        try
-        {
-            await RefreshAsync();
-        }
-        finally
-        {
-            _reloadingAfterScan = false;
+            if (scan is not null || item.Scan is null) item.SetScan(scan);
         }
     }
 
