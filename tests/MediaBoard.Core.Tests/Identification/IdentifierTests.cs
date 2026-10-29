@@ -389,6 +389,43 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
+    public async Task EpisodeAirYear_ShowThatStartedAYearLater_CanStillBeAccepted()
+    {
+        _tmdb.OnSearch("Some Show", null, TitleKind.Show, Show(77, "Some Show", 2005))
+            .OnTitle(ShowTitle(77, "Some Show", 2005, 1)).OnSeason(77, Season(1, "Pilot"));
+
+        var result = await Identify(Episode("Some Show", null, 1, 1) with { AirYear = 2004 });
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+    }
+
+    [Fact]
+    public async Task CompletePackYear_AfterTheShowStarted_StillMatches()
+    {
+        _tmdb.OnSearch("Breaking Bad", null, TitleKind.Show, Show(1396, "Breaking Bad", 2008))
+            .OnTitle(ShowTitle(1396, "Breaking Bad", 2008, 1)).OnSeason(1396, Season(1, "Pilot"));
+        var parsed = PathParser.Parse(@"Breaking Bad (2013) Complete BluRay\Season 1\Breaking.Bad.S01E01.mkv", []);
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(1396, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task ShowFolderYear_StillPicksTheRebootOverTheOriginal()
+    {
+        _tmdb.OnSearch("Frasier", 2023, TitleKind.Show, Show(194764, "Frasier", 2023, 40, votes: 150))
+            .OnSearch("Frasier", null, TitleKind.Show, Show(3452, "Frasier", 1993, 60, votes: 1900), Show(194764, "Frasier", 2023, 40, votes: 150))
+            .OnTitle(ShowTitle(194764, "Frasier", 2023, 2)).OnSeason(194764, Season(2, "Episode 1"));
+        var parsed = PathParser.Parse(@"Frasier (2023)\Season 2\Frasier.S02E01.mkv", []);
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(194764, result.Title!.TmdbId);
+    }
+
+    [Fact]
     public async Task Reboot_YearBeforeTheMarker_IsTheShowYear()
     {
         _tmdb.OnSearch("Frasier", 2023, TitleKind.Show, Show(194764, "Frasier", 2023, 40, votes: 150))

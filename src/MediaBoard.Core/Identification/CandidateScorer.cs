@@ -36,15 +36,26 @@ public static class CandidateScorer
     }
 
     /// <summary>
-    /// The year component. An episode's air year is no start year: it only rules out a show that started
-    /// after it, which scores as a far year.
+    /// The year component. A movie's year is strict. An episode's show year is looser: one year off either way
+    /// counts in full, and a show that started earlier may simply be in a later pack ("Breaking Bad (2013)
+    /// Complete"), so that scores like an air year. An air year is no start year: it only makes a show that
+    /// started after it unlikely, one year after being an off-by-one.
     /// </summary>
     private static double YearScore(ParsedMedia parsed, int? candidateYear)
     {
         if (candidateYear is not { } c) return ScoringWeights.YearUnknownScore;
         if (parsed.Year is not { } p)
         {
-            return parsed.AirYear is { } aired && c > aired ? ScoringWeights.YearFarScore : ScoringWeights.YearUnknownScore;
+            return parsed.AirYear is not { } aired || c <= aired ? ScoringWeights.YearUnknownScore
+                : c - aired <= ScoringWeights.YearOffByOneDistance ? ScoringWeights.YearOffByOneScore
+                : ScoringWeights.YearFarScore;
+        }
+
+        if (parsed.Kind == MediaKind.Episode)
+        {
+            return Math.Abs(p - c) <= ScoringWeights.YearOffByOneDistance ? ScoringWeights.YearExactScore
+                : c < p ? ScoringWeights.YearUnknownScore
+                : ScoringWeights.YearFarScore;
         }
 
         var distance = Math.Abs(p - c);

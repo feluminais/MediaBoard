@@ -13,6 +13,36 @@ public class CandidateScorerTests
         string name, int? year, TitleKind kind = TitleKind.Movie, double popularity = 50, string? original = null) =>
         new(1, kind, name, original, year, popularity, null, null, null);
 
+    private static double EpisodeYearPart(int? showYear, int? airYear, int candidateYear)
+    {
+        var parsed = new ParsedMedia(MediaKind.Episode, "Show", showYear, 1, [1], [], "Show", null, null, airYear);
+        var candidate = Candidate("Show", candidateYear, TitleKind.Show);
+        var noYear = Candidate("Show", null, TitleKind.Show);
+        return (CandidateScorer.Score(parsed, candidate, null, null) - CandidateScorer.Score(parsed, noYear, null, null))
+               / ScoringWeights.YearWeight + ScoringWeights.YearUnknownScore;
+    }
+
+    [Theory]
+    [InlineData(2008, 2008, 1.0)] // exact
+    [InlineData(2008, 2007, 1.0)] // one off either way: full credit for a show year
+    [InlineData(2008, 2009, 1.0)]
+    [InlineData(2013, 2008, 0.5)] // started earlier than a pack's year: like an air year, no penalty
+    [InlineData(2008, 2011, 0.0)] // started later: a different show
+    public void Scorer_EpisodeShowYear(int showYear, int candidateYear, double expected)
+    {
+        Assert.Equal(expected, EpisodeYearPart(showYear, null, candidateYear), 9);
+    }
+
+    [Theory]
+    [InlineData(2004, 2004, 0.5)] // started that year or before: no evidence either way
+    [InlineData(2004, 1999, 0.5)]
+    [InlineData(2004, 2005, 0.7)] // a year after: a premiere date across New Year, off by one
+    [InlineData(2004, 2006, 0.0)] // later still: cannot have aired in 2004
+    public void Scorer_EpisodeAirYear(int airYear, int candidateYear, double expected)
+    {
+        Assert.Equal(expected, EpisodeYearPart(null, airYear, candidateYear), 9);
+    }
+
     [Fact]
     public void Scorer_YearOffByOne_StillAccepts()
     {
