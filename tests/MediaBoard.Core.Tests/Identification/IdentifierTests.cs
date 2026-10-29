@@ -412,6 +412,63 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
+    public async Task EpisodeNumberMissingFromSeason_IsFoundByTitleInAnotherSeason()
+    {
+        KnowFuturama();
+        var parsed = Episode("Futurama", null, 4, 13) with { EpisodeTitles = ["Bend Her"] };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        var episode = Assert.Single(result.Episodes);
+        Assert.Equal((5, 13, "Bend Her"), (episode.Season, episode.Number, episode.Name));
+        // Each season once; season 0 was read only because the file has an episode title.
+        Assert.Equal([(615, 0), (615, 1), (615, 4), (615, 5)], _tmdb.SeasonFetches.Order());
+    }
+
+    [Fact]
+    public async Task EpisodeNumberMissingFromSeason_TitleNowhere_GoesToReview()
+    {
+        KnowFuturama();
+        var parsed = Episode("Futurama", null, 4, 13) with { EpisodeTitles = ["Not An Episode"] };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+    }
+
+    [Fact]
+    public async Task EpisodeNumberThatExists_IsNotLookedUpInOtherSeasons()
+    {
+        KnowFuturama();
+        var parsed = Episode("Futurama", null, 4, 2) with { EpisodeTitles = ["Bend Her"] };
+
+        var result = await Identify(parsed);
+
+        Assert.Equal((4, 2), (result.Episodes.Single().Season, result.Episodes.Single().Number));
+        Assert.DoesNotContain((615, 5), _tmdb.SeasonFetches);
+    }
+
+    [Fact]
+    public async Task EpisodeNumberMissingFromSeason_WithoutATitle_FetchesNoOtherSeason()
+    {
+        KnowFuturama();
+
+        var result = await Identify(Episode("Futurama", null, 4, 13));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+        Assert.Equal([(615, 4)], _tmdb.SeasonFetches);
+    }
+
+    private void KnowFuturama() =>
+        _tmdb.OnSearch("Futurama", null, TitleKind.Show, Show(615, "Futurama", 1999))
+            .OnTitle(ShowTitle(615, "Futurama", 1999, 0, 1, 4, 5))
+            .OnSeason(615, Season(0, "Futurama: The Lost Adventure"))
+            .OnSeason(615, Season(1, "Space Pilot 3000", "The Series Has Landed"))
+            .OnSeason(615, Season(4, [.. Enumerable.Range(1, 12).Select(n => $"Season Four {n}")]))
+            .OnSeason(615, Season(5, [.. Enumerable.Range(1, 12).Select(n => $"Season Five {n}"), "Bend Her", "Obsoletely Fabulous"]));
+
+    [Fact]
     public async Task SeasonMissingFromShow_GoesToReview_WithoutFetchingIt()
     {
         _tmdb.OnSearch("Brassic", 2019, TitleKind.Show, Show(91239, "Brassic", 2019))

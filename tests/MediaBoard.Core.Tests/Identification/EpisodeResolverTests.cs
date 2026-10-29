@@ -198,4 +198,39 @@ public class EpisodeResolverTests
         Assert.Equal([15], Numbers(EpisodeResolver.Resolve(a, season, null)));
         Assert.Equal([16], Numbers(EpisodeResolver.Resolve(b, season, null)));
     }
+
+    [Fact]
+    public void AcrossSeasons_UniqueTitleMatch_IsFound()
+    {
+        var result = EpisodeResolver.ResolveAcrossSeasons(
+            Parsed(4, [13], "Bend Her"),
+            [Season(3, "Amazon Women in the Mood"), Season(5, "Crimes of the Hot", "Bend Her", "Obsoletely Fabulous")]);
+
+        var episode = Assert.Single(result!);
+        Assert.Equal((5, 2), (episode.Season, episode.Number));
+    }
+
+    [Fact]
+    public void AcrossSeasons_TitleInTwoSeasons_IsAmbiguous()
+    {
+        var result = EpisodeResolver.ResolveAcrossSeasons(
+            Parsed(4, [13], "Bend Her"), [Season(3, "Bend Her"), Season(5, "Bend Her")]);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void AcrossSeasons_NeedsANearExactTitle()
+    {
+        // "Godfella" and "Godfellas" score about 0.89: enough inside the file's own season, not across seasons.
+        var result = EpisodeResolver.ResolveAcrossSeasons(Parsed(4, [13], "Godfella"), [Season(5, "Godfellas")]);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void AcrossSeasons_NoTitle_FindsNothing()
+    {
+        Assert.Null(EpisodeResolver.ResolveAcrossSeasons(Parsed(4, [13]), [Season(5, "Bend Her")]));
+    }
 }

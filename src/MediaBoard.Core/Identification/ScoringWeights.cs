@@ -46,4 +46,8 @@ public static class ScoringWeights
 
     // An episode title from a file name matches a TMDB episode name at or above this similarity.
     public const double EpisodeTitleThreshold = 0.85;
+
+    // An episode whose number TMDB does not have is looked up by title in the show's other seasons, where nothing
+    // backs the title up, so the match must be closer.
+    public const double OtherSeasonTitleThreshold = 0.90;
 }

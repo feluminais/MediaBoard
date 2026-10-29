@@ -311,7 +311,10 @@ public sealed class Identifier(IMetadataProvider provider)
     private async Task<IReadOnlyList<EpisodeDetails>?> ResolveEpisodesAsync(ParsedMedia parsed, TitleDetails show, CancellationToken ct)
     {
         var number = parsed.Season ?? 1;
-        if (show.SeasonNumbers.Count > 0 && !show.SeasonNumbers.Contains(number)) return null;
+        if (show.SeasonNumbers.Count > 0 && !show.SeasonNumbers.Contains(number))
+        {
+            return await ResolveInOtherSeasonsAsync(parsed, show, number, null, ct).ConfigureAwait(false);
+        }
 
         var season = await provider.GetSeasonAsync(show.TmdbId, number, ct).ConfigureAwait(false);
 
@@ -320,7 +323,39 @@ public sealed class Identifier(IMetadataProvider provider)
             ? await provider.GetSeasonAsync(show.TmdbId, 0, ct).ConfigureAwait(false)
             : null;
 
-        return EpisodeResolver.Resolve(parsed, season, specials);
+        if (EpisodeResolver.Resolve(parsed, season, specials) is { } episodes) return episodes;
+
+        // Numbers TMDB has, with a title it does not know: nothing suggests a different numbering.
+        if (parsed.Episodes.All(n => season.Episodes.Any(e => e.Number == n))) return null;
+
+        return await ResolveInOtherSeasonsAsync(parsed, show, number, specials, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A file numbered differently from TMDB (Amazon's Futurama "S04E13 Bend Her" is TMDB's S05E13) is found by
+    /// its episode title in the show's other seasons. Season 0 counts only when it was already read. The run's
+    /// cache fetches each season once, however many files ask.
+    /// </summary>
+    private async Task<IReadOnlyList<EpisodeDetails>?> ResolveInOtherSeasonsAsync(
+        ParsedMedia parsed, TitleDetails show, int number, SeasonDetails? specials, CancellationToken ct)
+    {
+        if (parsed.EpisodeTitles.Count == 0) return null;
+
+        var seasons = new List<SeasonDetails>();
+        if (specials is not null) seasons.Add(specials);
+        foreach (var other in show.SeasonNumbers.Where(n => n != 0 && n != number))
+        {
+            try
+            {
+                seasons.Add(await provider.GetSeasonAsync(show.TmdbId, other, ct).ConfigureAwait(false));
+            }
+            catch (MetadataUnavailableException e) when (e.Reason == UnavailableReason.ServerError)
+            {
+                // A season TMDB lists but cannot serve is left out.
+            }
+        }
+
+        return EpisodeResolver.ResolveAcrossSeasons(parsed, seasons);
     }
 
     private static IdentificationResult Review(double confidence, IReadOnlyList<SearchCandidate> candidates) =>

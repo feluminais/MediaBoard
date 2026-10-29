@@ -106,6 +106,30 @@ public static class EpisodeResolver
         return Pick.None;
     }
 
+    /// <summary>
+    /// For a file whose episode number TMDB does not have (a release numbered differently, such as Amazon's
+    /// Futurama): each episode title must match exactly one episode in <paramref name="seasons"/> at
+    /// <see cref="ScoringWeights.OtherSeasonTitleThreshold"/> or above. Returns the episodes ordered, or null.
+    /// </summary>
+    public static IReadOnlyList<EpisodeDetails>? ResolveAcrossSeasons(ParsedMedia parsed, IReadOnlyList<SeasonDetails> seasons)
+    {
+        var titles = parsed.EpisodeTitles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        if (titles.Count == 0) return null;
+
+        var found = new List<EpisodeDetails>();
+        foreach (var title in titles)
+        {
+            var matches = seasons
+                .SelectMany(s => s.Episodes)
+                .Where(e => TitleSimilarity.Score(title, e.Name) >= ScoringWeights.OtherSeasonTitleThreshold)
+                .ToList();
+            if (matches.Count != 1) return null;
+            if (!found.Contains(matches[0])) found.Add(matches[0]);
+        }
+
+        return Ordered(found);
+    }
+
     private static IReadOnlyList<EpisodeDetails>? ResolveByNumbers(ParsedMedia parsed, SeasonDetails season)
     {
         if (parsed.Episodes.Count == 0) return null;
