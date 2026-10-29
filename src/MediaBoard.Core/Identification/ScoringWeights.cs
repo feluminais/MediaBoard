@@ -7,6 +7,11 @@ public static class ScoringWeights
     public const double AcceptThreshold = 0.80;
     public const double AcceptMargin = 0.10;
 
+    // With no year to tell them apart, a leader that ties the runners-up on title is still accepted when it has
+    // this many times their votes, and at least VoteLeadMinimum votes.
+    public const int VoteLeadFactor = 10;
+    public const int VoteLeadMinimum = 100;
+
     // Candidate score = sum of weight * component, then penalties, clamped to [0, 1].
     public const double TitleWeight = 0.60;
     public const double YearWeight = 0.20;

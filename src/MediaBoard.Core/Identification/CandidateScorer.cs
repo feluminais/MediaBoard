@@ -10,13 +10,7 @@ public static class CandidateScorer
     /// <param name="candidateRuntimeMin">Runtime TMDB lists for the candidate, when known.</param>
     public static double Score(ParsedMedia parsed, SearchCandidate c, double? fileDurationS, int? candidateRuntimeMin)
     {
-        var titleSim = TitleSimilarity.Score(parsed.Title, c.Name);
-        if (!string.IsNullOrWhiteSpace(c.OriginalName))
-        {
-            titleSim = Math.Max(titleSim, TitleSimilarity.Score(parsed.Title, c.OriginalName));
-        }
-
-        var score = ScoringWeights.TitleWeight * titleSim
+        var score = ScoringWeights.TitleWeight * TitleScore(parsed.Title, c)
                     + ScoringWeights.YearWeight * YearScore(parsed, c.Year)
                     + ScoringWeights.TypeWeight * (KindMatches(parsed.Kind, c.Kind) ? 1.0 : 0.0)
                     + ScoringWeights.PopularityWeight * PopularityScore(c.Popularity);
@@ -27,6 +21,18 @@ public static class CandidateScorer
         }
 
         return Math.Clamp(score, 0.0, 1.0);
+    }
+
+    /// <summary>Title similarity of a candidate: the better of its name and its original name.</summary>
+    public static double TitleScore(string title, SearchCandidate c)
+    {
+        var titleSim = TitleSimilarity.Score(title, c.Name);
+        if (!string.IsNullOrWhiteSpace(c.OriginalName))
+        {
+            titleSim = Math.Max(titleSim, TitleSimilarity.Score(title, c.OriginalName));
+        }
+
+        return titleSim;
     }
 
     /// <summary>

@@ -11,7 +11,8 @@ public sealed record SearchCandidate(
     double Popularity,
     double? Rating,
     string? PosterPath,
-    string? Overview);
+    string? Overview,
+    int VoteCount = 0);
 
 public sealed record TitleDetails(
     int TmdbId,

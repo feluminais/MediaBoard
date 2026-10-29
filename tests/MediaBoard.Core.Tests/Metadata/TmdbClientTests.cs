@@ -43,7 +43,8 @@ public class TmdbClientTests
         Assert.Equal(
             new SearchCandidate(438631, TitleKind.Movie, "Dune", "Dune", 2021, 87.123, 7.8,
                 "/d5NXSklXo0qyIYkgV94XAgMIckC.jpg",
-                "Paul Atreides, a brilliant and gifted young man born into a great destiny, must travel to the most dangerous planet in the universe."),
+                "Paul Atreides, a brilliant and gifted young man born into a great destiny, must travel to the most dangerous planet in the universe.",
+                VoteCount: 11000),
             results[0]);
 
         // Empty release date, no poster, no votes: all become null rather than "" or 0.
@@ -52,6 +53,7 @@ public class TmdbClientTests
         Assert.Null(sparse.Rating);
         Assert.Null(sparse.PosterPath);
         Assert.Null(sparse.Overview);
+        Assert.Equal(0, sparse.VoteCount);
     }
 
     [Fact]

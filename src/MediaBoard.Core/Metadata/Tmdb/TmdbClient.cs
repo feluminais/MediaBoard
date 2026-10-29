@@ -179,7 +179,8 @@ public sealed class TmdbClient : IMetadataProvider
             item.Popularity,
             RatingOf(item.VoteAverage, item.VoteCount),
             NullIfEmpty(item.PosterPath),
-            NullIfEmpty(item.Overview));
+            NullIfEmpty(item.Overview),
+            item.VoteCount);
     }
 
     /// <summary>TMDB reports 0.0 for titles nobody has rated; that is "no rating", not a zero.</summary>

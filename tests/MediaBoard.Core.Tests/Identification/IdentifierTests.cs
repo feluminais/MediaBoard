@@ -29,11 +29,11 @@ public class IdentifierTests : IDisposable
     private static ParsedMedia Movie(string title, int? year = null, string? showFolder = null) =>
         new(MediaKind.Movie, title, year, null, [], [], showFolder, null, null);
 
-    private static SearchCandidate Show(int id, string name, int? year, double popularity = 50) =>
-        new(id, TitleKind.Show, name, null, year, popularity, 8.0, null, null);
+    private static SearchCandidate Show(int id, string name, int? year, double popularity = 50, int votes = 0) =>
+        new(id, TitleKind.Show, name, null, year, popularity, 8.0, null, null, votes);
 
-    private static SearchCandidate Film(int id, string name, int? year, double popularity = 50) =>
-        new(id, TitleKind.Movie, name, null, year, popularity, 7.0, null, null);
+    private static SearchCandidate Film(int id, string name, int? year, double popularity = 50, int votes = 0) =>
+        new(id, TitleKind.Movie, name, null, year, popularity, 7.0, null, null, votes);
 
     private static TitleDetails ShowTitle(int id, string name, int? year, params int[] seasons) =>
         new(id, TitleKind.Show, name, year, null, null, 8.0, null, 45, seasons);
@@ -194,6 +194,58 @@ public class IdentifierTests : IDisposable
         Assert.Equal([1, 2, 3, 4, 5], result.Candidates.Select(c => c.TmdbId));
         Assert.Equal("auto", result.Source);
     }
+
+    [Fact]
+    public async Task SameTitleNoYear_ClearlyMoreVotedShow_IsMatched()
+    {
+        KnowSupernatural(leaderVotes: 8789, runnerUpVotes: 11);
+
+        var result = await Identify(Episode("Supernatural", null, 1, 1));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(1622, result.Title!.TmdbId);
+    }
+
+    [Theory]
+    [InlineData(8789, 900)] // not ten times the runner-up's votes
+    [InlineData(99, 5)] // too few votes to be sure
+    public async Task SameTitleNoYear_LeaderWithoutAClearVoteLead_GoesToReview(int leaderVotes, int runnerUpVotes)
+    {
+        KnowSupernatural(leaderVotes, runnerUpVotes);
+
+        var result = await Identify(Episode("Supernatural", null, 1, 1));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+    }
+
+    [Fact]
+    public async Task SameTitle_KnownYear_WinsOverVotes()
+    {
+        _tmdb.OnSearch("Supernatural", 1977, TitleKind.Show,
+                Show(1622, "Supernatural", 2005, 5025, votes: 8789), Show(13836, "Supernatural", 1977, 6, votes: 11))
+            .OnTitle(ShowTitle(13836, "Supernatural", 1977, 1)).OnSeason(13836, Season(1, "Ghost Town"));
+
+        var result = await Identify(Episode("Supernatural", 1977, 1, 1));
+
+        Assert.Equal(IdentificationStatus.Matched, result.Status);
+        Assert.Equal(13836, result.Title!.TmdbId);
+    }
+
+    [Fact]
+    public async Task DifferentTitlesNoYear_VotesDoNotBreakTheCloseCall()
+    {
+        _tmdb.OnSearch("Spartacus", null, TitleKind.Movie,
+            Film(1, "Spartacus", 1960, 50, votes: 5000), Film(2, "Spartakus", 1976, 50, votes: 10));
+
+        var result = await Identify(Movie("Spartacus"));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, result.Status);
+    }
+
+    private void KnowSupernatural(int leaderVotes, int runnerUpVotes) =>
+        _tmdb.OnSearch("Supernatural", null, TitleKind.Show,
+                Show(1622, "Supernatural", 2005, 5025, leaderVotes), Show(13836, "Supernatural", 1977, 6, runnerUpVotes))
+            .OnTitle(ShowTitle(1622, "Supernatural", 2005, 1)).OnSeason(1622, Season(1, "Pilot"));
 
     [Fact]
     public async Task LowScore_GoesToReview_AfterAllRetries()
