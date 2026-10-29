@@ -18,14 +18,15 @@ public class ActivityHubTests
         var raised = new List<StatusSnapshot>();
         hub.StatusChanged += raised.Add;
 
-        hub.SetScan("Movies", 3, 10);
+        hub.BeginScan(1, "Movies");
+        hub.ReportScan(1, 3, 10);
         hub.SetPendingIdentification(7);
         hub.SetOnline(true);
         hub.SetKeyState(KeyState.Ok);
         hub.SetPlayer("MPC-HC");
         hub.SetUnavailableFolders(["G:\\Shows"]);
 
-        Assert.Equal(6, raised.Count);
+        Assert.Equal(7, raised.Count);
         var current = hub.Current;
         Assert.Equal("Movies", current.ScanFolder);
         Assert.Equal(3, current.ScanDone);
@@ -49,9 +50,110 @@ public class ActivityHubTests
 
         hub.SetOnline(true);
         hub.SetUnavailableFolders(["A"]);
-        hub.SetScan(null, 0, 0);
+        hub.EndScan(1); // nothing was scanning
 
         Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void FolderScan_IsTrackedByFolderId_NotByName()
+    {
+        var hub = new ActivityHub();
+
+        hub.BeginScan(1, "Movies"); // D:\Movies
+        hub.ReportScan(1, 120, 810);
+        using var waiting = hub.QueueScan(2); // E:\Movies, behind it
+
+        Assert.Equal(new FolderScan(FolderScanState.Scanning, 120, 810), hub.Current.ScanOf(1));
+        Assert.Equal(new FolderScan(FolderScanState.Waiting, 0, 0), hub.Current.ScanOf(2));
+        Assert.Null(hub.Current.ScanOf(3));
+        Assert.Equal("Movies", hub.Current.ScanFolder);
+        Assert.Equal(120, hub.Current.ScanDone);
+        Assert.Equal(810, hub.Current.ScanTotal);
+    }
+
+    [Fact]
+    public void FolderScan_StartsWithAnUnknownTotal_AndEndsIdle()
+    {
+        var hub = new ActivityHub();
+
+        hub.BeginScan(1, "Movies");
+        Assert.Equal(new FolderScan(FolderScanState.Scanning, 0, 0), hub.Current.ScanOf(1));
+        Assert.True(hub.Current.IsScanning);
+
+        hub.EndScan(1);
+        Assert.Null(hub.Current.ScanOf(1));
+        Assert.Empty(hub.Current.FolderScans);
+        Assert.False(hub.Current.IsScanning);
+        Assert.Null(hub.Current.ScanFolder);
+        Assert.Equal(0, hub.Current.ScanDone);
+        Assert.Equal(0, hub.Current.ScanTotal);
+    }
+
+    [Fact]
+    public void QueuedScan_WaitsUntilItsScanStarts_AndStaysQueuedUntilDisposed()
+    {
+        var hub = new ActivityHub();
+
+        var queued = hub.QueueScan(1);
+        Assert.Equal(FolderScanState.Waiting, hub.Current.ScanOf(1)?.State);
+        Assert.False(hub.Current.IsScanning); // waiting is not scanning
+
+        hub.BeginScan(1, "Movies");
+        Assert.Equal(FolderScanState.Scanning, hub.Current.ScanOf(1)?.State); // running wins over queued
+        hub.EndScan(1);
+        Assert.Equal(FolderScanState.Waiting, hub.Current.ScanOf(1)?.State); // its caller has not let go yet
+
+        queued.Dispose();
+        Assert.Null(hub.Current.ScanOf(1));
+        queued.Dispose(); // twice is fine
+        Assert.Null(hub.Current.ScanOf(1));
+    }
+
+    [Fact]
+    public void QueuedScan_ThatNeverRan_IsDroppedWhenDisposed()
+    {
+        var hub = new ActivityHub();
+        var first = hub.QueueScan(1);
+        var second = hub.QueueScan(1); // queued again, as a rescan of a folder that has not started would be
+
+        first.Dispose();
+        Assert.Equal(FolderScanState.Waiting, hub.Current.ScanOf(1)?.State);
+        second.Dispose();
+        Assert.Null(hub.Current.ScanOf(1));
+    }
+
+    [Fact]
+    public void StatusBarFields_FollowTheLatestRunningScan_WhenScansOverlap()
+    {
+        var hub = new ActivityHub();
+
+        hub.BeginScan(1, "Movies");
+        hub.ReportScan(1, 25, 100);
+        hub.BeginScan(2, "Shows");
+        hub.ReportScan(2, 5, 40);
+        Assert.Equal(("Shows", 5, 40), (hub.Current.ScanFolder, hub.Current.ScanDone, hub.Current.ScanTotal));
+
+        hub.EndScan(2);
+        Assert.Equal(("Movies", 25, 100), (hub.Current.ScanFolder, hub.Current.ScanDone, hub.Current.ScanTotal));
+        hub.ReportScan(1, 50, 100);
+        Assert.Equal(("Movies", 50, 100), (hub.Current.ScanFolder, hub.Current.ScanDone, hub.Current.ScanTotal));
+    }
+
+    [Fact]
+    public void ReportScan_ForAFolderThatIsNotScanning_ChangesNothing()
+    {
+        var hub = new ActivityHub();
+        var count = 0;
+        hub.StatusChanged += _ => count++;
+
+        hub.ReportScan(1, 3, 10);
+        hub.BeginScan(2, "Movies");
+        hub.ReportScan(2, 3, 10);
+        hub.ReportScan(2, 3, 10); // the same numbers again
+
+        Assert.Null(hub.Current.ScanOf(1));
+        Assert.Equal(2, count);
     }
 
     [Fact]

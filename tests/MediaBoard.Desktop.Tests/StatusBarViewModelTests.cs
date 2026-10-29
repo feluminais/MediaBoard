@@ -14,6 +14,12 @@ public class StatusBarViewModelTests
     // Hub events are posted to the UI thread; run them before asserting.
     private static void Flush() => Dispatcher.UIThread.RunJobs();
 
+    private void Scan(int folderId, string name, int done, int total)
+    {
+        _hub.BeginScan(folderId, name);
+        _hub.ReportScan(folderId, done, total);
+    }
+
     [AvaloniaFact]
     public void Problem_ShowsTheLatestWarningOrError()
     {
@@ -73,7 +79,7 @@ public class StatusBarViewModelTests
     {
         var vm = Create();
 
-        _hub.SetScan("Supernatural", 12, 44);
+        Scan(1, "Supernatural", 12, 44);
         Flush();
 
         Assert.Equal("Scanning Supernatural, 12 of 44", vm.Progress);
@@ -83,10 +89,10 @@ public class StatusBarViewModelTests
     public void StatusBar_ShowsUpToDate_WhenNothingRuns()
     {
         var vm = Create();
-        _hub.SetScan("Supernatural", 12, 44);
+        Scan(1, "Supernatural", 12, 44);
         Flush();
 
-        _hub.SetScan(null, 0, 0);
+        _hub.EndScan(1);
         Flush();
 
         Assert.Equal("Up to date", vm.Progress);
@@ -204,7 +210,7 @@ public class StatusBarViewModelTests
     {
         var vm = Create();
 
-        await Task.Run(() => _hub.SetScan("Movies", 3, 9));
+        await Task.Run(() => Scan(1, "Movies", 3, 9));
         Flush();
 
         Assert.Equal("Scanning Movies, 3 of 9", vm.Progress);

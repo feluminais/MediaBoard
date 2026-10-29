@@ -86,11 +86,7 @@ public sealed class AppHost(
             connectivity.Start();
             identification.Start();
 
-            foreach (var folder in folders.All().Where(f => f.Enabled))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (await ScanAsync(folder, ct).ConfigureAwait(false)) _ = IdentifyAsync(ct);
-            }
+            await ScanInTurnAsync(folders.All().Where(f => f.Enabled).ToList(), ct, scanned => _ = IdentifyAsync(ct)).ConfigureAwait(false);
 
             ct.ThrowIfCancellationRequested();
             watcher.Start();
@@ -238,17 +234,37 @@ public sealed class AppHost(
     {
         var unavailable = scanner.UnavailableFolderIds();
         var back = folders.All().Where(f => f.Enabled && unavailable.Contains(f.Id) && Directory.Exists(f.Path)).ToList();
-        foreach (var folder in back)
+        await ScanInTurnAsync(back, ct, folder =>
         {
-            ct.ThrowIfCancellationRequested();
-            if (!await ScanAsync(folder, ct).ConfigureAwait(false)) continue;
-
             hub.Log(ActivityLevel.Info, $"Folder available again: {FolderName(folder.Path)}");
             library.NotifyChanged();
             _ = IdentifyAsync(ct);
-        }
+        }).ConfigureAwait(false);
 
         watcher.Refresh();
+    }
+
+    /// <summary>
+    /// Scans the folders one after another. The ones still in line show as waiting to scan, so their rows don't say
+    /// they are empty. <paramref name="scanned"/> runs after each scan that worked.
+    /// </summary>
+    private async Task ScanInTurnAsync(IReadOnlyList<LibraryFolder> list, CancellationToken ct, Action<LibraryFolder> scanned)
+    {
+        var queued = list.Select(f => hub.QueueScan(f.Id)).ToList();
+        try
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var worked = await ScanAsync(list[i], ct).ConfigureAwait(false);
+                queued[i].Dispose();
+                if (worked) scanned(list[i]);
+            }
+        }
+        finally
+        {
+            foreach (var entry in queued) entry.Dispose(); // the rest, when closing cut the run short
+        }
     }
 
     // Watched marks and resume positions show on Home, the grids and the title page.

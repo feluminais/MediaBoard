@@ -258,6 +258,45 @@ public sealed class FolderActionsTests
         AssertNoErrors(stack);
     }
 
+    [Fact]
+    public async Task Add_MarksTheFolderWaitingOrScanning_BeforeItReturns_AndIdleOnceDone()
+    {
+        using var stack = new ShellStack();
+        var gate = new ScanGate(stack.Hub);
+        gate.Arm(); // the scan can't end before the check below
+        var root = stack.MakeLibrary("Movies", "Heat (1995).mkv");
+
+        Assert.True((await stack.Actions.AddAsync(root)).Ok);
+        var id = OnlyFolderId(stack);
+
+        Assert.NotNull(stack.Hub.Current.ScanOf(id)); // never idle with no files before its first scan
+        gate.Release();
+        await stack.Actions.WhenIdleAsync();
+        Assert.Null(stack.Hub.Current.ScanOf(id));
+        Assert.Empty(stack.Hub.Current.FolderScans);
+    }
+
+    [Fact]
+    public async Task Remove_OfAFolderWithAScanStillQueued_LeavesItIdle()
+    {
+        using var stack = new ShellStack();
+        var gate = new ScanGate(stack.Hub);
+        gate.Arm();
+        var root = stack.MakeLibrary("Movies", "Heat (1995).mkv");
+        Assert.True((await stack.Actions.AddAsync(root)).Ok);
+        Assert.True(gate.Reached.Wait(Wait, Ct), "the scan never started");
+        var id = OnlyFolderId(stack);
+        // A second scan queues behind the held one; removing cancels it before it ever runs.
+        await stack.Services.GetRequiredService<FolderActions>().RescanAllAsync();
+
+        var remove = stack.Actions.RemoveAsync(id);
+        gate.Release();
+        await remove.WaitAsync(Wait, Ct);
+        await stack.Actions.WhenIdleAsync();
+
+        Assert.Empty(stack.Hub.Current.FolderScans);
+    }
+
     private static async Task WaitFor(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(15);

@@ -61,8 +61,8 @@ public sealed class FolderActions(
         if (Conflict(normalized, folders.All(), ignoreId: null) is { } problem) return Task.FromResult(FolderOutcome.Refused(problem));
 
         var folder = folders.Add(normalized);
+        StartScan(folder); // first, so the page sees the folder waiting to scan, not empty
         library.NotifyChanged();
-        StartScan(folder);
         return Task.FromResult(FolderOutcome.Done);
     });
 
@@ -87,8 +87,8 @@ public sealed class FolderActions(
         if (enabled)
         {
             folders.SetEnabled(folderId, true);
-            library.NotifyChanged();
             StartScan(folder with { Enabled = true });
+            library.NotifyChanged();
             return FolderOutcome.Done;
         }
 
@@ -112,10 +112,10 @@ public sealed class FolderActions(
 
         await StopScanAsync(folderId).ConfigureAwait(false);
         folders.Repoint(folderId, normalized);
-        library.NotifyChanged();
         var moved = folder with { Path = normalized };
         if (moved.Enabled) StartScan(moved);
         else watcher.Refresh();
+        library.NotifyChanged();
         return FolderOutcome.Done;
     });
 
@@ -154,7 +154,8 @@ public sealed class FolderActions(
 
     /// <summary>
     /// Scans the folder, then refreshes the watcher so it watches the folder (or its new location) from now on.
-    /// A scan already running for the same folder is cancelled, and this one starts after it has stopped.
+    /// A scan already running for the same folder is cancelled, and this one starts after it has stopped. The folder
+    /// shows as waiting to scan from now until its scanner starts.
     /// </summary>
     private void StartScan(LibraryFolder folder)
     {
@@ -163,19 +164,24 @@ public sealed class FolderActions(
             _scans.TryGetValue(folder.Id, out var previous);
             previous?.Cancel.Cancel();
 
+            var queued = hub.QueueScan(folder.Id);
             var cancel = new CancellationTokenSource();
-            var task = Task.Run(() => ScanThenWatchAsync(folder, previous?.Task, cancel.Token));
+            var task = Task.Run(() => ScanThenWatchAsync(folder, previous?.Task, queued, cancel.Token));
             _scans[folder.Id] = new ScanRun(cancel, task);
             Track(task);
         }
     }
 
-    private async Task ScanThenWatchAsync(LibraryFolder folder, Task? previous, CancellationToken ct)
+    private async Task ScanThenWatchAsync(LibraryFolder folder, Task? previous, IDisposable queued, CancellationToken ct)
     {
         try
         {
-            if (previous is not null) await previous.ConfigureAwait(false); // never throws: it catches its own
-            var scanned = await host.ScanFolderAsync(folder, ct).ConfigureAwait(false);
+            bool scanned;
+            using (queued) // a cancelled run that never scanned stops waiting too
+            {
+                if (previous is not null) await previous.ConfigureAwait(false); // never throws: it catches its own
+                scanned = await host.ScanFolderAsync(folder, ct).ConfigureAwait(false);
+            }
 
             // Watch the folder first: identification can run for minutes, and it is not part of this run, so a
             // remove or disable that cancels and awaits the scan never waits for it.

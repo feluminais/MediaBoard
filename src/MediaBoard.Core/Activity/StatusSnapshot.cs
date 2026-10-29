@@ -2,10 +2,18 @@ namespace MediaBoard.Core.Activity;
 
 public enum KeyState { Missing, Ok, Rejected }
 
+public enum FolderScanState { Waiting, Scanning }
+
+/// <summary>Where one folder's scan is. <paramref name="Total"/> is 0 until the scan has listed the folder.</summary>
+public sealed record FolderScan(FolderScanState State, int Done, int Total);
+
 /// <summary>Everything the status bar shows. Immutable: each change produces a new snapshot.</summary>
 public sealed record StatusSnapshot
 {
-    /// <summary>Folder being scanned, or null when no scan is running.</summary>
+    /// <summary>
+    /// Folder being scanned, or null when no scan is running. When scans overlap, the one that started last.
+    /// It is a name, so two folders called "Movies" look the same here; <see cref="FolderScans"/> tells them apart.
+    /// </summary>
     public string? ScanFolder { get; init; }
 
     public int ScanDone { get; init; }
@@ -29,5 +37,10 @@ public sealed record StatusSnapshot
     /// <summary>Folders whose last scan threw; a folder leaves the list when a scan of it succeeds.</summary>
     public IReadOnlyList<string> FailedScans { get; init; } = [];
 
+    /// <summary>Folders with a scan running or waiting to run, by folder id. A folder that is not here is idle.</summary>
+    public IReadOnlyDictionary<int, FolderScan> FolderScans { get; init; } = new Dictionary<int, FolderScan>();
+
     public bool IsScanning => ScanFolder is not null;
+
+    public FolderScan? ScanOf(int folderId) => FolderScans.GetValueOrDefault(folderId);
 }

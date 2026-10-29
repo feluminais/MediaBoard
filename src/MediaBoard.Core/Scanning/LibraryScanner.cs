@@ -56,18 +56,18 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
     private ScanResult Scan(LibraryFolder folder, CancellationToken ct)
     {
         var name = DisplayName(folder.Path);
-        hub.SetScan(name, 0, 0);
+        hub.BeginScan(folder.Id, name);
         try
         {
             var listing = Enumerate(folder.Path, ct);
             if (listing is null) return MarkUnavailable(folder, name);
 
             SetAvailable(folder.Id);
-            return Reconcile(folder, name, listing, ct);
+            return Reconcile(folder, listing, ct);
         }
         finally
         {
-            hub.SetScan(null, 0, 0);
+            hub.EndScan(folder.Id);
         }
     }
 
@@ -107,7 +107,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
         }
     }
 
-    private ScanResult Reconcile(LibraryFolder folder, string name, Listing listing, CancellationToken ct)
+    private ScanResult Reconcile(LibraryFolder folder, Listing listing, CancellationToken ct)
     {
         var videos = listing.Videos;
         using var connection = db.Open();
@@ -132,7 +132,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
         int changed = 0, restored = 0, markedMissing = 0, relinked = 0;
 
         using var transaction = connection.BeginTransaction();
-        hub.SetScan(name, 0, videos.Count);
+        hub.ReportScan(folder.Id, 0, videos.Count);
         var done = 0;
         foreach (var file in videos)
         {
@@ -170,7 +170,7 @@ public sealed class LibraryScanner(LibraryDatabase db, ActivityHub hub, TimeProv
             }
 
             done++;
-            if (done % ProgressStep == 0 || done == videos.Count) hub.SetScan(name, done, videos.Count);
+            if (done % ProgressStep == 0 || done == videos.Count) hub.ReportScan(folder.Id, done, videos.Count);
         }
 
         // Rows the walk did not reach: a moved file shows up as one of these plus one new file.

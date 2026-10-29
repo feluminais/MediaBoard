@@ -145,6 +145,31 @@ public sealed class AppHostTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task StartupScans_ShowTheFoldersInLineAsWaiting()
+    {
+        var movies = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
+        var shows = Directory.CreateDirectory(Path.Combine(_dir, "Shows")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(movies, "Heat.1995.mkv"), new byte[4096]);
+        var services = Build(Path.Combine(_dir, "library.db"));
+        var store = services.GetRequiredService<FolderStore>();
+        var first = store.Add(movies);
+        var second = store.Add(shows);
+        var hub = services.GetRequiredService<ActivityHub>();
+        FolderScan? secondWhileFirstScans = null;
+        hub.StatusChanged += s =>
+        {
+            if (s.ScanOf(first.Id)?.State == FolderScanState.Scanning) secondWhileFirstScans ??= s.ScanOf(second.Id);
+        };
+
+        await RunAsync(services, _ =>
+        {
+            Assert.Equal(FolderScanState.Waiting, secondWhileFirstScans?.State);
+            Assert.Empty(hub.Current.FolderScans);
+            return Task.CompletedTask;
+        });
+    }
+
+    [AvaloniaFact]
     public async Task FailedScan_ShowsOnStatusBar()
     {
         var database = Path.Combine(_dir, "library.db");

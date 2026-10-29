@@ -473,6 +473,30 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_ReportsItsStateUnderTheFolderId()
+    {
+        for (var i = 1; i <= 30; i++) _lib.File($@"Movies\Movie.{2000 + i}.mkv");
+        var seen = new List<FolderScan?>();
+        _hub.StatusChanged += s => { lock (seen) seen.Add(s.ScanOf(_folder.Id)); };
+
+        await Scan();
+
+        Assert.Equal(new FolderScan(FolderScanState.Scanning, 0, 0), seen[0]); // listing: the total is not known yet
+        Assert.Contains(new FolderScan(FolderScanState.Scanning, 25, 30), seen);
+        Assert.Contains(new FolderScan(FolderScanState.Scanning, 30, 30), seen);
+        Assert.Null(seen[^1]);
+        Assert.Empty(_hub.Current.FolderScans);
+    }
+
+    [Fact]
+    public async Task Scan_OfAnUnavailableFolder_EndsIdle()
+    {
+        await _scanner.ScanAsync(new LibraryFolder(_folder.Id, _lib.PathOf("Gone"), true), CancellationToken.None);
+
+        Assert.Null(_hub.Current.ScanOf(_folder.Id));
+    }
+
+    [Fact]
     public async Task Remove_DeletesRowsNotFiles()
     {
         _lib.File(@"Movies\Heat.1995.mkv");
