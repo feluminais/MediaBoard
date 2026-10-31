@@ -9,7 +9,7 @@
     <Button Classes="card" Command="{Binding OpenCommand}">
         <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
             <Panel Width="160" Height="240">
-                <Border Classes="frame" CornerRadius="6" ClipToBounds="True">
+                <Border Classes="frame" CornerRadius="8" ClipToBounds="True">
                     <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="240" />
                 </Border>
                 <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"

@@ -5,9 +5,10 @@
              x:Class="MediaBoard.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
     <ScrollViewer>
-        <StackPanel Spacing="32" MaxWidth="640" HorizontalAlignment="Left">
-            <TextBlock Classes="pageTitle" Text="{Binding Title}" />
+        <StackPanel Spacing="16" MaxWidth="640" HorizontalAlignment="Left" Margin="0,0,0,16">
+            <TextBlock Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,4" />
 
+            <Border Classes="panel">
             <StackPanel Spacing="10">
                 <TextBlock Classes="rowTitle" Text="TMDB key" />
                 <TextBlock Classes="muted" TextWrapping="Wrap"
@@ -27,7 +28,9 @@
                     <TextBlock Classes="muted" Text="{Binding KeyStatus}" VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
+            </Border>
 
+            <Border Classes="panel">
             <StackPanel Spacing="10">
                 <TextBlock Classes="rowTitle" Text="Player" />
                 <DockPanel>
@@ -45,7 +48,9 @@
                 <TextBlock Text="{Binding InUse}" TextWrapping="Wrap" />
                 <TextBlock Classes="muted" Text="{Binding InUseDetail}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
+            </Border>
 
+            <Border Classes="panel">
             <StackPanel Spacing="10">
                 <TextBlock Classes="rowTitle" Text="About" />
                 <StackPanel Spacing="2">
@@ -53,14 +58,14 @@
                     <TextBlock Classes="muted" Text="{Binding Version}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="12">
-                    <Border Padding="10,4" CornerRadius="4" VerticalAlignment="Center"
-                            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+                    <Border Classes="tag" Padding="10,4" VerticalAlignment="Center">
                         <TextBlock Text="{Binding TmdbMark}" FontWeight="Bold" />
                     </Border>
                     <TextBlock Text="{Binding TmdbAttribution}" TextWrapping="Wrap" MaxWidth="480"
                                VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

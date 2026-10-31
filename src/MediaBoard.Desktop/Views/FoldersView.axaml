@@ -4,7 +4,7 @@
              x:Class="MediaBoard.Desktop.Views.FoldersView"
              x:DataType="vm:FoldersViewModel">
     <DockPanel>
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,20">
             <Button DockPanel.Dock="Right" Classes="accent" Content="Add folder" VerticalAlignment="Center"
                     Command="{Binding AddFolderCommand}" />
             <TextBlock Classes="pageTitle" Text="{Binding Title}" />
@@ -22,9 +22,7 @@
             <ItemsControl ItemsSource="{Binding Folders}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:FolderItem">
-                        <Border Margin="0,0,0,10" Padding="16,12" CornerRadius="6"
-                                Background="{DynamicResource PanelBrush}"
-                                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+                        <Border Classes="panel" Margin="0,0,0,10" Padding="16,14">
                             <StackPanel Spacing="10">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8"

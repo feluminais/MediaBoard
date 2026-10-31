@@ -6,7 +6,7 @@
         Title="Delete from disk"
         Width="560" MaxHeight="560" SizeToContent="Height" CanResize="False"
         ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
-    <DockPanel Margin="24" LastChildFill="True">
+    <DockPanel Margin="24,4,24,24" LastChildFill="True">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,20,0,0">
             <Button x:Name="CancelButton" Content="Cancel" MinWidth="88" IsDefault="True" IsCancel="True" />
             <Button x:Name="DeleteButton" Content="Delete" MinWidth="88" Classes="accent" />

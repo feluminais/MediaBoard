@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using MediaBoard.Core.Library;
+using MediaBoard.Desktop.Controls;
 using MediaBoard.Desktop.Views;
 
 namespace MediaBoard.Desktop;
@@ -61,7 +62,7 @@ public sealed class Dialogs
         cancel.Click += (_, _) => dialog.Close(false);
         dialog.Content = new StackPanel
         {
-            Margin = new Thickness(24),
+            Margin = new Thickness(24, 4, 24, 24),
             Spacing = 20,
             Children =
             {
@@ -76,6 +77,7 @@ public sealed class Dialogs
             },
         };
 
+        DialogFrame.Apply(dialog, "MediaBoard");
         return await dialog.ShowDialog<bool>(Owner);
     }
 
@@ -102,7 +104,7 @@ public sealed class Dialogs
         close.Click += (_, _) => dialog.Close(true);
         dialog.Content = new StackPanel
         {
-            Margin = new Thickness(24),
+            Margin = new Thickness(24, 4, 24, 24),
             Spacing = 20,
             Children =
             {
@@ -130,6 +132,7 @@ public sealed class Dialogs
             },
         };
 
+        DialogFrame.Apply(dialog, "MediaBoard");
         return await dialog.ShowDialog<bool>(Owner);
     }
 

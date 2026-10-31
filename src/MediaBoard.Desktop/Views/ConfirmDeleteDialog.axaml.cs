@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using MediaBoard.Core.Library;
+using MediaBoard.Desktop.Controls;
 using MediaBoard.Desktop.ViewModels;
 
 namespace MediaBoard.Desktop.Views;
@@ -18,6 +19,7 @@ public partial class ConfirmDeleteDialog : Window
     public ConfirmDeleteDialog(DeletePreview preview)
     {
         InitializeComponent();
+        DialogFrame.Apply(this, Title ?? "MediaBoard");
         DataContext = new ConfirmDeleteViewModel(preview);
         DeleteButton.Click += (_, _) => Close(true);
         CancelButton.Click += (_, _) => Close(false);

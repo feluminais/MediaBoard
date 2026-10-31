@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using MediaBoard.Desktop.Controls;
 
 namespace MediaBoard.Desktop.Views;
 
@@ -16,6 +17,7 @@ public partial class FinishedPromptDialog : Window
     public FinishedPromptDialog(string title)
     {
         InitializeComponent();
+        DialogFrame.Apply(this, Title ?? "MediaBoard");
         Question.Text = $"Did you finish {title}?";
         YesButton.Click += (_, _) => Close(true);
         NoButton.Click += (_, _) => Close(false);

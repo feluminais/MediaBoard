@@ -1,6 +1,9 @@
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using MediaBoard.Desktop.ViewModels;
 
@@ -11,10 +14,30 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _vm;
     private InputElement? _focusBeforeSearch;
 
+    private const string MaximizeIcon = "M5.5 5.5 H14.5 V14.5 H5.5 Z";
+    private const string RestoreIcon = "M7.5 5.5 H14.5 V12.5 M5.5 7.5 H12.5 V14.5 H5.5 Z";
+
     public MainWindow()
     {
         InitializeComponent();
     }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property != WindowStateProperty) return;
+
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeGlyph.Data = Geometry.Parse(maximized ? RestoreIcon : MaximizeIcon);
+        ToolTip.SetTip(MaximizeButton, maximized ? "Restore" : "Maximise");
+    }
+
+    private void OnMinimize(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void OnMaximize(object? sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void OnClose(object? sender, RoutedEventArgs e) => Close();
 
     protected override void OnDataContextChanged(EventArgs e)
     {

@@ -6,7 +6,7 @@
              x:Class="MediaBoard.Desktop.Views.ReviewView"
              x:DataType="vm:ReviewViewModel">
     <DockPanel>
-        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,16">
+        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
             <TextBlock Classes="pageTitle" Text="{Binding Title}" />
             <TextBlock Classes="muted" Text="{Binding Hint}" IsVisible="{Binding HasHint}" />
         </StackPanel>
@@ -30,8 +30,7 @@
                         </DockPanel>
                     </DataTemplate>
                     <DataTemplate DataType="vm:ReviewRowViewModel">
-                        <Border Padding="12" Margin="0,0,0,8" CornerRadius="6" Background="{DynamicResource PanelBrush}"
-                                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+                        <Border Classes="panel" Margin="0,0,0,10">
                             <StackPanel Spacing="10">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
@@ -50,7 +49,7 @@
                                             <DockPanel Margin="0,0,0,6">
                                                 <Button DockPanel.Dock="Right" Content="Pick" Classes="small" VerticalAlignment="Center"
                                                         Command="{Binding PickCommand}" />
-                                                <Border DockPanel.Dock="Left" Width="40" Height="60" CornerRadius="4" ClipToBounds="True" Margin="0,0,12,0">
+                                                <Border DockPanel.Dock="Left" Width="40" Height="60" CornerRadius="6" ClipToBounds="True" Margin="0,0,12,0">
                                                     <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="80" />
                                                 </Border>
                                                 <StackPanel VerticalAlignment="Center">

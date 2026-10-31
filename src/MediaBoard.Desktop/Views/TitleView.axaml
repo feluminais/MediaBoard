@@ -38,31 +38,27 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <UserControl.Styles>
-        <Style Selector="Border.tag">
-            <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="4" />
-            <Setter Property="Padding" Value="8,2" />
-        </Style>
-    </UserControl.Styles>
-
     <ScrollViewer>
         <StackPanel Spacing="20" MaxWidth="980" HorizontalAlignment="Left">
-            <Button Classes="textLink" Content="Back" Command="{Binding BackCommand}" HorizontalAlignment="Left" />
+            <Button Classes="textLink" Command="{Binding BackCommand}" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Path Classes="icon" Data="M12 4.5 L6.5 10 L12 15.5" Margin="-5,0,0,0" />
+                    <TextBlock Text="Back" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
 
             <TextBlock Classes="muted" Text="{Binding NotFoundText}" IsVisible="{Binding NotFound}" />
             <StackPanel Spacing="4" IsVisible="{Binding HasOfflineMessage}">
                 <Border Classes="tag" HorizontalAlignment="Left" IsVisible="{Binding HasTag}">
                     <TextBlock Text="{Binding Tag}" FontSize="12" />
                 </Border>
-                <TextBlock Text="{Binding OfflineMessage}" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Classes="emptyTitle" Text="{Binding OfflineMessage}" />
                 <TextBlock Classes="muted" Text="Connect to the internet to load details."
                            IsVisible="{Binding IsOnline}" />
             </StackPanel>
 
             <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowDetails}">
-                <Border Grid.Column="0" Width="220" Height="330" CornerRadius="6" ClipToBounds="True"
+                <Border Grid.Column="0" Width="220" Height="330" CornerRadius="10" ClipToBounds="True"
                         VerticalAlignment="Top" Margin="0,0,28,0">
                     <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Header.Name}" DecodeWidth="360" />
                 </Border>
@@ -114,15 +110,12 @@
                                     IsEnabled="{Binding CanMarkWatched}" />
                             <Button Content="Fix match" Command="{Binding FixMatchCommand}" Margin="0,0,8,8" />
                             <Button Content="Not a movie or show" Command="{Binding NotMediaCommand}" Margin="0,0,8,8" />
-                            <Button Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8"
-                                    Foreground="{DynamicResource ErrorTextBrush}" />
+                            <Button Classes="danger" Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8" />
                         </WrapPanel>
                         <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" Foreground="{DynamicResource WarningTextBrush}"
                                    IsVisible="{Binding HasNotice}" />
 
-                        <Border Padding="12" CornerRadius="6" Background="{DynamicResource PanelBrush}"
-                                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
-                                IsVisible="{Binding HasDeleteSummary}">
+                        <Border Classes="panel" Padding="12" IsVisible="{Binding HasDeleteSummary}">
                             <DockPanel>
                                 <Button DockPanel.Dock="Right" Content="Dismiss" Classes="small" VerticalAlignment="Top"
                                         Command="{Binding DismissSummaryCommand}" />

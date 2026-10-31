@@ -8,8 +8,8 @@
         <Style Selector="Button.choice">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="4" />
-            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10,7" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
@@ -21,9 +21,10 @@
         </Style>
     </UserControl.Styles>
 
-    <Border Padding="12" CornerRadius="8"
+    <Border Padding="12" CornerRadius="{StaticResource OverlayCornerRadius}"
             Background="{DynamicResource PanelBrush}"
             BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
+            BoxShadow="0 16 40 0 #66000000"
             KeyboardNavigation.TabNavigation="Contained">
         <StackPanel Spacing="8">
             <TextBox x:Name="Input" Text="{Binding Query}" PlaceholderText="Search, or type &gt; for commands" />

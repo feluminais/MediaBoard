@@ -4,8 +4,7 @@
              x:Class="MediaBoard.Desktop.Views.FixMatchPickerView"
              x:DataType="vm:FixMatchPickerViewModel">
     <!-- The "Fix match" search, shared by the title page and Needs review. -->
-    <Border Padding="12" CornerRadius="6" Background="{DynamicResource PanelBrush}"
-            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+    <Border Classes="panel">
         <StackPanel Spacing="10">
             <TextBlock Classes="rowTitle" Text="Fix match" />
             <DockPanel>

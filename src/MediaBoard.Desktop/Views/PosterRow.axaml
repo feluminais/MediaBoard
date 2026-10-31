@@ -9,7 +9,7 @@
             Command="{Binding OpenCommand}">
         <DockPanel Classes.dimmed="{Binding IsDimmed}" Margin="0,4">
             <Panel DockPanel.Dock="Left" Width="48" Height="72" Margin="0,0,16,0">
-                <Border Classes="frame" CornerRadius="4" ClipToBounds="True">
+                <Border Classes="frame" CornerRadius="6" ClipToBounds="True">
                     <controls:PosterImage LocalPath="{Binding PosterLocalPath}" DecodeWidth="96" />
                 </Border>
             </Panel>
