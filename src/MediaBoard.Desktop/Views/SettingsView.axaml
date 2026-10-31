@@ -46,7 +46,7 @@
                     </ComboBox>
                 </DockPanel>
                 <TextBlock Text="{Binding InUse}" TextWrapping="Wrap" />
-                <TextBlock Classes="muted" Text="{Binding InUseDetail}" TextTrimming="CharacterEllipsis" />
+                <SelectableTextBlock Classes="muted" Text="{Binding InUseDetail}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             </Border>
 
@@ -55,7 +55,7 @@
                 <TextBlock Classes="rowTitle" Text="About" />
                 <StackPanel Spacing="2">
                     <TextBlock Text="{Binding AppName}" FontWeight="SemiBold" />
-                    <TextBlock Classes="muted" Text="{Binding Version}" />
+                    <SelectableTextBlock Classes="muted" Text="{Binding Version}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <Border Classes="tag" Padding="10,4" VerticalAlignment="Center">

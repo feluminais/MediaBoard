@@ -15,19 +15,22 @@
                            IsVisible="{Binding HasEmptyHint}" />
             </StackPanel>
 
-            <!-- The ListBox's panel only builds the rows in view. -->
-            <ListBox x:Name="Rows" ItemsSource="{Binding Items}" Background="Transparent" Padding="0">
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-                <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="vm:PosterCardViewModel">
-                        <views:PosterRow />
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+            <!-- Each row is a button already, so no ListBox: its items would be a second tab stop per row, with a
+                 selection nothing uses. The panel only builds the rows in view. -->
+            <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="Rows" ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PosterCardViewModel">
+                            <views:PosterRow />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </Panel>
     </DockPanel>
 </UserControl>

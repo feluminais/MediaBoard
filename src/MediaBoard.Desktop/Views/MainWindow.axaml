@@ -15,7 +15,6 @@
 
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+F" Command="{Binding OpenSearchCommand}" />
-        <KeyBinding Gesture="Escape" Command="{Binding CloseSearchCommand}" />
     </Window.KeyBindings>
 
     <Window.DataTemplates>
@@ -185,7 +184,8 @@
         </Style>
     </Window.Styles>
 
-    <Panel>
+    <!-- Root takes the focus from a text box when the viewer presses empty space (it is no tab stop). -->
+    <Panel x:Name="Root" Background="Transparent" Focusable="True" IsTabStop="False" PointerPressed="OnRootPressed">
         <DockPanel>
             <!-- Status bar: always visible. The key segment opens Settings; the rest toggles the activity panel. A problem
                  segment (red) shows warnings and errors logged since the panel was last open. -->

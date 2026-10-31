@@ -62,13 +62,39 @@ public partial class MainWindow : Window
         {
             var back = _focusBeforeSearch;
             _focusBeforeSearch = null;
-            Dispatcher.UIThread.Post(() => back?.Focus());
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (back is { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, Focusable: true }) back.Focus();
+                else FocusManager?.FindFirstFocusableElement()?.Focus();
+            });
         }
+    }
+
+    // Escape closes the palette when focus is not in it (inside, the palette takes the key first). A bubbling handler,
+    // not a KeyBinding: a binding would run before every handler below the window.
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || e.Key != Key.Escape || e.KeyModifiers != KeyModifiers.None || _vm is not { IsSearchOpen: true }) return;
+
+        _vm.CloseSearchCommand.Execute(null);
+        e.Handled = true;
     }
 
     // Only a click on the dimmed area itself closes the palette, not one that bubbled up from the palette.
     private void OnBackdropPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (ReferenceEquals(e.Source, SearchBackdrop)) _vm?.CloseSearchCommand.Execute(null);
+        if (!ReferenceEquals(e.Source, SearchBackdrop)) return;
+
+        _vm?.CloseSearchCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    // A press no control handled (TextBox and Button handle their own) ends a text edit: the caret and the box's focus
+    // styling go. Focus moves to the root, never to nothing, so Ctrl+F and Escape keep working.
+    private void OnRootPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_vm?.IsSearchOpen == true) return;
+        if (FocusManager?.GetFocusedElement() is TextBox) Root.Focus();
     }
 }

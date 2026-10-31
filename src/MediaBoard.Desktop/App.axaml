@@ -148,7 +148,7 @@
         </Style>
 
         <!-- Text -->
-        <Style Selector="TextBlock.muted">
+        <Style Selector=":is(TextBlock).muted">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
         </Style>
         <Style Selector="TextBlock.pageTitle">

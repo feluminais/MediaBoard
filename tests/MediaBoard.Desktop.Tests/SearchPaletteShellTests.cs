@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Desktop.Tests.Support;
@@ -186,6 +187,44 @@ public partial class MainWindowViewModelTests
 
         Assert.False(vm.IsSearchOpen);
         Assert.Same(elsewhere, window.FocusManager!.GetFocusedElement());
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Palette_Escape_ClosesIt_WhenTheFocusIsNotInTheBox()
+    {
+        var vm = Create();
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        window.KeyPress(Key.F, RawInputModifiers.Control, PhysicalKey.F, "f");
+        Flush();
+        window.FindControl<Button>("StatusStrip")!.Focus();
+        Flush();
+
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        Flush();
+
+        Assert.False(vm.IsSearchOpen);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void PressingEmptySpace_TakesTheFocusOutOfATextBox_ToTheRoot()
+    {
+        var vm = Create();
+        vm.NavigateCommand.Execute(MainWindowViewModel.SettingsPage);
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        Flush();
+        var box = window.GetVisualDescendants().OfType<TextBox>().Single(b => b.Name == "KeyBox");
+        box.Focus();
+        Flush();
+        Assert.Same(box, window.FocusManager!.GetFocusedElement());
+
+        window.MouseDown(new Point(1100, 400), MouseButton.Left);
+        Flush();
+
+        Assert.Same(window.FindControl<Panel>("Root"), window.FocusManager!.GetFocusedElement());
         window.Close();
     }
 

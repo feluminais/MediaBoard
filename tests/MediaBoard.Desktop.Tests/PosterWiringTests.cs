@@ -268,13 +268,14 @@ public class PosterWiringTests
         window.Show();
         Settle(window);
 
-        var rows = view.GetVisualDescendants().OfType<ListBox>().Single();
+        var rows = view.GetVisualDescendants().OfType<ItemsControl>().Single();
+        var scroller = view.GetVisualDescendants().OfType<ScrollViewer>().Single();
         Assert.IsType<VirtualizingStackPanel>(rows.ItemsPanelRoot);
         Assert.Equal(5000, list.Items.Count);
         Assert.InRange(view.GetVisualDescendants().OfType<PosterRow>().Count(), 1, 60);
         Assert.InRange(list.Items.Count(c => c.IsLookingForPoster), 1, 60);
 
-        rows.Scroll!.Offset = new Vector(0, 200000);
+        scroller.Offset = new Vector(0, 200000);
         Settle(window);
 
         Assert.InRange(view.GetVisualDescendants().OfType<PosterRow>().Count(), 1, 60);
