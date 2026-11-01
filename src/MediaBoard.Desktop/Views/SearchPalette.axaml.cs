@@ -50,7 +50,7 @@ public partial class SearchPalette : UserControl
                 _vm.OpenSelectedCommand.Execute(null);
                 break;
             case Key.Escape:
-                _vm.CloseCommand.Execute(null);
+                _vm.EscapeCommand.Execute(null);
                 break;
             default:
                 return;

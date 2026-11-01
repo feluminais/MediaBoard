@@ -17,10 +17,15 @@
             <TextBlock Classes="muted" Text="{Binding SizeText}" />
             <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
                 <ItemsControl ItemsSource="{Binding Paths}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:PathRow">
                             <StackPanel Margin="0,0,0,6">
-                                <SelectableTextBlock Text="{Binding Path}" TextWrapping="Wrap" FontSize="12" />
+                                <SelectableTextBlock Text="{Binding Path}" TextWrapping="Wrap" FontSize="12" IsTabStop="False" />
                                 <TextBlock Classes="muted" Text="{Binding Note}" FontSize="12"
                                            IsVisible="{Binding Note, Converter={x:Static ObjectConverters.IsNotNull}}" />
                             </StackPanel>

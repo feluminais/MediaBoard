@@ -17,6 +17,17 @@ public partial class FixMatchPickerView : UserControl
     public FixMatchPickerView()
     {
         InitializeComponent();
+        Input.KeyDown += OnInputKeyDown;
+    }
+
+    // Escape peels one layer: the typed text first, then the search itself.
+    private void OnInputKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || e.KeyModifiers != KeyModifiers.None || DataContext is not FixMatchPickerViewModel picker) return;
+
+        if (picker.Query.Length > 0) picker.Query = "";
+        else picker.CancelCommand.Execute(null);
+        e.Handled = true;
     }
 
     protected override void OnDataContextChanged(EventArgs e)

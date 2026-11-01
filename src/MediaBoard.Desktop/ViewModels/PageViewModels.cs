@@ -10,6 +10,9 @@ public abstract class PageViewModel(string title) : ObservableObject
 {
     public string Title { get; } = title;
 
+    /// <summary>Where the page's list was scrolled to (pixels from the top), kept for the next time its view is built.</summary>
+    public double ScrollOffset { get; set; }
+
     /// <summary>
     /// Re-reads the library after it changed. Called on the UI thread; it must return at once, so pages load through
     /// a <see cref="BackgroundQuery"/>. The task completes when the new data is applied.

@@ -156,6 +156,14 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     [RelayCommand]
     private void Close() => _close();
 
+    /// <summary>Escape peels one layer: the typed text first, then the palette.</summary>
+    [RelayCommand]
+    private void Escape()
+    {
+        if (Query.Length > 0) Query = "";
+        else _close();
+    }
+
     partial void OnQueryChanged(string value) => Update(value);
 
     private void Update(string text)

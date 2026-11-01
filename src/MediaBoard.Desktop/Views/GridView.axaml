@@ -7,7 +7,8 @@
     <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,20">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                <TextBox Width="200" PlaceholderText="Filter" Text="{Binding FilterText}" />
+                <TextBox x:Name="FilterBox" Width="200" PlaceholderText="Filter" Text="{Binding FilterText}"
+                         KeyDown="OnFilterKeyDown" />
                 <TextBlock Classes="muted" Text="Sort" VerticalAlignment="Center" />
                 <ComboBox MinWidth="120" ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}">
                     <ComboBox.ItemTemplate>

@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -192,6 +194,90 @@ public class FocusAndScaleTests
         Assert.NotNull(now);
         Assert.True(((InputElement)now!).IsEffectivelyVisible);
         window.Close();
+    }
+
+    private static void PressEscape(Window window)
+    {
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        Settle(window);
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_Escape_ClearsTheFilterText()
+    {
+        for (var i = 0; i < 50; i++) _library.TitleCards.Add(FakeLibrary.Card(i, $"Film {i:0000}"));
+        var grid = new TitleGridViewModel(TitleKind.Movie, _library, _hub, Posters.None(), new PageActions(_ => { }, _ => { }, _ => { }));
+        await grid.RefreshAsync();
+        var view = new GridView { DataContext = grid };
+        var window = new Window { Width = 1000, Height = 700, Content = view };
+        window.Show();
+        Settle(window);
+        var box = view.FindControl<TextBox>("FilterBox")!;
+        box.Focus();
+        box.Text = "Film 0003";
+        Settle(window);
+        Assert.Equal("Film 0003", grid.FilterText);
+
+        PressEscape(window);
+
+        Assert.Equal("", grid.FilterText);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task FixMatch_Escape_ClearsTheTextThenClosesTheSearch()
+    {
+        _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
+        _library.Next[1] = 10;
+        var (page, _, window) = await ShownTitle(1);
+        page.FixMatchCommand.Execute(null);
+        Settle(window);
+        var picker = page.Picker!;
+        Assert.NotEqual("", picker.Query);
+
+        PressEscape(window);
+        Assert.Equal("", picker.Query);
+        Assert.NotNull(page.Picker);
+
+        PressEscape(window);
+        Assert.Null(page.Picker);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Grid_ComingBack_LandsWhereTheViewerLeft()
+    {
+        for (var i = 0; i < 600; i++) _library.TitleCards.Add(FakeLibrary.Card(i, $"Film {i:0000}"));
+        var grid = new TitleGridViewModel(TitleKind.Movie, _library, _hub, Posters.None(), new PageActions(_ => { }, _ => { }, _ => { }));
+        await grid.RefreshAsync();
+        var first = new Window { Width = 1000, Height = 700, Content = new GridView { DataContext = grid } };
+        first.Show();
+        Settle(first);
+        var scroller = first.GetVisualDescendants().OfType<ItemsRepeater>().Single().FindAncestorOfType<ScrollViewer>()!;
+        scroller.Offset = new Vector(0, 3000);
+        Settle(first);
+        Assert.True(Math.Abs(grid.ScrollOffset - 3000) < 1, $"saved {grid.ScrollOffset}, scroller at {scroller.Offset.Y}, extent {scroller.Extent.Height}");
+        first.Close(); // the shell builds a new view when the page comes back
+
+        var second = new Window { Width = 1000, Height = 700, Content = new GridView { DataContext = grid } };
+        second.Show();
+        Settle(second);
+
+        var restored = second.GetVisualDescendants().OfType<ItemsRepeater>().Single().FindAncestorOfType<ScrollViewer>()!;
+        Assert.True(Math.Abs(restored.Offset.Y - 3000) < 1, $"restored to {restored.Offset.Y}, saved {grid.ScrollOffset}");
+        second.Close();
+    }
+
+    [AvaloniaFact]
+    public void DeleteDialog_ThousandPaths_BuildsOnlyTheRowsInView()
+    {
+        var files = Enumerable.Range(0, 1000).Select(i => new DeleteFile(i, $@"D:\Shows\Long runner\Long.Runner.S01E{i:000}.mkv", 1_000_000)).ToList();
+        var dialog = new ConfirmDeleteDialog(new DeletePreview(1, "Long runner", files));
+        dialog.Show();
+        Settle(dialog);
+
+        Assert.InRange(dialog.GetVisualDescendants().OfType<SelectableTextBlock>().Count(), 1, 60);
+        dialog.Close();
     }
 
     [AvaloniaFact]

@@ -212,7 +212,7 @@
                                            Foreground="{DynamicResource ErrorTextBrush}"
                                            IsVisible="{Binding StatusBar.LibraryProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <TextBlock Text="{Binding StatusBar.FailedScans}"
-                                           Foreground="{DynamicResource ErrorTextBrush}"
+                                           Foreground="{DynamicResource ErrorTextBrush}" MaxWidth="480" TextTrimming="CharacterEllipsis"
                                            IsVisible="{Binding StatusBar.FailedScans, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <!-- Scanning or identifying: a small bar and the accent colour, so it stands out from "Up to date". -->
                                 <StackPanel x:Name="BusySegment" Orientation="Horizontal" Spacing="8"
@@ -228,7 +228,7 @@
                                                IsVisible="{Binding StatusBar.Identifying, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 </StackPanel>
                                 <TextBlock Text="{Binding StatusBar.UnavailableFolders}"
-                                           Foreground="{DynamicResource WarningTextBrush}"
+                                           Foreground="{DynamicResource WarningTextBrush}" MaxWidth="480" TextTrimming="CharacterEllipsis"
                                            IsVisible="{Binding StatusBar.UnavailableFolders, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 <StackPanel Orientation="Horizontal" Spacing="6"
                                             IsVisible="{Binding StatusBar.Player, Converter={x:Static ObjectConverters.IsNotNull}}">

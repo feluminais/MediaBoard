@@ -4,10 +4,10 @@
              x:Class="MediaBoard.Desktop.Views.ActivityPanel"
              x:DataType="vm:ActivityPanelViewModel">
     <UserControl.Styles>
-        <Style Selector="TextBlock.error">
+        <Style Selector=":is(TextBlock).error">
             <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
         </Style>
-        <Style Selector="TextBlock.warning">
+        <Style Selector=":is(TextBlock).warning">
             <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
         </Style>
     </UserControl.Styles>
@@ -30,11 +30,12 @@
                             <Grid ColumnDefinitions="52,*" Margin="0,3">
                                 <TextBlock Classes="muted" Text="{Binding Time}" />
                                 <StackPanel Grid.Column="1">
-                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
-                                               Classes.error="{Binding IsError}"
-                                               Classes.warning="{Binding IsWarning}" />
-                                    <TextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" FontSize="12"
-                                               IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                    <!-- Selectable, so an error or a path can be copied; no tab stop, the mouse does the selecting. -->
+                                    <SelectableTextBlock Text="{Binding Message}" TextWrapping="Wrap" IsTabStop="False"
+                                                         Classes.error="{Binding IsError}"
+                                                         Classes.warning="{Binding IsWarning}" />
+                                    <SelectableTextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" FontSize="12" IsTabStop="False"
+                                                         IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>

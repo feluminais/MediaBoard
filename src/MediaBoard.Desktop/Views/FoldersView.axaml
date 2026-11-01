@@ -38,7 +38,7 @@
                                                 CommandParameter="{Binding}" />
                                     </StackPanel>
                                     <StackPanel Spacing="2">
-                                        <SelectableTextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <SelectableTextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" IsTabStop="False" />
                                         <TextBlock Classes="muted" Text="{Binding Summary}" TextWrapping="Wrap" />
                                         <ProgressBar Height="3" MinHeight="0" HorizontalAlignment="Stretch"
                                                      Margin="0,4,0,0" Minimum="0" Maximum="100"
@@ -48,7 +48,20 @@
                                     </StackPanel>
                                 </DockPanel>
 
-                                <ItemsControl ItemsSource="{Binding Ignored}" IsVisible="{Binding HasIgnored}">
+                                <!-- A folder can skip hundreds of subfolders: they scroll in a box instead of growing the page. -->
+                                <ItemsControl ItemsSource="{Binding Ignored}" IsVisible="{Binding HasIgnored}" MaxHeight="140">
+                                    <ItemsControl.Template>
+                                        <ControlTemplate>
+                                            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                                <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                                            </ScrollViewer>
+                                        </ControlTemplate>
+                                    </ItemsControl.Template>
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="vm:IgnoredFolder">
                                             <DockPanel Margin="0,2">

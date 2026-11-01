@@ -45,6 +45,7 @@ public sealed partial class FixMatchPickerViewModel : ObservableObject
     private OnlineState _state = OnlineState.TooShort;
     private bool _searched;
     private CancellationTokenSource? _pause;
+    private CancellationTokenSource? _searchCancel;
 
     public FixMatchPickerViewModel(
         ISearchService search, ActivityHub hub, string query, TitleKind kind, Func<SearchCandidate, Task> pick, Action cancel)
@@ -107,9 +108,11 @@ public sealed partial class FixMatchPickerViewModel : ObservableObject
     public Task SearchAsync()
     {
         _pause?.Cancel();
+        _searchCancel?.Cancel(); // a newer search makes the one in flight pointless: stop its request
+        var cancel = _searchCancel = new CancellationTokenSource();
         var text = Query;
         return _query.RunAsync(
-            () => _search.SearchAsync(text, CancellationToken.None).GetAwaiter().GetResult(),
+            () => _search.SearchAsync(text, cancel.Token).GetAwaiter().GetResult(),
             results =>
             {
                 _found = results.Online.Select(o => o.Candidate).ToList();
@@ -147,6 +150,8 @@ public sealed partial class FixMatchPickerViewModel : ObservableObject
     private void Cancel()
     {
         _pause?.Cancel();
+        _searchCancel?.Cancel();
+        _query.Discard(); // the cancelled request is not a failure to report
         _cancel();
     }
 }

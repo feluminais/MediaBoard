@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input;
+using MediaBoard.Desktop.Controls;
 
 namespace MediaBoard.Desktop.Views;
 
@@ -19,6 +21,16 @@ public partial class GridView : UserControl
         Cards.ElementPrepared += (_, e) => (e.Element as PosterHost)?.Unpark();
         AddHandler(ScrollViewer.ScrollChangedEvent, (_, _) => SyncViewport());
         Cards.LayoutUpdated += (_, _) => SyncViewport();
+        _ = new ScrollMemory(this, Scroller);
+    }
+
+    // Escape in the filter clears what was typed; with nothing typed it is left for the layers outside.
+    private void OnFilterKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || e.KeyModifiers != KeyModifiers.None || sender is not TextBox { Text.Length: > 0 } box) return;
+
+        box.Text = "";
+        e.Handled = true;
     }
 
     private void SyncViewport()

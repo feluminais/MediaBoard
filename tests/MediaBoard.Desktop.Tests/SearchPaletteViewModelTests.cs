@@ -333,6 +333,21 @@ public class SearchPaletteViewModelTests
         Assert.Empty(rig.Calls);
     }
 
+    // Escape peels one layer: the text first, then the palette.
+    [AvaloniaFact]
+    public void Escape_ClearsTheTextFirst_ThenCloses()
+    {
+        var rig = new Rig();
+        rig.Palette.Query = "hea";
+
+        rig.Palette.EscapeCommand.Execute(null);
+        Assert.Equal("", rig.Palette.Query);
+        Assert.Equal(0, rig.Closed);
+
+        rig.Palette.EscapeCommand.Execute(null);
+        Assert.Equal(1, rig.Closed);
+    }
+
     [AvaloniaFact]
     public async Task Arrows_MoveSelection()
     {
