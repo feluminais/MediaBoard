@@ -498,6 +498,26 @@ public sealed class FoldersViewModelTests : IDisposable
         Assert.Equal("No videos found", vm.Folders.Single(f => f.Id == 2).Summary);
     }
 
+    // The row objects survive a reload, so the list keeps their controls and a focused button stays focused.
+    [AvaloniaFact]
+    public async Task Refresh_KeepsTheRowsItAlreadyHas()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
+        library.FolderRows.Add(FakeLibrary.Folder(2, @"E:\Movies"));
+        var vm = CreateOver(library);
+        await vm.RefreshAsync();
+        var first = vm.Folders[0];
+        var second = vm.Folders[1];
+
+        library.FolderRows.Add(FakeLibrary.Folder(3, @"F:\Movies"));
+        await vm.RefreshAsync();
+
+        Assert.Equal(3, vm.Folders.Count);
+        Assert.Same(first, vm.Folders[0]);
+        Assert.Same(second, vm.Folders[1]);
+    }
+
     [AvaloniaFact]
     public async Task Refresh_RunsTheQueryOffTheUiThread()
     {

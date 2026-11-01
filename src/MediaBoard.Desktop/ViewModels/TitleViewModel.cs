@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -35,6 +36,8 @@ public sealed partial class TitleViewModel : PageViewModel
     private IReadOnlyList<(int FileId, bool Watched)> _files = [];
     private string? _posterPath;
     private bool _onlineLoaded;
+    private bool _headerLoaded;
+    private Dictionary<(TargetKind, int), EditableItem> _items = [];
 
     /// <summary>A page for a title in the library.</summary>
     public TitleViewModel(int titleId, TitleServices services, TitleNavigation navigation)
@@ -58,7 +61,14 @@ public sealed partial class TitleViewModel : PageViewModel
         _player = new Lazy<string?>(services.PlayerName);
         Header = new EditableItem(null, TargetKind.Title, titleId, "", false);
         PlayText = "Play";
+        Rows.Add(this);
     }
+
+    /// <summary>
+    /// What the page lists, flat so the list virtualizes: this page for the header block, then seasons and episodes,
+    /// then <see cref="FilesHeader"/> and the loose files. A refresh changes it row by row.
+    /// </summary>
+    public ObservableCollection<object> Rows { get; } = [];
 
     /// <summary>A page for a TMDB title that is not in the library (an online search hit).</summary>
     public static TitleViewModel Online(int tmdbId, TitleKind kind, TitleServices services, TitleNavigation navigation) =>
@@ -210,6 +220,8 @@ public sealed partial class TitleViewModel : PageViewModel
             _playFileId = null;
             Seasons = [];
             Files = [];
+            _items = [];
+            CollectionSync.Sync(Rows, [this]);
             CanPlay = false;
             PlayReason = null;
             OnPropertyChanged(nameof(WatchedText));
@@ -219,7 +231,6 @@ public sealed partial class TitleViewModel : PageViewModel
 
         NotFound = false;
         _kind = d.Kind;
-        var editing = EditsInProgress();
 
         Tag = d.Offline ? "Not identified (offline)" : null;
         YearText = YearOf(d.Year, d.EndYear);
@@ -227,24 +238,37 @@ public sealed partial class TitleViewModel : PageViewModel
         Overview = d.Overview;
         ShowPoster(d.PosterPath);
 
-        var header = new EditableItem(this, TargetKind.Title, d.TitleId, d.Name, d.Hidden);
-        Carry(editing, header);
-        Header = header;
+        // Items the page already has are updated in place: the list keeps their elements, so a name being typed or
+        // the button the viewer has focused is still there after the refresh.
+        if (_headerLoaded)
+        {
+            Header.Update(d.Name, d.Hidden);
+            OnPropertyChanged(nameof(ShowHiddenTag));
+        }
+        else
+        {
+            Header = new EditableItem(this, TargetKind.Title, d.TitleId, d.Name, d.Hidden);
+            _headerLoaded = true;
+        }
 
+        var known = _items;
+        var next = new Dictionary<(TargetKind, int), EditableItem>();
         var seasons = d.Seasons.Select(season =>
         {
-            var episodes = season.Episodes.Select(e => EpisodeItem.Of(this, e)).ToList();
-            foreach (var episode in episodes) Carry(editing, episode);
-            var item = new SeasonItem(this, season, episodes);
-            Carry(editing, item);
-            return item;
+            var episodes = season.Episodes
+                .Select(e => Reuse(known, next, (TargetKind.Episode, e.EpisodeId), i => i.Refresh(e), () => EpisodeItem.Of(this, e)))
+                .ToList();
+            return Reuse(known, next, (TargetKind.Season, season.Id), i => i.Refresh(season, episodes), () => new SeasonItem(this, season, episodes));
         }).ToList();
-        var files = d.Files.Select(f => EpisodeItem.Of(this, f)).ToList();
-        foreach (var file in files) Carry(editing, file);
+        var files = d.Files
+            .Select(f => Reuse(known, next, (TargetKind.File, f.FileId), i => i.Refresh(f), () => EpisodeItem.Of(this, f)))
+            .ToList();
+        _items = next;
         Seasons = seasons;
         Files = files;
         OnPropertyChanged(nameof(HasSeasons));
         OnPropertyChanged(nameof(ShowFiles));
+        SyncRows(seasons, files);
 
         var rows = seasons.SelectMany(s => s.Episodes).Concat(files).Where(i => i.FileId is not null).ToList();
         _files = rows.GroupBy(i => i.FileId!.Value).Select(g => (g.Key, g.Any(i => i.IsWatched))).ToList();
@@ -314,15 +338,37 @@ public sealed partial class TitleViewModel : PageViewModel
         if (path == _posterPath) PosterLocalPath = local;
     }
 
-    // A refresh rebuilds every item; the name being typed in a box must not be lost with the old item.
-    private Dictionary<(TargetKind, int), EditableItem> EditsInProgress() =>
-        Seasons.SelectMany(s => s.Episodes.Prepend<EditableItem>(s)).Concat(Files).Append(Header)
-            .Where(i => i.IsEditing)
-            .ToDictionary(i => (i.Kind, i.Id));
-
-    private static void Carry(Dictionary<(TargetKind, int), EditableItem> editing, EditableItem item)
+    // The item the last refresh made for this season, episode or file, brought up to date; a new one when there was none.
+    private static T Reuse<T>(
+        Dictionary<(TargetKind, int), EditableItem> known, Dictionary<(TargetKind, int), EditableItem> next,
+        (TargetKind, int) key, Action<T> refresh, Func<T> create)
+        where T : EditableItem
     {
-        if (editing.TryGetValue((item.Kind, item.Id), out var old)) item.CarryEditFrom(old);
+        var item = known.GetValueOrDefault(key) as T;
+        if (item is not null) refresh(item);
+        else item = create();
+        next[key] = item;
+        return item;
+    }
+
+    // One flat list for the page, so the list control builds only the rows in view: the page itself (its header
+    // block), then each season with its episodes, then the files that belong to no episode.
+    private void SyncRows(IReadOnlyList<SeasonItem> seasons, IReadOnlyList<EpisodeItem> files)
+    {
+        var rows = new List<object> { this };
+        foreach (var season in seasons)
+        {
+            rows.Add(season);
+            rows.AddRange(season.Episodes);
+        }
+
+        if (ShowFiles)
+        {
+            rows.Add(FilesHeader.Instance);
+            rows.AddRange(files);
+        }
+
+        CollectionSync.Sync(Rows, rows);
     }
 
     // ---- Edits ----

@@ -336,7 +336,7 @@
                     </Grid>
                 </Border>
 
-                <ContentControl Content="{Binding CurrentPage}" Margin="32,12,32,0" />
+                <ContentControl x:Name="PageHost" Content="{Binding CurrentPage}" Margin="32,12,32,0" />
             </DockPanel>
         </DockPanel>
 

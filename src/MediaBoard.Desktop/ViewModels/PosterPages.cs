@@ -47,9 +47,8 @@ public sealed partial class ListViewModel : PageViewModel
     [NotifyPropertyChangedFor(nameof(EmptyText), nameof(EmptyHint), nameof(HasEmptyHint))]
     private partial string? BusyTitle { get; set; }
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowEmpty))]
-    public partial IReadOnlyList<PosterCardViewModel> Items { get; private set; } = [];
+    /// <summary>The rows. A refresh that adds or removes a few changes the list row by row, so the focused row stays.</summary>
+    public BulkObservableCollection<PosterCardViewModel> Items { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty))]
@@ -64,7 +63,12 @@ public sealed partial class ListViewModel : PageViewModel
         var known = _known;
         return _query.RunAsync(() => Load(known), cards =>
         {
-            if (!PosterCards.SameCards(Items, cards)) Items = cards;
+            if (!PosterCards.SameCards(Items, cards))
+            {
+                CollectionUpdate.Apply(Items, cards);
+                OnPropertyChanged(nameof(ShowEmpty));
+            }
+
             _known = PosterCards.Index(cards);
             IsLoaded = true;
         });
@@ -142,10 +146,11 @@ public sealed partial class TitleGridViewModel : PageViewModel
     [ObservableProperty]
     public partial bool ShowHidden { get; set; }
 
-    /// <summary>The cards to show: all of them, or those that match the filter.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowEmpty), nameof(EmptyTitle), nameof(EmptyHint), nameof(HasEmptyHint))]
-    public partial IReadOnlyList<PosterCardViewModel> Items { get; private set; } = [];
+    /// <summary>
+    /// The cards to show: all of them, or those that match the filter. A refresh that adds or removes a few changes the
+    /// list card by card, so the focused card stays; another sort or a typed filter replaces it in one change.
+    /// </summary>
+    public BulkObservableCollection<PosterCardViewModel> Items { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty), nameof(EmptyTitle), nameof(EmptyHint), nameof(HasEmptyHint))]
@@ -206,7 +211,8 @@ public sealed partial class TitleGridViewModel : PageViewModel
         var shown = text.Length == 0
             ? _all
             : _all.Where(c => c.Name.Contains(text, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (!PosterCards.SameCards(Items, shown)) Items = shown;
+        if (!PosterCards.SameCards(Items, shown)) CollectionUpdate.Apply(Items, shown);
+        OnPropertyChanged(nameof(ShowEmpty));
         OnPropertyChanged(nameof(EmptyTitle)); // _all may have changed without Items changing
         OnPropertyChanged(nameof(EmptyHint));
         OnPropertyChanged(nameof(HasEmptyHint));

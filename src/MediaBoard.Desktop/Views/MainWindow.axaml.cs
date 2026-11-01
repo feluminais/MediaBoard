@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using MediaBoard.Desktop.Controls;
 using MediaBoard.Desktop.ViewModels;
 
 namespace MediaBoard.Desktop.Views;
@@ -51,6 +52,12 @@ public partial class MainWindow : Window
     // same pass, so focus after it). Closing gives the focus back.
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainWindowViewModel.CurrentPage))
+        {
+            FocusNewPage();
+            return;
+        }
+
         if (e.PropertyName != nameof(MainWindowViewModel.IsSearchOpen) || _vm is null) return;
 
         if (_vm.IsSearchOpen)
@@ -68,6 +75,21 @@ public partial class MainWindow : Window
                 else FocusManager?.FindFirstFocusableElement()?.Focus();
             });
         }
+    }
+
+    // The page that was open takes its focused control with it (the card that was pressed, a Back button, a row's
+    // button), and the focus would be nowhere. Put it on the new page's first control, silently (no cue, no tooltip),
+    // unless it is already somewhere visible: the sidebar button that was pressed keeps it. The new page's rows are
+    // built in the layout pass, so wait for it.
+    private void FocusNewPage()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (FocusManager?.GetFocusedElement() is InputElement { IsEffectivelyVisible: true }) return;
+
+            PageHost.UpdateLayout();
+            FocusTargets.First(PageHost)?.Focus();
+        }, DispatcherPriority.Loaded);
     }
 
     // Escape closes the palette when focus is not in it (inside, the palette takes the key first). A bubbling handler,

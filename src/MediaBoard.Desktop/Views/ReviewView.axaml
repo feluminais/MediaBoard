@@ -15,7 +15,9 @@
             <TextBlock Classes="muted" Text="{Binding EmptyText}" IsVisible="{Binding ShowEmpty}"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-            <!-- One flat list (a header, then its rows) so only the rows on screen are built. -->
+            <!-- One flat list (a header, then its rows) so only the rows on screen are built. An ItemsControl does not
+                 scroll by itself: without the ScrollViewer only the first screenful of rows is reachable. -->
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
             <ItemsControl x:Name="List" ItemsSource="{Binding Items}" MaxWidth="980" Margin="0,0,16,0">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -70,6 +72,7 @@
                     </DataTemplate>
                 </ItemsControl.DataTemplates>
             </ItemsControl>
+            </ScrollViewer>
         </Panel>
     </DockPanel>
 </UserControl>

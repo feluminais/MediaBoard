@@ -11,7 +11,7 @@
                 <Button DockPanel.Dock="Right" Content="Cancel" Margin="8,0,0,0" Command="{Binding CancelCommand}" />
                 <ComboBox DockPanel.Dock="Right" Margin="8,0,0,0" MinWidth="110"
                           ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" />
-                <TextBox Text="{Binding Query}" PlaceholderText="Search TMDB" />
+                <TextBox x:Name="Input" Text="{Binding Query}" PlaceholderText="Search TMDB" />
             </DockPanel>
             <TextBlock Classes="muted" Text="{Binding Message}"
                        IsVisible="{Binding Message, Converter={x:Static ObjectConverters.IsNotNull}}" />

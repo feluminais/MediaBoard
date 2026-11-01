@@ -7,7 +7,8 @@ namespace MediaBoard.Desktop.ViewModels;
 
 /// <summary>
 /// Something on the title page the viewer can rename or hide: the title itself, a season, an episode or a file.
-/// A page refresh builds new items, so the page copies an open edit over to the new item.
+/// A page refresh updates the items it already has (see <c>Refresh</c> on each), so the row a viewer is typing in or
+/// has keyboard focus on is the same row after the refresh.
 /// </summary>
 public partial class EditableItem : ObservableObject
 {
@@ -27,9 +28,12 @@ public partial class EditableItem : ObservableObject
     /// <summary>The id the library edits by (<see cref="SeasonView.Id"/> for a season).</summary>
     public int Id { get; }
 
-    public string Name { get; }
+    [ObservableProperty]
+    public partial string Name { get; private set; }
 
-    public bool IsHidden { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HideText))]
+    public partial bool IsHidden { get; private set; }
 
     public string HideText => IsHidden ? "Show" : "Hide";
 
@@ -39,13 +43,16 @@ public partial class EditableItem : ObservableObject
     [ObservableProperty]
     public partial string EditText { get; set; } = "";
 
-    /// <summary>The edit was carried over from the item this one replaced (a refresh): the box keeps what was typed and does not select it.</summary>
-    public bool ResumedEdit { get; private set; }
+    /// <summary>What the library says now. The text being typed in an open edit is not touched.</summary>
+    internal void Update(string name, bool hidden)
+    {
+        Name = name;
+        IsHidden = hidden;
+    }
 
     [RelayCommand]
     private void BeginRename()
     {
-        ResumedEdit = false;
         EditText = Name;
         IsEditing = true;
     }
@@ -66,21 +73,37 @@ public partial class EditableItem : ObservableObject
 
     [RelayCommand]
     private Task ToggleHiddenAsync() => _page?.SetHiddenAsync(Kind, Id, !IsHidden) ?? Task.CompletedTask;
+}
 
-    internal void CarryEditFrom(EditableItem old)
+public sealed partial class SeasonItem : EditableItem
+{
+    public SeasonItem(TitleViewModel page, SeasonView season, IReadOnlyList<EpisodeItem> episodes)
+        : base(page, TargetKind.Season, season.Id, season.Name, season.Hidden)
     {
-        ResumedEdit = true;
-        EditText = old.EditText;
-        IsEditing = old.IsEditing;
+        Number = season.Number;
+        Episodes = episodes;
+    }
+
+    public int Number { get; private set; }
+
+    public IReadOnlyList<EpisodeItem> Episodes { get; private set; }
+
+    internal void Refresh(SeasonView season, IReadOnlyList<EpisodeItem> episodes)
+    {
+        Update(season.Name, season.Hidden);
+        Number = season.Number;
+        Episodes = episodes;
     }
 }
 
-public sealed class SeasonItem(TitleViewModel page, SeasonView season, IReadOnlyList<EpisodeItem> episodes)
-    : EditableItem(page, TargetKind.Season, season.Id, season.Name, season.Hidden)
+/// <summary>The "Other files" line above the files that belong to no episode.</summary>
+public sealed class FilesHeader
 {
-    public int Number { get; } = season.Number;
+    public static FilesHeader Instance { get; } = new();
 
-    public IReadOnlyList<EpisodeItem> Episodes { get; } = episodes;
+    private FilesHeader()
+    {
+    }
 }
 
 /// <summary>An episode row, or a file the library could not place in an episode.</summary>
@@ -94,6 +117,34 @@ public sealed partial class EpisodeItem : EditableItem
         : base(page, kind, id, name, hidden)
     {
         _page = page;
+        Set(label, code, fileId, watched, positionS, durationS, missing);
+    }
+
+    public static EpisodeItem Of(TitleViewModel page, EpisodeRow row) =>
+        new(page, TargetKind.Episode, row.EpisodeId, row.Name, row.Hidden, $"E{row.Number:00}", $"S{row.Season:00}E{row.Number:00}", row.FileId, row.Watched,
+            row.PositionS, row.DurationS, row.Missing);
+
+    public static EpisodeItem Of(TitleViewModel page, FileView file) =>
+        new(page, TargetKind.File, file.FileId, file.Name, file.Hidden, null, null, file.FileId, file.Watched,
+            file.PositionS, file.DurationS, file.Missing);
+
+    /// <summary>Takes what the library says now; the row stays the same object, so the list control keeps its elements.</summary>
+    internal void Refresh(EpisodeRow row)
+    {
+        Update(row.Name, row.Hidden);
+        Set($"E{row.Number:00}", $"S{row.Season:00}E{row.Number:00}", row.FileId, row.Watched, row.PositionS, row.DurationS, row.Missing);
+        RaiseAll();
+    }
+
+    internal void Refresh(FileView file)
+    {
+        Update(file.Name, file.Hidden);
+        Set(null, null, file.FileId, file.Watched, file.PositionS, file.DurationS, file.Missing);
+        RaiseAll();
+    }
+
+    private void Set(string? label, string? code, int? fileId, bool watched, double positionS, double durationS, bool missing)
+    {
         Label = label;
         Code = code;
         PositionS = positionS;
@@ -108,35 +159,38 @@ public sealed partial class EpisodeItem : EditableItem
             : "";
     }
 
-    public static EpisodeItem Of(TitleViewModel page, EpisodeRow row) =>
-        new(page, TargetKind.Episode, row.EpisodeId, row.Name, row.Hidden, $"E{row.Number:00}", $"S{row.Season:00}E{row.Number:00}", row.FileId, row.Watched,
-            row.PositionS, row.DurationS, row.Missing);
+    private void RaiseAll()
+    {
+        foreach (var name in Derived) OnPropertyChanged(name);
+    }
 
-    public static EpisodeItem Of(TitleViewModel page, FileView file) =>
-        new(page, TargetKind.File, file.FileId, file.Name, file.Hidden, null, null, file.FileId, file.Watched,
-            file.PositionS, file.DurationS, file.Missing);
+    private static readonly string[] Derived =
+    [
+        nameof(Label), nameof(Code), nameof(PositionS), nameof(FileId), nameof(IsWatched), nameof(Missing), nameof(Progress),
+        nameof(HasProgress), nameof(StatusText), nameof(HasStatus), nameof(HasLabel), nameof(CanPlay), nameof(CanMarkWatched), nameof(WatchedText),
+    ];
 
     /// <summary>"E04"; null for a file with no episode.</summary>
-    public string? Label { get; }
+    public string? Label { get; private set; }
 
     /// <summary>"S01E04", for the Play button; null for a file with no episode.</summary>
-    public string? Code { get; }
+    public string? Code { get; private set; }
 
-    public double PositionS { get; }
+    public double PositionS { get; private set; }
 
-    public int? FileId { get; }
+    public int? FileId { get; private set; }
 
-    public bool IsWatched { get; }
+    public bool IsWatched { get; private set; }
 
-    public bool Missing { get; }
+    public bool Missing { get; private set; }
 
     /// <summary>How far through the file the viewer is, 0 to 1; 0 hides the bar.</summary>
-    public double Progress { get; }
+    public double Progress { get; private set; }
 
     public bool HasProgress => Progress > 0;
 
     /// <summary>"Watched", the time left off at, "File missing" or "No file"; empty for an episode not started.</summary>
-    public string StatusText { get; }
+    public string StatusText { get; private set; } = "";
 
     public bool HasStatus => StatusText.Length > 0;
 

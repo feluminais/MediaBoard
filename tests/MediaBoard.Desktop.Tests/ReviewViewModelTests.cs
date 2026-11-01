@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -542,11 +543,37 @@ public class ReviewViewModelTests
         Ui.Flush();
 
         var panel = view.GetVisualDescendants().OfType<VirtualizingStackPanel>().First();
-        var rowViews = view.GetVisualDescendants().OfType<Button>().Count(b => (string?)b.Content == "Not a movie or show");
+        var rowViews = view.GetVisualDescendants().OfType<Button>().Count(b => b.Content as string == "Not a movie or show");
 
         Assert.Equal(1000, page.Items.Count);
         Assert.InRange(panel.Children.Count, 1, 60);
         Assert.InRange(rowViews, 1, 60);
+        window.Close();
+    }
+
+    // An ItemsControl does not scroll by itself: without a ScrollViewer around it only the first screenful was reachable.
+    [AvaloniaFact]
+    public async Task TheList_ScrollsToTheRowsBelowTheFirstScreen()
+    {
+        for (var i = 1; i <= 200; i++) _library.Review.Add(MovieFile(i, $"F{i:0000}.mkv", $"F{i}", null, Movie(i, "T", 2000)));
+        var page = await Loaded();
+        var view = new ReviewView { DataContext = page };
+        var window = new Window { Width = 1000, Height = 640, Content = view };
+        window.Show();
+        Ui.Flush();
+        window.UpdateLayout();
+
+        var scroller = view.GetVisualDescendants().OfType<ScrollViewer>().First();
+        Assert.True(scroller.Extent.Height > scroller.Viewport.Height * 5, "the list is much taller than the window");
+
+        scroller.Offset = new Vector(0, scroller.Extent.Height - scroller.Viewport.Height);
+        Ui.Flush();
+        window.UpdateLayout();
+        Ui.Flush();
+        window.UpdateLayout();
+
+        var summaries = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains(summaries, text => text?.StartsWith("F200") == true);
         window.Close();
     }
 

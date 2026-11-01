@@ -274,7 +274,7 @@ public sealed partial class ReviewViewModel : PageViewModel
             else _loose = null;
         }
 
-        foreach (var (group, list) in wanted) Sync(group.Rows, list);
+        foreach (var (group, list) in wanted) CollectionSync.Sync(group.Rows, list);
         if (!Groups.SequenceEqual(order, ReferenceEqualityComparer.Instance)) Groups = order;
 
         var flat = new List<object>();
@@ -284,7 +284,7 @@ public sealed partial class ReviewViewModel : PageViewModel
             flat.AddRange(group.Rows);
         }
 
-        Sync(Items, flat);
+        CollectionSync.Sync(Items, flat);
         StartEnrichment();
     }
 
@@ -293,31 +293,6 @@ public sealed partial class ReviewViewModel : PageViewModel
         if (showFolder is null) return _loose ??= new ReviewGroup(null);
         if (!_groups.TryGetValue(showFolder, out var group)) _groups[showFolder] = group = new ReviewGroup(showFolder);
         return group;
-    }
-
-    // Makes <target> hold the same items as <wanted>, in order, with the fewest removals, inserts and moves.
-    private static void Sync<T>(ObservableCollection<T> target, IReadOnlyList<T> wanted)
-        where T : class
-    {
-        var keep = new HashSet<T>(wanted, ReferenceEqualityComparer.Instance as IEqualityComparer<T>);
-        for (var i = target.Count - 1; i >= 0; i--)
-        {
-            if (!keep.Contains(target[i])) target.RemoveAt(i);
-        }
-
-        for (var i = 0; i < wanted.Count; i++)
-        {
-            if (i < target.Count && ReferenceEquals(target[i], wanted[i])) continue;
-
-            var at = -1;
-            for (var j = i + 1; j < target.Count && at < 0; j++)
-            {
-                if (ReferenceEquals(target[j], wanted[i])) at = j;
-            }
-
-            if (at >= 0) target.Move(at, i);
-            else target.Insert(i, wanted[i]);
-        }
     }
 
     // ---- Search ----

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -17,13 +18,39 @@ public sealed partial class FolderItem : ObservableObject
 {
     public const string IgnoredLabel = "Ignored: no video";
 
-    private readonly string _idleSummary;
+    private string _idleSummary = "";
 
     /// <param name="scanFailed">The folder's last scan threw (the status bar says so too).</param>
     /// <param name="scan">Where the folder's scan is; null when none runs or waits.</param>
     public FolderItem(FolderRow row, bool scanFailed = false, FolderScan? scan = null)
     {
         Id = row.Id;
+        Path = "";
+        Name = "";
+        Ignored = [];
+        Fill(row, scanFailed);
+        SetScan(scan);
+    }
+
+    /// <summary>
+    /// Takes what the library says now. The row stays the same object, so the list keeps its controls and the
+    /// button the viewer has focused is still there after the reload.
+    /// </summary>
+    internal void Refresh(FolderRow row, bool scanFailed, FolderScan? scan)
+    {
+        Fill(row, scanFailed);
+        SetScan(scan);
+        foreach (var name in Changeable) OnPropertyChanged(name);
+    }
+
+    private static readonly string[] Changeable =
+    [
+        nameof(Path), nameof(Name), nameof(IsEnabled), nameof(IsUnavailable), nameof(ShowRepoint), nameof(ToggleLabel),
+        nameof(Ignored), nameof(HasIgnored),
+    ];
+
+    private void Fill(FolderRow row, bool scanFailed)
+    {
         Path = row.Path;
         IsEnabled = row.Enabled;
         IsUnavailable = row.Unavailable;
@@ -34,19 +61,18 @@ public sealed partial class FolderItem : ObservableObject
             : scanFailed ? "Scan failed"
             : !row.Enabled ? "Disabled"
             : row.FileCount switch { 0 => "No videos found", 1 => "1 file", var n => $"{n} files" };
-        SetScan(scan);
     }
 
     public int Id { get; }
 
-    public string Path { get; }
+    public string Path { get; private set; }
 
     /// <summary>The last part of the path, for the remove question.</summary>
-    public string Name { get; }
+    public string Name { get; private set; }
 
-    public bool IsEnabled { get; }
+    public bool IsEnabled { get; private set; }
 
-    public bool IsUnavailable { get; }
+    public bool IsUnavailable { get; private set; }
 
     /// <summary>A folder that can't be read offers to be pointed at its new location.</summary>
     public bool ShowRepoint => IsUnavailable;
@@ -72,7 +98,7 @@ public sealed partial class FolderItem : ObservableObject
     [ObservableProperty]
     public partial double ScanPercent { get; private set; }
 
-    public IReadOnlyList<IgnoredFolder> Ignored { get; }
+    public IReadOnlyList<IgnoredFolder> Ignored { get; private set; }
 
     public bool HasIgnored => Ignored.Count > 0;
 
@@ -133,9 +159,8 @@ public sealed partial class FoldersViewModel : PageViewModel
         _ = new StatusFeed(hub, ApplyScans);
     }
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowEmpty))]
-    public partial IReadOnlyList<FolderItem> Folders { get; private set; } = [];
+    /// <summary>The rows. A reload keeps the row objects it can (<see cref="FolderItem.Refresh"/>), so focus on a row's button stays.</summary>
+    public ObservableCollection<FolderItem> Folders { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmpty))]
@@ -164,11 +189,18 @@ public sealed partial class FoldersViewModel : PageViewModel
         {
             var status = _hub.Current;
             var shown = Folders.ToDictionary(f => f.Id);
-            Folders = rows.Select(row => new FolderItem(
-                row,
-                status.FailedScanIds.Contains(row.Id),
-                status.ScanOf(row.Id) ?? HeldScan(row.Id, busy, shown))).ToList();
+            var items = rows.Select(row =>
+            {
+                var failed = status.FailedScanIds.Contains(row.Id);
+                var scan = status.ScanOf(row.Id) ?? HeldScan(row.Id, busy, shown);
+                if (!shown.TryGetValue(row.Id, out var item)) return new FolderItem(row, failed, scan);
+
+                item.Refresh(row, failed, scan);
+                return item;
+            }).ToList();
+            CollectionSync.Sync(Folders, items);
             IsLoaded = true;
+            OnPropertyChanged(nameof(ShowEmpty));
         });
     }
 
