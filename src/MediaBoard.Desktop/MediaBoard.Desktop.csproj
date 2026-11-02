@@ -21,4 +21,9 @@
   <ItemGroup>
     <ProjectReference Include="..\MediaBoard.Core\MediaBoard.Core.csproj" />
   </ItemGroup>
+  <!-- A MediaBoard shortcut on the desktop follows the latest build (Debug or Release). Skipped on CI, or when
+       MediaBoardNoShortcut=true; a failure never fails the build. -->
+  <Target Name="UpdateDesktopShortcut" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' And '$(CI)' == '' And '$(MediaBoardNoShortcut)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Update-DesktopShortcut.ps1&quot; -Target &quot;$(TargetDir)$(TargetName).exe&quot; -Icon &quot;$(MSBuildProjectDirectory)\Assets\app.ico&quot;" IgnoreExitCode="true" StandardOutputImportance="low" />
+  </Target>
 </Project>
