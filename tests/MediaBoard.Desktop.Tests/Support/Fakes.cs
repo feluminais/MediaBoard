@@ -140,6 +140,24 @@ internal sealed class FakeSearch : ISearchService
         return Task.FromResult(answer);
     }
 
+    /// <summary>The online seasons this fake knows, by (TMDB id, season); GetOnlineSeasonAsync answers null for the rest.</summary>
+    public Dictionary<(int TmdbId, int Season), SeasonDetails> Seasons { get; } = [];
+
+    /// <summary>Every GetOnlineSeasonAsync call, in order.</summary>
+    public List<(int TmdbId, int Season)> SeasonRequests { get; } = [];
+
+    /// <summary>Answers GetOnlineSeasonAsync instead of <see cref="Seasons"/>; a test can hold a season open.</summary>
+    public Func<int, int, CancellationToken, Task<SeasonDetails?>>? OnSeason { get; set; }
+
+    public Task<SeasonDetails?> GetOnlineSeasonAsync(int tmdbId, int season, CancellationToken ct)
+    {
+        lock (SeasonRequests) SeasonRequests.Add((tmdbId, season));
+        if (OnSeason is not null) return OnSeason(tmdbId, season, ct);
+
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(Seasons.TryGetValue((tmdbId, season), out var hit) ? hit : null);
+    }
+
     /// <summary>The palette commands this fake offers; <see cref="Commands"/> filters them like the real service.</summary>
     public List<PaletteCommand> CommandList { get; } = [];
 

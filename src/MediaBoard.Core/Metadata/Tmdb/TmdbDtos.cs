@@ -83,4 +83,8 @@ internal sealed class TmdbEpisode
     [JsonPropertyName("name")] public string? Name { get; set; }
     [JsonPropertyName("runtime")] public int? Runtime { get; set; }
     [JsonPropertyName("air_date")] public string? AirDate { get; set; }
+    [JsonPropertyName("overview")] public string? Overview { get; set; }
+    [JsonPropertyName("vote_average")] public double VoteAverage { get; set; }
+    [JsonPropertyName("vote_count")] public int VoteCount { get; set; }
+    [JsonPropertyName("still_path")] public string? StillPath { get; set; }
 }

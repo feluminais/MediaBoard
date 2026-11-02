@@ -185,6 +185,43 @@ public sealed class SearchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task OnlineSeason_IsAskedOnce_AndKept()
+    {
+        var season = new SeasonDetails(2, [new EpisodeDetails(2, 1, "Pilot", null, null, "Plot.", 8.4, 90, "/s.jpg")]);
+        _tmdb.OnSeason(1399, season);
+
+        Assert.Same(season, await _service.GetOnlineSeasonAsync(1399, 2, Ct));
+        Assert.Same(season, await _service.GetOnlineSeasonAsync(1399, 2, Ct));
+
+        Assert.Equal([(1399, 2)], _tmdb.SeasonFetches);
+    }
+
+    [Theory]
+    [InlineData(UnavailableReason.Offline)]
+    [InlineData(UnavailableReason.NoKey)]
+    [InlineData(UnavailableReason.KeyRejected)]
+    [InlineData(UnavailableReason.ServerError)]
+    public async Task OnlineSeason_Unavailable_ReturnsNull(UnavailableReason reason)
+    {
+        _tmdb.OnSeason(1399, new SeasonDetails(1, []));
+        _tmdb.Unavailable = reason;
+
+        Assert.Null(await _service.GetOnlineSeasonAsync(1399, 1, Ct));
+    }
+
+    [Fact]
+    public async Task OnlineSeason_AFailureIsNotKept()
+    {
+        _tmdb.OnSeason(1399, new SeasonDetails(1, []));
+        _tmdb.Unavailable = UnavailableReason.ServerError;
+        Assert.Null(await _service.GetOnlineSeasonAsync(1399, 1, Ct));
+
+        _tmdb.Unavailable = null;
+
+        Assert.NotNull(await _service.GetOnlineSeasonAsync(1399, 1, Ct));
+    }
+
+    [Fact]
     public void Commands_AreTheThreeFixedOnes()
     {
         var all = _service.Commands("");

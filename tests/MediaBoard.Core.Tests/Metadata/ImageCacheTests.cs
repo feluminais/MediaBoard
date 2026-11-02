@@ -212,6 +212,22 @@ public sealed class ImageCacheTests : IDisposable
         Assert.Equal(images, FilesInCacheDir().Length);
     }
 
+    [Fact]
+    public async Task Still_Width300_DownloadsFromW300()
+    {
+        Uri? requested = null;
+        var cache = CacheWith(new StubHandler((_, request) =>
+        {
+            requested = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Image) };
+        }));
+
+        var path = await cache.GetAsync("/still.jpg", 300, Ct);
+
+        Assert.Equal(Path.Combine(_dir, "w300still.jpg"), path);
+        Assert.Equal(new Uri("https://image.tmdb.org/t/p/w300/still.jpg"), requested);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(500)]

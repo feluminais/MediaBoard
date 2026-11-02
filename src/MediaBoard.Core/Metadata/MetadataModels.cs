@@ -28,4 +28,15 @@ public sealed record TitleDetails(
 
 public sealed record SeasonDetails(int Season, IReadOnlyList<EpisodeDetails> Episodes);
 
-public sealed record EpisodeDetails(int Season, int Number, string Name, int? RuntimeMin, DateOnly? AirDate);
+/// <param name="Rating">TMDB viewers' average, or null while nobody voted on the episode.</param>
+/// <param name="StillPath">A TMDB image path for the episode's still frame.</param>
+public sealed record EpisodeDetails(
+    int Season,
+    int Number,
+    string Name,
+    int? RuntimeMin,
+    DateOnly? AirDate,
+    string? Overview = null,
+    double? Rating = null,
+    int VoteCount = 0,
+    string? StillPath = null);

@@ -98,7 +98,8 @@ public sealed class TmdbClient : IMetadataProvider
 
         var episodes = (dto.Episodes ?? [])
             .Select(e => new EpisodeDetails(e.SeasonNumber, e.EpisodeNumber, e.Name ?? "",
-                e.Runtime is > 0 ? e.Runtime : null, ParseDate(e.AirDate)))
+                e.Runtime is > 0 ? e.Runtime : null, ParseDate(e.AirDate),
+                NullIfEmpty(e.Overview), RatingOf(e.VoteAverage, e.VoteCount), e.VoteCount, NullIfEmpty(e.StillPath)))
             .ToList();
         return new SeasonDetails(dto.SeasonNumber, episodes);
     }

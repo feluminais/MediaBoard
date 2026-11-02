@@ -150,6 +150,20 @@ public class TmdbClientTests
         ], season.Episodes);
     }
 
+    [Fact]
+    public async Task GetSeason_KeepsRatingVotesOverviewAndStill_AndNullsWhatNobodyFilledIn()
+    {
+        var rig = Build(new FixtureHandler());
+
+        var season = await rig.Client.GetSeasonAsync(9001, 1, Ct);
+
+        Assert.Equal(
+        [
+            new EpisodeDetails(1, 1, "Pilot", 44, new DateOnly(2020, 1, 5), "A town wakes up.", 8.46, 120, "/pilot.jpg"),
+            new EpisodeDetails(1, 2, "Unrated", null, null, null, null, 0, null),
+        ], season.Episodes);
+    }
+
     // --- request shape ---------------------------------------------------------------------------
 
     [Fact]

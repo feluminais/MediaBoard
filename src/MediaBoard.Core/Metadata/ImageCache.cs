@@ -20,10 +20,10 @@ public sealed class ImageCache(HttpClient http, Connectivity connectivity, strin
     /// TMDB is reachable. Returns null when the file is missing and cannot be had now: offline, a network
     /// failure, a non-success answer (not asked again during this run), or a path that is not a plain file name.
     /// </summary>
-    /// <param name="width">342 or 780.</param>
+    /// <param name="width">342 or 780 for a poster, 300 for an episode still.</param>
     public async Task<string?> GetAsync(string posterPath, int width, CancellationToken ct)
     {
-        if (width is not (342 or 780)) throw new ArgumentOutOfRangeException(nameof(width), width, "Only 342 and 780 are cached.");
+        if (width is not (300 or 342 or 780)) throw new ArgumentOutOfRangeException(nameof(width), width, "Only 300, 342 and 780 are cached.");
 
         var name = LocalName(posterPath, width);
         if (name is null) return null;

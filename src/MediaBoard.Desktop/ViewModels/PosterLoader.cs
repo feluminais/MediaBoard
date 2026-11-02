@@ -10,6 +10,9 @@ public sealed class PosterLoader
     /// <summary>The width the image cache holds for cards and rows.</summary>
     public const int CardWidth = 342;
 
+    /// <summary>The width TMDB serves episode stills at (stills have no 342).</summary>
+    public const int StillWidth = 300;
+
     private readonly Func<string, int, CancellationToken, Task<string?>> _source;
     private readonly SemaphoreSlim _slots;
 
@@ -21,12 +24,17 @@ public sealed class PosterLoader
     }
 
     /// <summary>The local file, or null when there is none to show (offline, no such poster, a failed read). Throws only <see cref="OperationCanceledException"/>.</summary>
-    public async Task<string?> LoadAsync(string posterPath, CancellationToken ct)
+    public Task<string?> LoadAsync(string posterPath, CancellationToken ct) => LoadAsync(posterPath, CardWidth, ct);
+
+    /// <summary>The local file of an episode still, with the same rules as <see cref="LoadAsync(string, CancellationToken)"/>.</summary>
+    public Task<string?> LoadStillAsync(string stillPath, CancellationToken ct) => LoadAsync(stillPath, StillWidth, ct);
+
+    private async Task<string?> LoadAsync(string path, int width, CancellationToken ct)
     {
         await _slots.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await Task.Run(() => _source(posterPath, CardWidth, ct), CancellationToken.None).ConfigureAwait(false);
+            return await Task.Run(() => _source(path, width, ct), CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {

@@ -313,6 +313,27 @@ public sealed partial class TitleViewModel : PageViewModel
         RatingText = RatingOf(details.Rating);
         Overview = details.Overview;
         ShowPoster(details.PosterPath);
+        ShowGraph(details);
+    }
+
+    // A show not in the library gets the episode graph under its header; the seasons load in the background.
+    private void ShowGraph(TitleDetails details)
+    {
+        if (details.Kind != TitleKind.Show || details.SeasonNumbers.All(n => n <= 0)) return;
+
+        Graph = new EpisodeGraphViewModel(_tmdbId, details.SeasonNumbers, _s.Search, _s.Posters.LoadStillAsync);
+        CollectionSync.Sync(Rows, [this, Graph]);
+        _ = Graph.LoadAsync();
+    }
+
+    /// <summary>The episode graph of an online show; null for a movie, a library title, or while TMDB has not answered.</summary>
+    public EpisodeGraphViewModel? Graph { get; private set; }
+
+    public override void Closed() => Graph?.Stop();
+
+    public override void Opened()
+    {
+        if (Graph is { IsComplete: false } graph) _ = graph.LoadAsync();
     }
 
     private static string? YearOf(int? year, int? endYear) =>

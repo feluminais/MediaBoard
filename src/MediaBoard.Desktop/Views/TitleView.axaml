@@ -71,7 +71,7 @@
                                     </Border>
                                 </StackPanel>
 
-                                <TextBlock Text="{Binding Overview}" TextWrapping="Wrap" MaxWidth="640"
+                                <TextBlock Text="{Binding Overview}" TextWrapping="Wrap" MaxWidth="640" HorizontalAlignment="Left"
                                            IsVisible="{Binding Overview, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
                                 <!-- Play and the edits: library titles only -->
@@ -115,6 +115,11 @@
                             </StackPanel>
                         </Grid>
                     </StackPanel>
+                </DataTemplate>
+
+                <!-- An online show's episodes, one rating-coloured cell each -->
+                <DataTemplate DataType="vm:EpisodeGraphViewModel">
+                    <views:EpisodeGraphView />
                 </DataTemplate>
 
                 <!-- A season's name, renamed in place -->

@@ -28,6 +28,12 @@ public interface ISearchService
     /// <summary>The TMDB details of an online hit, or null when TMDB cannot answer.</summary>
     Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct);
 
+    /// <summary>
+    /// One season of an online show with each episode's rating and description, or null when TMDB cannot answer.
+    /// A season that was answered is kept for the run, so reopening a show asks TMDB nothing.
+    /// </summary>
+    Task<SeasonDetails?> GetOnlineSeasonAsync(int tmdbId, int season, CancellationToken ct);
+
     /// <summary>The commands whose label has a word starting with <paramref name="filter"/> (case-insensitive); all of them for an empty filter.</summary>
     IReadOnlyList<PaletteCommand> Commands(string filter);
 }

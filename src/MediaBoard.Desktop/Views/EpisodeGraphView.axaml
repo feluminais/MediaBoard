@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             xmlns:controls="using:MediaBoard.Desktop.Controls"
+             xmlns:views="using:MediaBoard.Desktop.Views"
+             x:Class="MediaBoard.Desktop.Views.EpisodeGraphView"
+             x:DataType="vm:EpisodeGraphViewModel">
+    <StackPanel Spacing="12" Margin="0,8,0,32">
+        <TextBlock Classes="rowTitle" Text="Episode ratings" />
+
+        <ItemsControl ItemsSource="{x:Static views:EpisodeGraphView.Legend}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="views:LegendEntry">
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,16,4">
+                        <Ellipse Width="12" Height="12" Fill="{Binding Fill}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Name}" Classes="muted" FontSize="13" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding HasStatus}">
+            <TextBlock Classes="muted" Text="{Binding Status}" VerticalAlignment="Center" />
+            <Button Content="Retry" Classes="small" Command="{Binding LoadCommand}" IsVisible="{Binding ShowRetry}" />
+        </StackPanel>
+        <TextBlock Classes="muted" Text="No episodes listed yet." IsVisible="{Binding HasNoEpisodes}" />
+
+        <!-- The graph draws every cell itself; the card is one element moved next to the cell the pointer is on. -->
+        <Panel x:Name="Host">
+            <controls:EpisodeGraph x:Name="Graph" Seasons="{Binding Seasons}" HorizontalAlignment="Stretch" />
+            <Border x:Name="CardBox" Classes="panel" Padding="10" Width="380" HorizontalAlignment="Left" VerticalAlignment="Top"
+                    IsHitTestVisible="False" ZIndex="1" DataContext="{Binding Card}" x:DataType="vm:EpisodeCardViewModel"
+                    IsVisible="{Binding IsVisible}">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Border Width="128" Height="72" CornerRadius="6" ClipToBounds="True" Margin="0,0,12,0" VerticalAlignment="Top">
+                            <Panel>
+                                <controls:PosterImage LocalPath="{Binding StillLocalPath}" DecodeWidth="256" />
+                                <Border Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="5,1" Margin="5"
+                                        HorizontalAlignment="Left" VerticalAlignment="Top">
+                                    <TextBlock Text="{Binding RatingText}" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource OnAccentBrush}" />
+                                </Border>
+                            </Panel>
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxLines="2"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="muted" FontSize="12" Text="{Binding Subtitle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding Overview}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis"
+                               FontSize="13" IsVisible="{Binding HasOverview}" />
+                </StackPanel>
+            </Border>
+        </Panel>
+    </StackPanel>
+</UserControl>
