@@ -6,7 +6,8 @@
                   x:Class="MediaBoard.Desktop.Views.PosterCard"
                   x:DataType="vm:PosterCardViewModel"
                   Width="160">
-    <Button Classes="card" Command="{Binding OpenCommand}">
+    <!-- Top-aligned: cards in a row stretch to the tallest one, and a card without a subtitle would otherwise sit centred in that height. -->
+    <Button Classes="card" VerticalAlignment="Top" Command="{Binding OpenCommand}">
         <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
             <Panel Width="160" Height="240">
                 <!-- The poster and progress bar are clipped to the rounded corners; the hover ring is a separate border on top,
