@@ -547,6 +547,118 @@ public sealed class PlaybackServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Attach_FollowsTheFileThePlayerHasOpen_AndSavesItsProgress()
+    {
+        var id = AddFile("First.mkv");
+        var session = new FakeAttachableSession("mpv")
+        {
+            RaiseOnAttach = new PlaybackEvent.FileChanged(_library.PathOf("First.mkv")),
+        };
+
+        Assert.True(await _service.AttachAsync(session, CancellationToken.None));
+        Assert.Equal("mpv", _service.CurrentPlayer);
+        Assert.Equal("mpv", _hub.Current.PlayerName);
+
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(10)));
+        AssertProgress(id, 600, Hour);
+
+        session.Raise(new PlaybackEvent.Closed());
+
+        Assert.Null(_service.CurrentPlayer);
+        await Waiting.Until(() => session.Disposed);
+    }
+
+    [Fact]
+    public async Task Attach_ThenTheViewerMovesOn_SavesBothEpisodes()
+    {
+        var first = AddFile("First.mkv");
+        var second = AddFile("Second.mkv");
+        var session = new FakeAttachableSession { RaiseOnAttach = new PlaybackEvent.FileChanged(_library.PathOf("First.mkv")) };
+        await _service.AttachAsync(session, CancellationToken.None);
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(Hour * 0.6)));
+
+        session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(4)));
+
+        AssertProgress(first, Hour * 0.6, Hour);
+        AssertProgress(second, 240, Hour);
+    }
+
+    [Fact]
+    public async Task Attach_PlayerOpenWithAFileOutsideTheLibrary_SavesNothing_UntilALibraryFileComes()
+    {
+        var id = AddFile("First.mkv");
+        var session = new FakeAttachableSession { RaiseOnAttach = new PlaybackEvent.FileChanged(@"D:\Elsewhere\Other.mkv") };
+        await _service.AttachAsync(session, CancellationToken.None);
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(10)));
+        Assert.Null(_progress.Get(id));
+
+        session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("First.mkv")));
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(2)));
+
+        AssertProgress(id, 120, Hour);
+    }
+
+    [Fact]
+    public async Task Attach_NoPlayerAnswers_ReturnsFalse_AndDisposesTheSession()
+    {
+        var session = new FakeAttachableSession(answers: false);
+
+        Assert.False(await _service.AttachAsync(session, CancellationToken.None));
+
+        Assert.True(session.Disposed);
+        Assert.Null(_service.CurrentPlayer);
+        Assert.Null(_hub.Current.PlayerName);
+    }
+
+    [Fact]
+    public async Task Attach_AttachFails_ReturnsFalse_AndDisposesTheSession()
+    {
+        var session = new FakeAttachableSession { AttachFailure = new InvalidOperationException("boom") };
+
+        Assert.False(await _service.AttachAsync(session, CancellationToken.None));
+
+        Assert.True(session.Disposed);
+        Assert.Null(_service.CurrentPlayer);
+    }
+
+    [Fact]
+    public async Task Attach_WhileAPlayerIsFollowed_ReturnsFalse_WithoutTouchingIt()
+    {
+        await Play("First.mkv");
+        var session = new FakeAttachableSession();
+
+        Assert.False(await _service.AttachAsync(session, CancellationToken.None));
+
+        Assert.Equal(0, session.AttachCalls);
+        Assert.True(session.Disposed);
+        Assert.Equal("mpv", _service.CurrentPlayer);
+        Assert.False(Session.Disposed);
+    }
+
+    [Fact]
+    public async Task Play_WhileAttached_SavesThePositionAndLetsGoOfThePlayer()
+    {
+        var id = AddFile("First.mkv");
+        var other = AddFile("Other.mkv");
+        var session = new FakeAttachableSession { RaiseOnAttach = new PlaybackEvent.FileChanged(_library.PathOf("First.mkv")) };
+        await _service.AttachAsync(session, CancellationToken.None);
+        session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        session.Position = TimeSpan.FromMinutes(30);
+
+        await _service.PlayAsync(other, fromStart: false, CancellationToken.None);
+
+        AssertProgress(id, 1800, Hour);
+        Assert.True(session.Disposed);
+        Assert.Single(Session.Starts);
+    }
+
+    [Fact]
     public async Task Stop_AfterAFileChange_SavesTheNewFilesPosition()
     {
         var first = await Play("First.mkv");

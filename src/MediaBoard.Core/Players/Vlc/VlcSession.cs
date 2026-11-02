@@ -27,11 +27,12 @@ namespace MediaBoard.Core.Players.Vlc;
 /// the process lives, and asked again quickly until VLC answers the first time.
 /// </para>
 /// </remarks>
-public sealed class VlcSession : IPlayerSession
+public sealed class VlcSession : IPlayerSession, IAttachableSession
 {
     private const string Name = "VLC";
     private const string PasswordAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private const int PasswordLength = 24;
+    private const int MissesBeforeClosed = 2;
 
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StartupPollInterval = TimeSpan.FromMilliseconds(500);
@@ -66,6 +67,8 @@ public sealed class VlcSession : IPlayerSession
     private VlcState? _lastState;
     private string? _currentFile;
     private int _lastPlaylistId = -1;
+    private bool _attached;
+    private int _misses;
 
     /// <param name="player">VLC as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="fetch">Asks VLC's HTTP interface for the status.</param>
@@ -81,8 +84,14 @@ public sealed class VlcSession : IPlayerSession
         TimeProvider? time = null,
         TimeSpan? pollInterval = null,
         TimeSpan? closeTimeout = null,
-        VlcPlaylistFetcher? fetchPlaylist = null)
+        VlcPlaylistFetcher? fetchPlaylist = null,
+        (int Port, string Password)? attachTo = null)
     {
+        if (attachTo is { } target)
+        {
+            (_attached, _port, _password) = (true, target.Port, target.Password);
+        }
+
         _player = player;
         _fetch = fetch;
         _fetchPlaylist = fetchPlaylist;
@@ -98,9 +107,40 @@ public sealed class VlcSession : IPlayerSession
     public static VlcSession Create(PlayerInfo player) =>
         new(player, SharedClient.FetchAsync, PlayerProcess.Start, fetchPlaylist: SharedClient.FetchPlaylistAsync);
 
+    /// <summary>
+    /// A session for a VLC the viewer started, with its web interface switched on at <paramref name="port"/> and
+    /// <paramref name="password"/>. Use <see cref="AttachAsync"/>, not <see cref="StartAsync"/>.
+    /// </summary>
+    public static VlcSession CreateAttached(int port, string password) =>
+        new(new PlayerInfo("vlc", Name, "", TracksProgress: true), SharedClient.FetchAsync, PlayerProcess.Start,
+            fetchPlaylist: SharedClient.FetchPlaylistAsync, attachTo: (port, password));
+
+    public string PlayerName => Name;
+
     public bool TracksProgress => true;
 
     public event Action<PlaybackEvent>? Event;
+
+    public async Task<bool> AttachAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        int port;
+        string password;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_started || !_attached) throw new InvalidOperationException("A session attaches or starts once; create a new session.");
+            _started = true;
+            (port, password) = (_port, _password);
+        }
+
+        // Anything else answering on the port (or a wrong password) is no VLC of the viewer's.
+        if (await TryFetchAsync(port, password, ct).ConfigureAwait(false) is null) return false;
+
+        lock (_gate) _answered = true;
+        _ = PollAsync(port, password, _stop.Token);
+        return true;
+    }
 
     public Task StartAsync(string filePath, TimeSpan? startAt, CancellationToken ct)
     {
@@ -218,9 +258,16 @@ public sealed class VlcSession : IPlayerSession
             {
                 if (await TryFetchAsync(port, password, stop).ConfigureAwait(false) is { } status)
                 {
+                    _misses = 0;
                     lock (_gate) _answered = true;
                     await FollowFileAsync(port, password, status, stop).ConfigureAwait(false);
                     Apply(status);
+                }
+                else if (_attached && ++_misses >= MissesBeforeClosed)
+                {
+                    // Nobody watches a process here, so VLC not answering any more is how its end shows.
+                    _pump.Raise(new PlaybackEvent.Closed());
+                    return;
                 }
 
                 bool answered;

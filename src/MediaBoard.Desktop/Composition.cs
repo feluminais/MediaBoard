@@ -133,6 +133,11 @@ public static class Composition
             sp.GetRequiredService<ActivityHub>(),
             PlayerSessionFactory.Create));
         services.AddSingleton<IPlaybackService>(sp => sp.GetRequiredService<PlaybackService>());
+        services.AddSingleton(sp =>
+        {
+            var playback = sp.GetRequiredService<PlaybackService>();
+            return new PlayerWatcher(sp.GetRequiredService<SettingsStore>(), playback.AttachAsync, () => playback.CurrentPlayer);
+        });
 
         services.AddSingleton(FolderRecheck.Default);
         services.AddSingleton<AppHost>();

@@ -106,6 +106,67 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Follows a player the viewer started without MediaBoard (see <see cref="IAttachableSession"/>): from then on the
+    /// library files it plays keep their progress, as if MediaBoard had launched them. Returns false, and disposes
+    /// the session, when a session already runs or no player answers.
+    /// </summary>
+    public async Task<bool> AttachAsync(IAttachableSession session, CancellationToken ct)
+    {
+        await _playGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            bool busy;
+            lock (_stateGate) busy = _current is not null;
+            if (busy)
+            {
+                await DisposeQuietlyAsync(session).ConfigureAwait(false);
+                return false;
+            }
+
+            var playing = new Playing(null, "", session.PlayerName, session);
+            session.Event += e => OnEvent(playing, e);
+
+            var attached = false;
+            try
+            {
+                attached = await session.AttachAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                await EndAsync(playing).ConfigureAwait(false);
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Trace.TraceWarning($"{session.PlayerName} could not be followed: {ex}");
+            }
+
+            if (!attached)
+            {
+                await EndAsync(playing).ConfigureAwait(false);
+                return false;
+            }
+
+            lock (_stateGate)
+            {
+                lock (playing.Gate)
+                {
+                    if (playing.Final) return true; // the player was gone again before this point
+                }
+
+                _current = playing;
+                _hub.SetPlayer(session.PlayerName);
+            }
+
+            return true;
+        }
+        finally
+        {
+            _playGate.Release();
+        }
+    }
+
     public void AnswerFinished(int fileId, bool finished)
     {
         _progress.SetWatched(fileId, finished);
@@ -488,7 +549,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private enum EndKind { None, Closed, Failed }
 
-    private sealed class Playing(int fileId, string title, string playerName, IPlayerSession session)
+    private sealed class Playing(int? fileId, string title, string playerName, IPlayerSession session)
     {
         public readonly Lock Gate = new();
 

@@ -120,6 +120,89 @@ public class MpvSessionTests
         ], _pipe.Written);
     }
 
+    private MpvSession CreateAttached(string pipeName = "mediaboard-mpv")
+    {
+        var session = new MpvSession(
+            Player,
+            (name, _) =>
+            {
+                lock (_connectNames) _connectNames.Add(name);
+                return Task.FromResult<IMpvPipe?>(_connectFailures-- > 0 ? null : _pipe);
+            },
+            _ => throw new InvalidOperationException("An attached session starts no process."),
+            _clock,
+            attachPipeName: pipeName);
+        session.Event += _events.Add;
+        return session;
+    }
+
+    [Fact]
+    public async Task Attach_ConnectsOnceToTheFixedPipe_AndReportsTheFileMpvHasOpen()
+    {
+        await using var session = CreateAttached();
+
+        Assert.True(await session.AttachAsync(Ct));
+        await _pipe.WaitUntilReading();
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path","data":"C:\\Videos\\test.mp4"}""");
+        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"duration","data":1500}""");
+        await _events.WaitFor<PlaybackEvent.Loaded>();
+
+        Assert.Equal("mediaboard-mpv", Assert.Single(_connectNames));
+        Assert.Equal(5, _pipe.Written.Count);
+        Assert.Equal(
+        [
+            new PlaybackEvent.FileChanged(@"C:\Videos\test.mp4"),
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)),
+        ], _events.All);
+    }
+
+    [Fact]
+    public async Task Attach_NoPipe_ReturnsFalse_WithoutRetrying()
+    {
+        _connectFailures = 1;
+        await using var session = CreateAttached();
+
+        Assert.False(await session.AttachAsync(Ct));
+
+        Assert.Single(_connectNames);
+        Assert.Empty(_events.All);
+    }
+
+    [Fact]
+    public async Task Attach_MpvClosesThePipe_RaisesClosed()
+    {
+        await using var session = CreateAttached();
+        await session.AttachAsync(Ct);
+        await _pipe.WaitUntilReading();
+
+        _pipe.EndOfStream();
+
+        await _events.WaitFor<PlaybackEvent.Closed>();
+    }
+
+    [Fact]
+    public async Task Attach_Dispose_RaisesNothing_AndNeverClosesMpv()
+    {
+        var session = CreateAttached();
+        await session.AttachAsync(Ct);
+        await _pipe.WaitUntilReading();
+
+        await session.DisposeAsync();
+        await Task.Delay(50, Ct);
+
+        Assert.Empty(_events.All);
+        Assert.False(_process.CloseRequested);
+    }
+
+    [Fact]
+    public async Task Attach_Twice_Throws()
+    {
+        await using var session = CreateAttached();
+        await session.AttachAsync(Ct);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.AttachAsync(Ct));
+    }
+
     [Fact]
     public async Task Mpv_SameFileReported_RaisesNothing()
     {

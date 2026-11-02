@@ -62,6 +62,102 @@ public sealed class SettingsViewModelTests : IDisposable
         public Task<SeasonDetails> GetSeasonAsync(int showTmdbId, int season, CancellationToken ct) => throw new NotSupportedException();
     }
 
+    [Fact]
+    public void FollowOtherPlayers_ShowsTheSavedChoices_WithoutSavingThem()
+    {
+        var store = Store;
+        store.Save(new AppSettings { FollowOtherPlayers = false, VlcWebPort = 9090, VlcWebPassword = "secret" });
+        var changes = 0;
+        store.Changed += _ => changes++;
+
+        var vm = Create(store);
+
+        Assert.False(vm.FollowOtherPlayers);
+        Assert.Equal("9090", vm.VlcPort);
+        Assert.Equal("secret", vm.VlcPassword);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void FollowOtherPlayers_DefaultsToOnWithVlcsOwnPort()
+    {
+        var vm = Create();
+
+        Assert.True(vm.FollowOtherPlayers);
+        Assert.Equal("8080", vm.VlcPort);
+        Assert.Equal("", vm.VlcPassword);
+    }
+
+    [Fact]
+    public void FollowOtherPlayers_ToggleIsSaved()
+    {
+        var vm = Create();
+
+        vm.FollowOtherPlayers = false;
+
+        Assert.False(Store.Load().FollowOtherPlayers);
+    }
+
+    [Fact]
+    public void SaveVlc_StoresThePortAndPassword()
+    {
+        var vm = Create();
+        vm.VlcPort = " 9090 ";
+        vm.VlcPassword = " secret ";
+
+        vm.SaveVlcCommand.Execute(null);
+
+        var saved = Store.Load();
+        Assert.Equal(9090, saved.VlcWebPort);
+        Assert.Equal("secret", saved.VlcWebPassword);
+        Assert.Equal("Saved", vm.FollowStatus);
+        Assert.Equal("9090", vm.VlcPort);
+    }
+
+    [Fact]
+    public void SaveVlc_EmptyPassword_ClearsIt()
+    {
+        var store = Store;
+        store.Save(new AppSettings { VlcWebPassword = "secret" });
+        var vm = Create(store);
+        vm.VlcPassword = "";
+
+        vm.SaveVlcCommand.Execute(null);
+
+        Assert.Null(Store.Load().VlcWebPassword);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [InlineData("70000")]
+    [InlineData("-5")]
+    public void SaveVlc_BadPort_SavesNothingAndSaysSo(string port)
+    {
+        var vm = Create();
+        vm.VlcPort = port;
+        vm.VlcPassword = "secret";
+
+        vm.SaveVlcCommand.Execute(null);
+
+        Assert.Equal(8080, Store.Load().VlcWebPort);
+        Assert.Null(Store.Load().VlcWebPassword);
+        Assert.Equal("The port is a number from 1 to 65535.", vm.FollowStatus);
+    }
+
+    [Fact]
+    public void FollowStatus_ClearsWhileTheUserEdits()
+    {
+        var vm = Create();
+        vm.SaveVlcCommand.Execute(null);
+        Assert.Equal("Saved", vm.FollowStatus);
+
+        vm.VlcPassword = "x";
+
+        Assert.Equal("", vm.FollowStatus);
+    }
+
     [AvaloniaFact]
     public async Task TmdbKey_SaveTriggersIdentification()
     {

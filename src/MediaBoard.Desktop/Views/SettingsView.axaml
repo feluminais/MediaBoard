@@ -52,6 +52,25 @@
 
             <Border Classes="panel">
             <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="{Binding FollowTitle}" />
+                <CheckBox Content="{Binding FollowLabel}" IsChecked="{Binding FollowOtherPlayers}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding MpvHint}" />
+                <SelectableTextBlock Text="{Binding MpvLine}" FontFamily="Consolas" TextWrapping="Wrap" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlcHint}" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"
+                            Command="{Binding SaveVlcCommand}" />
+                    <TextBox DockPanel.Dock="Left" Width="90" Margin="0,0,8,0" Text="{Binding VlcPort}"
+                             PlaceholderText="VLC port" AutomationProperties.Name="VLC port" />
+                    <TextBox Text="{Binding VlcPassword}" PasswordChar="&#x2022;"
+                             PlaceholderText="VLC password" AutomationProperties.Name="VLC password" />
+                </DockPanel>
+                <TextBlock Classes="muted" Text="{Binding FollowStatus}" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+            <StackPanel Spacing="10">
                 <TextBlock Classes="rowTitle" Text="About" />
                 <StackPanel Spacing="2">
                     <TextBlock Text="{Binding AppName}" FontWeight="SemiBold" />

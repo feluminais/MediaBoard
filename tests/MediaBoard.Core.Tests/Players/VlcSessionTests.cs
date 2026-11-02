@@ -45,7 +45,8 @@ public class VlcSessionTests
         TimeSpan? pollInterval = null,
         TimeSpan? closeTimeout = null,
         Func<ProcessStartInfo, IPlayerProcess>? start = null,
-        bool withPlaylist = false)
+        bool withPlaylist = false,
+        (int Port, string Password)? attachTo = null)
     {
         var session = new VlcSession(
             Player,
@@ -72,7 +73,8 @@ public class VlcSessionTests
                         ? Task.FromException<string>(new HttpRequestException("connection refused"))
                         : Task.FromResult(_playlist);
                 }
-                : null);
+                : null,
+            attachTo: attachTo);
         session.Event += _events.Add;
         return session;
     }
@@ -548,7 +550,7 @@ public class VlcSessionTests
 
         _status = StatusOf("playing", 3, 1320, plid: 5);
         await _events.WaitFor<PlaybackEvent.FileChanged>();
-        await Waiting.Until(() => _events.OfType<PlaybackEvent.Position>().Count == 2);
+        await Waiting.Until(() => _events.All.Contains(new PlaybackEvent.Position(TimeSpan.FromSeconds(3))));
 
         var events = _events.All;
         var changed = events.FindIndex(e => e is PlaybackEvent.FileChanged);
@@ -560,6 +562,75 @@ public class VlcSessionTests
             new PlaybackEvent.Playing(),
             new PlaybackEvent.Position(TimeSpan.FromSeconds(3)),
         ], events.Skip(changed + 1).Take(3));
+    }
+
+    [Fact]
+    public async Task Attach_VlcAnswers_ReportsTheFileItHasOpen_UsingThePortAndPasswordGiven()
+    {
+        _status = StatusOf("playing", 120, 1320, plid: 5);
+        _playlist = Playlist;
+        await using var session = Create(withPlaylist: true, attachTo: (9090, "secret"));
+
+        Assert.True(await session.AttachAsync(Ct));
+        await _events.WaitFor<PlaybackEvent.Position>();
+
+        Assert.Equal(
+        [
+            new PlaybackEvent.FileChanged(@"C:\Videos\My Show\S01E02.mkv"),
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1320)),
+            new PlaybackEvent.Playing(),
+            new PlaybackEvent.Position(TimeSpan.FromSeconds(120)),
+        ], _events.All.Take(4));
+        Assert.All(_requests.ToArray(), r => Assert.Equal((9090, "secret"), r));
+        Assert.Null(_startInfo);
+    }
+
+    [Fact]
+    public async Task Attach_VlcIdle_ReportsNoFile()
+    {
+        _status = StatusOf("stopped", 0, 0, plid: -1);
+        _playlist = Playlist;
+        await using var session = Create(withPlaylist: true, attachTo: (8080, "pw"));
+
+        Assert.True(await session.AttachAsync(Ct));
+        var requests = RequestCount;
+        await Waiting.Until(() => RequestCount >= requests + 3);
+
+        Assert.Empty(_events.All);
+    }
+
+    [Fact]
+    public async Task Attach_NothingAnswers_ReturnsFalse()
+    {
+        _httpDown = true;
+        await using var session = Create(withPlaylist: true, attachTo: (8080, "pw"));
+
+        Assert.False(await session.AttachAsync(Ct));
+
+        Assert.Equal(1, RequestCount);
+        Assert.Empty(_events.All);
+    }
+
+    [Fact]
+    public async Task Attach_VlcStopsAnswering_RaisesClosed()
+    {
+        _status = StatusOf("playing", 10, 600, plid: 4);
+        _playlist = Playlist;
+        await using var session = Create(withPlaylist: true, attachTo: (8080, "pw"));
+        await session.AttachAsync(Ct);
+        await _events.WaitFor<PlaybackEvent.Position>();
+
+        _httpDown = true;
+
+        await _events.WaitFor<PlaybackEvent.Closed>();
+    }
+
+    [Fact]
+    public async Task Attach_OnASessionMadeToLaunch_Throws()
+    {
+        await using var session = Create();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.AttachAsync(Ct));
     }
 
     [Fact]

@@ -21,7 +21,7 @@ namespace MediaBoard.Core.Players.Mpv;
 /// latest position mpv reported, unthrottled.
 /// </para>
 /// </remarks>
-public sealed class MpvSession : IPlayerSession
+public sealed class MpvSession : IPlayerSession, IAttachableSession
 {
     private const string Name = "mpv";
     private const string PipeDirectory = @"\\.\pipe\";
@@ -61,6 +61,7 @@ public sealed class MpvSession : IPlayerSession
     private long? _lastPositionStamp;
     private string? _currentFile;
     private bool _pathSeen;
+    private readonly string? _attachPipeName;
 
     /// <param name="player">mpv as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="connect">One attempt to connect to the named pipe (name without <c>\\.\pipe\</c>); null when it does not exist yet.</param>
@@ -78,8 +79,10 @@ public sealed class MpvSession : IPlayerSession
         TimeSpan? connectTimeout = null,
         TimeSpan? retryDelay = null,
         TimeSpan? closeTimeout = null,
-        TimeSpan? exitDrain = null)
+        TimeSpan? exitDrain = null,
+        string? attachPipeName = null)
     {
+        _attachPipeName = attachPipeName;
         _player = player;
         _connect = connect;
         _start = start;
@@ -95,9 +98,49 @@ public sealed class MpvSession : IPlayerSession
     public static MpvSession Create(PlayerInfo player) =>
         new(player, NamedPipeMpvPipe.TryConnectAsync, PlayerProcess.Start);
 
+    /// <summary>
+    /// A session for an mpv the viewer started, which listens on <c>\\.\pipe\&lt;pipeName&gt;</c> because their
+    /// <c>mpv.conf</c> says <c>input-ipc-server</c>. Use <see cref="AttachAsync"/>, not <see cref="StartAsync"/>.
+    /// </summary>
+    public static MpvSession CreateAttached(string pipeName) =>
+        new(new PlayerInfo("mpv", Name, "", TracksProgress: true), NamedPipeMpvPipe.TryConnectAsync, PlayerProcess.Start, attachPipeName: pipeName);
+
+    public string PlayerName => Name;
+
     public bool TracksProgress => true;
 
     public event Action<PlaybackEvent>? Event;
+
+    public async Task<bool> AttachAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var stop = _stop.Token;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_started || _attachPipeName is null) throw new InvalidOperationException("A session attaches or starts once; create a new session.");
+            _started = true;
+        }
+
+        var pipe = await _connect(_attachPipeName, ct).ConfigureAwait(false);
+        if (pipe is null) return false;
+
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                pipe.Dispose();
+                return false;
+            }
+
+            _pipe = pipe;
+            _answered = true;
+        }
+
+        var run = AttachedRunAsync(pipe, stop);
+        lock (_gate) _run = run;
+        return true;
+    }
 
     public Task StartAsync(string filePath, TimeSpan? startAt, CancellationToken ct)
     {
@@ -193,16 +236,7 @@ public sealed class MpvSession : IPlayerSession
                 _answered = true;
             }
 
-            var id = 1;
-            foreach (var property in new[] { MpvProtocol.PathProperty, MpvProtocol.TimePosProperty, MpvProtocol.DurationProperty, MpvProtocol.PauseProperty, MpvProtocol.EofReachedProperty })
-            {
-                await pipe.WriteLineAsync(MpvProtocol.Observe(id++, property), stop).ConfigureAwait(false);
-            }
-
-            while (await pipe.ReadLineAsync(stop).ConfigureAwait(false) is { } line)
-            {
-                OnLine(line);
-            }
+            await ReadAsync(pipe, stop).ConfigureAwait(false);
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException)
         {
@@ -212,6 +246,40 @@ public sealed class MpvSession : IPlayerSession
         {
             Trace.TraceError($"mpv session: reading from mpv failed: {e}");
         }
+    }
+
+    /// <summary>Asks for the properties, then reads until mpv closes the pipe.</summary>
+    private async Task ReadAsync(IMpvPipe pipe, CancellationToken stop)
+    {
+        var id = 1;
+        foreach (var property in new[] { MpvProtocol.PathProperty, MpvProtocol.TimePosProperty, MpvProtocol.DurationProperty, MpvProtocol.PauseProperty, MpvProtocol.EofReachedProperty })
+        {
+            await pipe.WriteLineAsync(MpvProtocol.Observe(id++, property), stop).ConfigureAwait(false);
+        }
+
+        while (await pipe.ReadLineAsync(stop).ConfigureAwait(false) is { } line)
+        {
+            OnLine(line);
+        }
+    }
+
+    /// <summary>Reads from a running mpv until it closes the pipe, which is the end: there is no process to watch.</summary>
+    private async Task AttachedRunAsync(IMpvPipe pipe, CancellationToken stop)
+    {
+        try
+        {
+            await ReadAsync(pipe, stop).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // Stopped, or mpv went away.
+        }
+        catch (Exception e)
+        {
+            Trace.TraceError($"mpv session: reading from mpv failed: {e}");
+        }
+
+        if (!stop.IsCancellationRequested) _pump.Raise(new PlaybackEvent.Closed());
     }
 
     private async Task<IMpvPipe?> ConnectAsync(string pipeName, CancellationToken stop)

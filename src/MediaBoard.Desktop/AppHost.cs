@@ -13,7 +13,8 @@ namespace MediaBoard.Desktop;
 /// Runs the app's background work. <see cref="Start"/> returns at once; everything slow happens on the thread pool,
 /// so the window shows before the database is open or any scan has finished. Startup order: database, connectivity,
 /// identification (which picks up files left pending last time), a scan of each enabled folder followed by an
-/// identification run, the watcher, then one metadata refresh. <see cref="StopAsync"/> undoes it in reverse.
+/// identification run, the watcher and the lookout for players started outside the app, then one metadata refresh.
+/// <see cref="StopAsync"/> undoes it in reverse.
 /// </summary>
 public sealed class AppHost(
     ActivityHub hub,
@@ -27,6 +28,7 @@ public sealed class AppHost(
     MetadataRefresher refresher,
     LocalLibrary library,
     PlaybackService playback,
+    PlayerWatcher players,
     FolderRecheck recheck)
 {
     private readonly CancellationTokenSource _stopping = new();
@@ -71,6 +73,7 @@ public sealed class AppHost(
         await _stopping.CancelAsync().ConfigureAwait(false);
         if (_recheckTimer is { } timer) await timer.DisposeAsync().ConfigureAwait(false);
 
+        await players.DisposeAsync().ConfigureAwait(false);
         await playback.DisposeAsync().ConfigureAwait(false);
         await _startup.ConfigureAwait(false); // never throws: RunStartupAsync catches everything
         watcher.Dispose();
@@ -94,6 +97,7 @@ public sealed class AppHost(
 
             ct.ThrowIfCancellationRequested();
             watcher.Start();
+            players.Start(); // the files it will find are in the library by now
             _recheckTimer = recheck.Clock.CreateTimer(_ => OnRecheckDue(), null, recheck.Interval, Timeout.InfiniteTimeSpan);
 
             // A run started by identification.Start() is not tied to ct, so stop waiting for it on close.

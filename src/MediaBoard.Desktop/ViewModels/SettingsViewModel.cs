@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Playback;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Settings;
 
@@ -41,7 +43,19 @@ public sealed partial class SettingsViewModel : PageViewModel
         _browsePlayer = browsePlayer;
         _openUrl = openUrl;
         _query = new BackgroundQuery(hub, "the players");
-        TmdbKey = settings.Load().TmdbKey ?? "";
+        var saved = settings.Load();
+        TmdbKey = saved.TmdbKey ?? "";
+        _applying = true; // showing the saved choices must not save them again
+        try
+        {
+            FollowOtherPlayers = saved.FollowOtherPlayers;
+            VlcPort = saved.VlcWebPort.ToString(CultureInfo.InvariantCulture);
+            VlcPassword = saved.VlcWebPassword ?? "";
+        }
+        finally
+        {
+            _applying = false;
+        }
     }
 
     // ---- TMDB key ----
@@ -163,6 +177,56 @@ public sealed partial class SettingsViewModel : PageViewModel
     private PlayersData ReadPlayers() => new(_detector.Detect(), _detector.Resolve(_settings.Load()));
 
     private sealed record PlayersData(IReadOnlyList<PlayerInfo> Detected, PlayerInfo? InUse);
+
+    // ---- Players opened outside the app ----
+
+    public string FollowTitle => "Other players";
+
+    public string FollowLabel => "Follow players I open myself";
+
+    public string MpvHint => "mpv: add this line to mpv.conf, then restart mpv.";
+
+    public string MpvLine => @"input-ipc-server=\\.\pipe\" + PlayerWatcher.MpvPipeName;
+
+    public string VlcHint => "VLC: turn on Web under Interface, Main interfaces (show all settings), set its Lua password, and enter the port and password here.";
+
+    [ObservableProperty]
+    public partial bool FollowOtherPlayers { get; set; }
+
+    [ObservableProperty]
+    public partial string VlcPort { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string VlcPassword { get; set; } = "";
+
+    /// <summary>"Saved", or why the VLC port or password was not saved; empty while the user edits.</summary>
+    [ObservableProperty]
+    public partial string FollowStatus { get; private set; } = "";
+
+    partial void OnFollowOtherPlayersChanged(bool value)
+    {
+        if (!_applying) Update(s => s with { FollowOtherPlayers = value });
+    }
+
+    partial void OnVlcPortChanged(string value) => FollowStatus = "";
+
+    partial void OnVlcPasswordChanged(string value) => FollowStatus = "";
+
+    [RelayCommand]
+    private void SaveVlc()
+    {
+        if (!int.TryParse(VlcPort.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535)
+        {
+            FollowStatus = "The port is a number from 1 to 65535.";
+            return;
+        }
+
+        var password = VlcPassword.Trim();
+        var saved = Update(s => s with { VlcWebPort = port, VlcWebPassword = password.Length == 0 ? null : password });
+        VlcPort = port.ToString(CultureInfo.InvariantCulture);
+        VlcPassword = password;
+        FollowStatus = _readFailed ? UnreadableMessage : saved ? "Saved" : "Couldn't save. See the activity panel.";
+    }
 
     // ---- About ----
 
