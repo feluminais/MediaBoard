@@ -19,6 +19,10 @@ namespace MediaBoard.Core.Players.Vlc;
 /// already being delivered may still arrive while, or just after, the session is disposed. A handler that throws is
 /// traced and does not stop delivery of the events after it.
 /// <para>
+/// When VLC moves on to another file (the next in its playlist, or one the viewer opens), the session raises
+/// <see cref="PlaybackEvent.FileChanged"/> and what follows belongs to that file.
+/// </para>
+/// <para>
 /// While VLC is still starting its HTTP interface does not answer yet; failed requests are ignored for as long as
 /// the process lives, and asked again quickly until VLC answers the first time.
 /// </para>
@@ -35,6 +39,7 @@ public sealed class VlcSession : IPlayerSession
 
     private readonly PlayerInfo _player;
     private readonly VlcStatusFetcher _fetch;
+    private readonly VlcPlaylistFetcher? _fetchPlaylist;
     private readonly Func<ProcessStartInfo, IPlayerProcess> _start;
     private readonly TimeProvider _time;
     private readonly TimeSpan _pollInterval;
@@ -59,9 +64,12 @@ public sealed class VlcSession : IPlayerSession
     private bool _sawPlaying;
     private bool _endedRaised;
     private VlcState? _lastState;
+    private string? _currentFile;
+    private int _lastPlaylistId = -1;
 
     /// <param name="player">VLC as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="fetch">Asks VLC's HTTP interface for the status.</param>
+    /// <param name="fetchPlaylist">Asks VLC's HTTP interface for the playlist, to learn which file it moved to; null to follow the launched file only.</param>
     /// <param name="start">Starts the player process.</param>
     /// <param name="time">The clock for judging an early exit.</param>
     /// <param name="pollInterval">How often the status is asked for once VLC answers (default 5 s).</param>
@@ -72,10 +80,12 @@ public sealed class VlcSession : IPlayerSession
         Func<ProcessStartInfo, IPlayerProcess> start,
         TimeProvider? time = null,
         TimeSpan? pollInterval = null,
-        TimeSpan? closeTimeout = null)
+        TimeSpan? closeTimeout = null,
+        VlcPlaylistFetcher? fetchPlaylist = null)
     {
         _player = player;
         _fetch = fetch;
+        _fetchPlaylist = fetchPlaylist;
         _start = start;
         _time = time ?? TimeProvider.System;
         _pollInterval = pollInterval ?? DefaultPollInterval;
@@ -86,7 +96,7 @@ public sealed class VlcSession : IPlayerSession
 
     /// <summary>A session wired to a real process and VLC's HTTP interface.</summary>
     public static VlcSession Create(PlayerInfo player) =>
-        new(player, SharedClient.FetchAsync, PlayerProcess.Start);
+        new(player, SharedClient.FetchAsync, PlayerProcess.Start, fetchPlaylist: SharedClient.FetchPlaylistAsync);
 
     public bool TracksProgress => true;
 
@@ -146,6 +156,7 @@ public sealed class VlcSession : IPlayerSession
             (_port, _password) = (port, password);
         }
 
+        _currentFile = filePath;
         _ = PollAsync(port, password, stop);
         _ = ObserveExitAsync(process);
         return Task.CompletedTask;
@@ -208,6 +219,7 @@ public sealed class VlcSession : IPlayerSession
                 if (await TryFetchAsync(port, password, stop).ConfigureAwait(false) is { } status)
                 {
                     lock (_gate) _answered = true;
+                    await FollowFileAsync(port, password, status, stop).ConfigureAwait(false);
                     Apply(status);
                 }
 
@@ -238,6 +250,49 @@ public sealed class VlcSession : IPlayerSession
                                       || (e is OperationCanceledException && !ct.IsCancellationRequested))
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// VLC reports the item it plays by id only, so a new id is looked up in the playlist; when that is another file
+    /// than before, <see cref="PlaybackEvent.FileChanged"/> goes out ahead of the status, which already belongs to it.
+    /// A playlist that does not answer is asked again at the next poll.
+    /// </summary>
+    private async Task FollowFileAsync(int port, string password, VlcStatus status, CancellationToken ct)
+    {
+        if (_fetchPlaylist is null || status.State == VlcState.Stopped || status.PlaylistId < 0 || status.PlaylistId == _lastPlaylistId) return;
+
+        string path;
+        try
+        {
+            var json = await _fetchPlaylist(port, password, ct).ConfigureAwait(false);
+            if (!VlcPlaylist.TryFindPath(json, status.PlaylistId, out path)) return;
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or TimeoutException
+                                      || (e is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            return;
+        }
+
+        _lastPlaylistId = status.PlaylistId;
+        if (string.Equals(NormalizePath(path), NormalizePath(_currentFile), StringComparison.OrdinalIgnoreCase)) return;
+
+        _currentFile = path;
+        (_loadedRaised, _sawPlaying, _endedRaised, _lastState) = (false, false, false, null);
+        _pump.Raise(new PlaybackEvent.FileChanged(path));
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
         }
     }
 

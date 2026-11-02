@@ -30,6 +30,39 @@ public sealed class FileStore(LibraryDatabase db)
         return connection.QuerySingleOrDefault<Row>($"{Select} WHERE id = @id", new { id })?.ToRow();
     }
 
+    /// <summary>
+    /// The file at this absolute path, when it sits in a library folder that is switched on; null otherwise. The
+    /// comparison ignores case, as Windows does.
+    /// </summary>
+    public MediaFileRow? FindByPath(string fullPath)
+    {
+        string path;
+        try
+        {
+            path = Path.GetFullPath(fullPath);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        using var connection = db.Open();
+        var folders = connection.Query<(long Id, string Path)>("SELECT id, path FROM folders WHERE enabled = 1")
+            .OrderByDescending(f => f.Path.Length);
+        foreach (var folder in folders)
+        {
+            var root = Path.TrimEndingDirectorySeparator(folder.Path) + Path.DirectorySeparatorChar;
+            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var row = connection.QuerySingleOrDefault<Row>(
+                $"{Select} WHERE folder_id = @folderId AND rel_path = @relPath COLLATE NOCASE",
+                new { folderId = folder.Id, relPath = path[root.Length..].Replace('/', '\\') });
+            if (row is not null) return row.ToRow();
+        }
+
+        return null;
+    }
+
     /// <summary>Every file with this status, missing ones included.</summary>
     public IReadOnlyList<MediaFileRow> ByStatus(string status)
     {

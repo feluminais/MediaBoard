@@ -195,8 +195,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             return;
         }
 
-        var title = string.IsNullOrWhiteSpace(file.Parsed.Title) ? Path.GetFileNameWithoutExtension(file.RelPath) : file.Parsed.Title;
-        var playing = new Playing(fileId, title, player.Name, session)
+        var playing = new Playing(fileId, TitleOf(file), player.Name, session)
         {
             Duration = file.DurationS ?? saved?.DurationS ?? 0,
             Marked = saved?.Watched ?? false,
@@ -230,6 +229,12 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private void OnEvent(Playing playing, PlaybackEvent e)
     {
+        if (e is PlaybackEvent.FileChanged changed)
+        {
+            OnFileChanged(playing, changed.Path);
+            return;
+        }
+
         var end = e switch
         {
             PlaybackEvent.Closed => EndKind.Closed,
@@ -277,8 +282,51 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         _ = Task.Run(() => DisposeQuietlyAsync(playing.Session));
 
         ProgressChanged?.Invoke();
-        if (end == EndKind.Closed && !playing.Session.TracksProgress) AskFinished?.Invoke(playing.FileId, playing.Title);
+        if (end == EndKind.Closed && !playing.Session.TracksProgress && playing.FileId is { } fileId) AskFinished?.Invoke(fileId, playing.Title);
     }
+
+    /// <summary>
+    /// The player moved to another file (or closed its file). The file it leaves keeps the position it had reached,
+    /// and marked watched when that counts as watched; from here on the positions belong to the new file, or to
+    /// nothing when the new file is not in the library.
+    /// </summary>
+    private void OnFileChanged(Playing playing, string? path)
+    {
+        var next = path is null ? null : _files.FindByPath(path);
+        lock (playing.Gate)
+        {
+            if (playing.Final || next?.Id == playing.FileId) return;
+
+            try
+            {
+                SaveLastPosition(playing);
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException)
+            {
+                Trace.TraceWarning($"Could not save progress: {ex}");
+            }
+
+            Rebind(playing, next);
+        }
+
+        ProgressChanged?.Invoke();
+    }
+
+    // Called with playing.Gate held.
+    private void Rebind(Playing playing, MediaFileRow? file)
+    {
+        var saved = file is null ? null : _progress.Get(file.Id);
+        playing.FileId = file?.Id;
+        playing.Title = file is null ? "" : TitleOf(file);
+        playing.Duration = file?.DurationS ?? saved?.DurationS ?? 0;
+        playing.LastPosition = null;
+        playing.Marked = saved?.Watched ?? false;
+        // The player starts a file it opened itself at the start, so a saved position stays until it is passed.
+        playing.CanSave = saved is null || saved.PositionS <= RealPositionS;
+    }
+
+    private static string TitleOf(MediaFileRow file) =>
+        string.IsNullOrWhiteSpace(file.Parsed.Title) ? Path.GetFileNameWithoutExtension(file.RelPath) : file.Parsed.Title;
 
     // Called with playing.Gate held. Closed and Failed are already marked final, so Closed's save is the last one.
     private void Apply(Playing playing, PlaybackEvent e)
@@ -318,15 +366,17 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private void SaveLastPosition(Playing playing)
     {
-        if (playing.LastPosition is not { } position || !playing.CanSave) return;
+        if (playing.FileId is not { } fileId || playing.LastPosition is not { } position || !playing.CanSave) return;
 
-        _progress.Save(playing.FileId, position, playing.Duration);
+        _progress.Save(fileId, position, playing.Duration);
         if (!playing.Marked && WatchRules.IsWatched(position, playing.Duration)) MarkWatched(playing);
     }
 
     private void MarkWatched(Playing playing)
     {
-        _progress.SetWatched(playing.FileId, true);
+        if (playing.FileId is not { } fileId) return;
+
+        _progress.SetWatched(fileId, true);
         playing.Marked = true;
     }
 
@@ -442,12 +492,13 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     {
         public readonly Lock Gate = new();
 
-        public int FileId => fileId;
-        public string Title => title;
         public string PlayerName => playerName;
         public IPlayerSession Session => session;
 
-        // Everything below is guarded by Gate.
+        // Everything below is guarded by Gate. The file changes when the player moves on to another one; it is
+        // null while the player has a file that is not in the library, or none.
+        public int? FileId = fileId;
+        public string Title = title;
         public double Duration;
         public double? LastPosition;
         public bool CanSave;

@@ -17,9 +17,9 @@ namespace MediaBoard.Core.Players.MpcHc;
 /// arrive while, or just after, the session is disposed. A handler that throws is traced and does not stop
 /// delivery of the events after it.
 /// <para>
-/// The session covers the launched file only. When MPC-HC closes it or moves on to another file (next in
-/// folder, a file dropped onto the window), the session raises <see cref="PlaybackEvent.Closed"/> and stops
-/// reporting, so another file's positions are never attributed to this one. Disposing it then leaves MPC-HC open.
+/// The session follows the player, not one file. When MPC-HC closes the launched file or moves on to another one
+/// (next in folder, a file dropped onto the window), the session raises <see cref="PlaybackEvent.FileChanged"/>,
+/// and what is reported after it belongs to the new file (none, when the file was closed). It ends when MPC-HC does.
 /// </para>
 /// </remarks>
 public sealed class MpcHcSession : IPlayerSession
@@ -178,8 +178,7 @@ public sealed class MpcHcSession : IPlayerSession
 
     /// <summary>
     /// Closes MPC-HC if this session started it and it is still running (asks first, kills after the close
-    /// timeout), then destroys the message window. Raises no events. A detached session, or one that ended because
-    /// MPC-HC moved to another file, leaves MPC-HC running.
+    /// timeout), then destroys the message window. Raises no events. A detached session leaves MPC-HC running.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -263,9 +262,15 @@ public sealed class MpcHcSession : IPlayerSession
 
         if (state is MpcLoadState.Closing or MpcLoadState.Closed)
         {
-            bool wasLoaded;
-            lock (_gate) wasLoaded = _fileLoaded;
-            if (wasLoaded) EndForFileChange();
+            lock (_gate)
+            {
+                if (!_fileLoaded) return; // The state before the launched file loaded is not a file closing.
+                (_fileLoaded, _loadedRaised, _nowPlaying, _filePath) = (false, false, null, "");
+            }
+
+            // The player stays open: it may be about to open the next file, which has its own FileChanged.
+            StopPolling();
+            Raise(new PlaybackEvent.FileChanged(null));
             return;
         }
 
@@ -298,28 +303,17 @@ public sealed class MpcHcSession : IPlayerSession
         bool otherFile;
         lock (_gate)
         {
-            otherFile = _fileLoaded && _nowPlaying is not null && !SamePath(nowPlaying.FileName, _filePath);
-            _nowPlaying ??= nowPlaying;
+            _nowPlaying = nowPlaying;
+            otherFile = !SamePath(nowPlaying.FileName, _filePath);
+            if (otherFile)
+            {
+                _filePath = nowPlaying.FileName;
+                _loadedRaised = false;
+            }
         }
 
-        if (otherFile)
-        {
-            EndForFileChange();
-            return;
-        }
-
+        if (otherFile) Raise(new PlaybackEvent.FileChanged(nowPlaying.FileName));
         RaiseLoadedOnce();
-    }
-
-    /// <summary>
-    /// MPC-HC closed the launched file or opened another one: this session is over (R25), but the player is the
-    /// viewer's now, so disposal leaves it running (R44).
-    /// </summary>
-    private void EndForFileChange()
-    {
-        Detach();
-        StopPolling();
-        Raise(new PlaybackEvent.Closed());
     }
 
     private static bool SamePath(string a, string b) =>
@@ -347,7 +341,7 @@ public sealed class MpcHcSession : IPlayerSession
             if (_loadedRaised || !_fileLoaded || _nowPlaying is null) return;
             _loadedRaised = true;
             duration = _nowPlaying.Duration;
-            startAt = _startAt;
+            (startAt, _startAt) = (_startAt, null); // only the launched file is resumed
         }
 
         Raise(new PlaybackEvent.Loaded(duration));

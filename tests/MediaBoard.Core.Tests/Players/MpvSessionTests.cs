@@ -112,11 +112,69 @@ public class MpvSessionTests
         Assert.Equal(serverArg[PipePrefix.Length..], Assert.Single(_connectNames));
         Assert.Equal(
         [
-            """{"command":["observe_property",1,"time-pos"]}""",
-            """{"command":["observe_property",2,"duration"]}""",
-            """{"command":["observe_property",3,"pause"]}""",
-            """{"command":["observe_property",4,"eof-reached"]}""",
+            """{"command":["observe_property",1,"path"]}""",
+            """{"command":["observe_property",2,"time-pos"]}""",
+            """{"command":["observe_property",3,"duration"]}""",
+            """{"command":["observe_property",4,"pause"]}""",
+            """{"command":["observe_property",5,"eof-reached"]}""",
         ], _pipe.Written);
+    }
+
+    [Fact]
+    public async Task Mpv_SameFileReported_RaisesNothing()
+    {
+        await using var session = await StartConnectedAsync();
+
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path","data":"c:/videos/TEST.mp4"}""");
+        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"duration","data":1500}""");
+
+        await _events.WaitFor<PlaybackEvent.Loaded>();
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500))], _events.All);
+    }
+
+    [Fact]
+    public async Task Mpv_MovesToAnotherFile_RaisesFileChangedAndLoadsAgain()
+    {
+        await using var session = await StartConnectedAsync();
+        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"duration","data":1500}""");
+        await _events.WaitFor<PlaybackEvent.Loaded>();
+
+        await _pipe.FeedAsync("""{"event":"end-file","reason":"eof"}""");
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path","data":"C:\\Videos\\test2.mp4"}""");
+        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"duration","data":1300}""");
+        await Waiting.Until(() => _events.OfType<PlaybackEvent.Loaded>().Count == 2);
+
+        Assert.Equal(
+        [
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)),
+            new PlaybackEvent.Ended(),
+            new PlaybackEvent.FileChanged(@"C:\Videos\test2.mp4"),
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1300)),
+        ], _events.All);
+    }
+
+    [Fact]
+    public async Task Mpv_FileUnloaded_RaisesFileChangedToNothing()
+    {
+        await using var session = await StartConnectedAsync();
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path","data":"C:\\Videos\\test.mp4"}""");
+
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path"}""");
+        await _events.WaitFor<PlaybackEvent.FileChanged>();
+
+        Assert.Equal([new PlaybackEvent.FileChanged(null)], _events.All);
+    }
+
+    [Fact]
+    public async Task Mpv_NoPathYet_IsNotAFileClosing()
+    {
+        await using var session = await StartConnectedAsync();
+
+        await _pipe.FeedAsync("""{"event":"property-change","id":1,"name":"path"}""");
+        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"duration","data":1500}""");
+        await _events.WaitFor<PlaybackEvent.Loaded>();
+
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500))], _events.All);
     }
 
     [Fact]

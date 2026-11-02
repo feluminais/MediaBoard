@@ -422,7 +422,7 @@ public sealed class PlaybackServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MpcHcMovesToAnotherFile_SessionEnds_PlayerKeepsRunning()
+    public async Task MpcHcMovesToAnotherFile_FollowsIt_AndKeepsTheFirstOnesProgress()
     {
         var transport = new LoopTransport();
         var process = new FakePlayerProcess();
@@ -435,13 +435,132 @@ public sealed class PlaybackServiceTests : IDisposable
         transport.Receive(MpcApi.CMD_NOWPLAYING, $"Movie|||{_library.PathOf("Movie (2020).mkv")}|{Hour}.000");
         transport.Receive(MpcApi.CMD_NOTIFYSEEK, "300.000");
 
+        var next = AddFile("Next (2021).mkv");
         transport.Receive(MpcApi.CMD_NOWPLAYING, $"Next|||{_library.PathOf("Next (2021).mkv")}|{Hour}.000"); // Next in MPC-HC
+        transport.Receive(MpcApi.CMD_NOTIFYSEEK, "120.000");
 
-        await Waiting.Until(() => process.Disposed);
+        await Waiting.Until(() => _progress.Get(next) is not null);
         Assert.False(process.CloseRequested);
-        Assert.False(process.Killed);
-        Assert.Null(_hub.Current.PlayerName);
+        Assert.Equal("mpv", _hub.Current.PlayerName);
         AssertProgress(id, 300, Hour);
+        AssertProgress(next, 120, Hour);
+    }
+
+    [Fact]
+    public async Task FileChanged_KeepsTheLeftEpisodeWhereItWas_AndFollowsTheNextOne()
+    {
+        var first = await Play("First.mkv");
+        var second = AddFile("Second.mkv");
+        var changes = 0;
+        _service.ProgressChanged += () => changes++;
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(Hour * 0.6)));
+
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour / 2)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(2)));
+
+        AssertProgress(first, Hour * 0.6, Hour);
+        Assert.False(_progress.Get(first)!.Watched);
+        AssertProgress(second, 120, Hour / 2);
+        Assert.Equal(1, changes);
+
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(5)));
+        Session.Raise(new PlaybackEvent.Closed());
+        AssertProgress(second, 300, Hour / 2);
+        AssertProgress(first, Hour * 0.6, Hour);
+    }
+
+    [Fact]
+    public async Task FileChanged_AfterTheFirstEnded_LeavesItWatchedAndTheNextNot()
+    {
+        var first = await Play("First.mkv");
+        var second = AddFile("Second.mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(5390)));
+        Session.Raise(new PlaybackEvent.Ended());
+
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(1)));
+
+        Assert.True(_progress.Get(first)!.Watched);
+        Assert.False(_progress.Get(second)!.Watched);
+    }
+
+    [Fact]
+    public async Task FileChanged_ToTheSameFile_ChangesNothing()
+    {
+        var id = await Play("First.mkv");
+        var changes = 0;
+        _service.ProgressChanged += () => changes++;
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(5)));
+
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("first.MKV"))); // Windows ignores case
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(6)));
+
+        AssertProgress(id, 360, Hour);
+        Assert.Equal(0, changes);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(@"D:\Elsewhere\Not In Library.mkv")]
+    public async Task FileChanged_ToNothingOrToAFileOutsideTheLibrary_StopsSaving_UntilALibraryFileComes(string? path)
+    {
+        var first = await Play("First.mkv");
+        var second = AddFile("Second.mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(20)));
+
+        Session.Raise(new PlaybackEvent.FileChanged(path));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(100)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(50)));
+        Session.Raise(new PlaybackEvent.Ended());
+
+        AssertProgress(first, 1200, Hour);
+        Assert.Null(_progress.Get(second));
+        Assert.Equal("mpv", _service.CurrentPlayer);
+
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(3)));
+
+        AssertProgress(second, 180, Hour);
+    }
+
+    [Fact]
+    public async Task FileChanged_ToAnEpisodeWithSavedProgress_KeepsItUntilThePlayerPassesIt()
+    {
+        await Play("First.mkv");
+        var second = AddFile("Second.mkv");
+        _progress.Save(second, 1800, Hour);
+
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(0.5)));
+        AssertProgress(second, 1800, Hour);
+
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(30)));
+        AssertProgress(second, 30, Hour);
+    }
+
+    [Fact]
+    public async Task Stop_AfterAFileChange_SavesTheNewFilesPosition()
+    {
+        var first = await Play("First.mkv");
+        var second = AddFile("Second.mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(10)));
+        Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Position = TimeSpan.FromMinutes(15);
+
+        await _service.StopAsync(closePlayer: false, CancellationToken.None);
+
+        AssertProgress(first, 600, Hour);
+        AssertProgress(second, 900, Hour);
     }
 
     [Fact]

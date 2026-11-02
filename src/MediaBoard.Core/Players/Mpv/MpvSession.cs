@@ -5,8 +5,9 @@ namespace MediaBoard.Core.Players.Mpv;
 
 /// <summary>
 /// Plays one file in mpv and follows it over mpv's JSON IPC: mpv is started with <c>--input-ipc-server</c> on a
-/// named pipe of its own, and the session observes <c>time-pos</c>, <c>duration</c>, <c>pause</c> and
-/// <c>eof-reached</c>. mpv's own configuration is never touched.
+/// named pipe of its own, and the session observes <c>path</c>, <c>time-pos</c>, <c>duration</c>, <c>pause</c> and
+/// <c>eof-reached</c>. mpv's own configuration is never touched. When mpv moves to another file, the session raises
+/// <see cref="PlaybackEvent.FileChanged"/> and what follows belongs to that file.
 /// </summary>
 /// <remarks>
 /// <see cref="Event"/> is raised on a thread-pool thread, one at a time and in order, with no lock held. Handlers
@@ -58,6 +59,8 @@ public sealed class MpvSession : IPlayerSession
     private bool? _paused;
     private bool _endedRaised;
     private long? _lastPositionStamp;
+    private string? _currentFile;
+    private bool _pathSeen;
 
     /// <param name="player">mpv as detected; <see cref="PlayerInfo.ExePath"/> is launched.</param>
     /// <param name="connect">One attempt to connect to the named pipe (name without <c>\\.\pipe\</c>); null when it does not exist yet.</param>
@@ -126,6 +129,7 @@ public sealed class MpvSession : IPlayerSession
             return Task.CompletedTask;
         }
 
+        _currentFile = filePath;
         var run = RunAsync(pipeName, stop);
         lock (_gate)
         {
@@ -190,7 +194,7 @@ public sealed class MpvSession : IPlayerSession
             }
 
             var id = 1;
-            foreach (var property in new[] { MpvProtocol.TimePosProperty, MpvProtocol.DurationProperty, MpvProtocol.PauseProperty, MpvProtocol.EofReachedProperty })
+            foreach (var property in new[] { MpvProtocol.PathProperty, MpvProtocol.TimePosProperty, MpvProtocol.DurationProperty, MpvProtocol.PauseProperty, MpvProtocol.EofReachedProperty })
             {
                 await pipe.WriteLineAsync(MpvProtocol.Observe(id++, property), stop).ConfigureAwait(false);
             }
@@ -233,6 +237,9 @@ public sealed class MpvSession : IPlayerSession
     {
         switch (MpvProtocol.Parse(line))
         {
+            case MpvMessage.Path p:
+                OnPath(p.File);
+                break;
             case MpvMessage.TimePos t:
                 OnTimePos(t.At);
                 break;
@@ -262,6 +269,41 @@ public sealed class MpvSession : IPlayerSession
             case MpvMessage.EndFile { Reason: "error" }:
                 _pump.Raise(new PlaybackEvent.Failed("mpv could not open the file"));
                 break;
+        }
+    }
+
+    /// <summary>mpv moved to another file (the next in a playlist, or one the viewer opened) or has none: what follows belongs to that.</summary>
+    private void OnPath(string? file)
+    {
+        // Before the first file is open mpv has no path; that is not a file closing.
+        if (file is null && !_pathSeen) return;
+        _pathSeen = true;
+        if (SamePath(file, _currentFile)) return;
+
+        _currentFile = file;
+        _loadedRaised = false;
+        _endedRaised = false;
+        _lastPositionStamp = null;
+        lock (_gate) _lastTimePos = null;
+        _pump.Raise(new PlaybackEvent.FileChanged(file));
+    }
+
+    private static bool SamePath(string? a, string? b)
+    {
+        if (a is null || b is null) return a is null && b is null;
+
+        return string.Equals(Normalize(a), Normalize(b), StringComparison.OrdinalIgnoreCase);
+
+        static string Normalize(string path)
+        {
+            try
+            {
+                return Path.IsPathRooted(path) ? Path.GetFullPath(path) : path;
+            }
+            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return path;
+            }
         }
     }
 

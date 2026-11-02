@@ -28,6 +28,14 @@ public class VlcSessionTests
     private static string Status(string state, int time, int length) =>
         $$"""{"state":"{{state}}","time":{{time}},"length":{{length}},"volume":256}""";
 
+    private static string StatusOf(string state, int time, int length, int plid) =>
+        $$"""{"state":"{{state}}","time":{{time}},"length":{{length}},"currentplid":{{plid}}}""";
+
+    private string? _playlist;
+    private int _playlistRequests;
+
+    private int PlaylistRequests => Volatile.Read(ref _playlistRequests);
+
     private int RequestCount
     {
         get { lock (_requests) return _requests.Count; }
@@ -36,7 +44,8 @@ public class VlcSessionTests
     private VlcSession Create(
         TimeSpan? pollInterval = null,
         TimeSpan? closeTimeout = null,
-        Func<ProcessStartInfo, IPlayerProcess>? start = null)
+        Func<ProcessStartInfo, IPlayerProcess>? start = null,
+        bool withPlaylist = false)
     {
         var session = new VlcSession(
             Player,
@@ -54,7 +63,16 @@ public class VlcSessionTests
             }),
             _clock,
             pollInterval ?? Fast,
-            closeTimeout: closeTimeout);
+            closeTimeout: closeTimeout,
+            fetchPlaylist: withPlaylist
+                ? (_, _, _) =>
+                {
+                    Interlocked.Increment(ref _playlistRequests);
+                    return _playlist is null
+                        ? Task.FromException<string>(new HttpRequestException("connection refused"))
+                        : Task.FromResult(_playlist);
+                }
+                : null);
         session.Event += _events.Add;
         return session;
     }
@@ -483,7 +501,92 @@ public class VlcSessionTests
             """;
 
         Assert.True(VlcStatus.TryParse(json, out var status));
-        Assert.Equal(new VlcStatus(VlcState.Playing, TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(1320)), status);
+        Assert.Equal(new VlcStatus(VlcState.Playing, TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(1320), PlaylistId: 6), status);
+    }
+
+    private const string Playlist = """
+        {"name":"Playlist","id":"1","children":[
+          {"name":"Playlist","id":"2","children":[
+            {"name":"test.mp4","id":"4","uri":"file:///C:/Videos/test.mp4","current":"current"},
+            {"name":"S01E02.mkv","id":"5","uri":"file:///C:/Videos/My%20Show/S01E02.mkv"},
+            {"name":"stream","id":"6","uri":"http://example.com/live"}]},
+          {"name":"Media Library","id":"3","children":[]}]}
+        """;
+
+    [Theory]
+    [InlineData(4, @"C:\Videos\test.mp4")]
+    [InlineData(5, @"C:\Videos\My Show\S01E02.mkv")]
+    public void Playlist_FindsTheLocalPathOfAnItem(int id, string expected)
+    {
+        Assert.True(VlcPlaylist.TryFindPath(Playlist, id, out var path));
+        Assert.Equal(expected, path);
+    }
+
+    [Theory]
+    [InlineData(6)] // not a local file
+    [InlineData(9)] // not in the playlist
+    public void Playlist_ItemWithoutALocalPath_IsNotFound(int id)
+    {
+        Assert.False(VlcPlaylist.TryFindPath(Playlist, id, out _));
+    }
+
+    [Fact]
+    public void Playlist_Garbage_IsNotFound()
+    {
+        Assert.False(VlcPlaylist.TryFindPath("not json", 4, out _));
+        Assert.False(VlcPlaylist.TryFindPath("", 4, out _));
+    }
+
+    [Fact]
+    public async Task Vlc_MovesToAnotherPlaylistItem_RaisesFileChangedBeforeTheNewPosition()
+    {
+        _status = StatusOf("playing", 10, 600, plid: 4);
+        _playlist = Playlist;
+        await using var session = Create(withPlaylist: true);
+        await session.StartAsync(File, null, Ct);
+        await _events.WaitFor<PlaybackEvent.Position>();
+
+        _status = StatusOf("playing", 3, 1320, plid: 5);
+        await _events.WaitFor<PlaybackEvent.FileChanged>();
+        await Waiting.Until(() => _events.OfType<PlaybackEvent.Position>().Count == 2);
+
+        var events = _events.All;
+        var changed = events.FindIndex(e => e is PlaybackEvent.FileChanged);
+        Assert.Equal(new PlaybackEvent.FileChanged(@"C:\Videos\My Show\S01E02.mkv"), events[changed]);
+        Assert.DoesNotContain(new PlaybackEvent.Position(TimeSpan.FromSeconds(3)), events.Take(changed));
+        Assert.Equal(
+        [
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1320)),
+            new PlaybackEvent.Playing(),
+            new PlaybackEvent.Position(TimeSpan.FromSeconds(3)),
+        ], events.Skip(changed + 1).Take(3));
+    }
+
+    [Fact]
+    public async Task Vlc_PlaylistItemOfTheLaunchedFile_RaisesNoFileChanged()
+    {
+        _status = StatusOf("playing", 10, 600, plid: 4);
+        _playlist = Playlist;
+        await using var session = Create(withPlaylist: true);
+        await session.StartAsync(File, null, Ct);
+        await _events.WaitFor<PlaybackEvent.Position>();
+        await Waiting.Until(() => PlaylistRequests >= 1);
+
+        Assert.Empty(_events.OfType<PlaybackEvent.FileChanged>());
+    }
+
+    [Fact]
+    public async Task Vlc_PlaylistNotAnswering_IsAskedAgainAtTheNextPoll()
+    {
+        _status = StatusOf("playing", 3, 1320, plid: 5);
+        _playlist = null;
+        await using var session = Create(withPlaylist: true);
+        await session.StartAsync(File, null, Ct);
+        await Waiting.Until(() => PlaylistRequests >= 2);
+        Assert.Empty(_events.OfType<PlaybackEvent.FileChanged>());
+
+        _playlist = Playlist;
+        await _events.WaitFor<PlaybackEvent.FileChanged>();
     }
 
     [Theory]

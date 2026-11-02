@@ -16,6 +16,9 @@ public abstract record MpvMessage
     /// <summary>Whether playback has reached the end of the file (<c>eof-reached</c>).</summary>
     public sealed record EofReached(bool Reached) : MpvMessage;
 
+    /// <summary>The file mpv has open (<c>path</c>), as it was given to mpv; null when mpv has none.</summary>
+    public sealed record Path(string? File) : MpvMessage;
+
     /// <summary>The file stopped playing. <paramref name="Reason"/> is mpv's: eof, stop, quit, error, redirect.</summary>
     public sealed record EndFile(string Reason) : MpvMessage;
 }
@@ -30,6 +33,7 @@ public static class MpvProtocol
     public const string DurationProperty = "duration";
     public const string PauseProperty = "pause";
     public const string EofReachedProperty = "eof-reached";
+    public const string PathProperty = "path";
 
     // Longer than any file; keeps a garbage number from overflowing TimeSpan.
     private const double MaxSeconds = 10_000_000;
@@ -85,7 +89,11 @@ public static class MpvProtocol
     private static MpvMessage? ParseProperty(JsonElement root)
     {
         if (!root.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String) return null;
-        if (!root.TryGetProperty("data", out var data)) return null;
+        if (!root.TryGetProperty("data", out var data))
+        {
+            // mpv leaves data out when the property is unavailable; for the path that means no file.
+            return name.GetString() == PathProperty ? new MpvMessage.Path(null) : null;
+        }
 
         switch (name.GetString())
         {
@@ -97,6 +105,8 @@ public static class MpvProtocol
                 return TryReadBool(data, out var paused) ? new MpvMessage.Pause(paused) : null;
             case EofReachedProperty:
                 return TryReadBool(data, out var reached) ? new MpvMessage.EofReached(reached) : null;
+            case PathProperty:
+                return data.ValueKind == JsonValueKind.String ? new MpvMessage.Path(data.GetString()) : new MpvMessage.Path(null);
             default:
                 return null;
         }

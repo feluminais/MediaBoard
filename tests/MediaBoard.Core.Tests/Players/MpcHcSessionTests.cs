@@ -200,15 +200,22 @@ public class MpcHcSessionTests
     }
 
     [Fact]
-    public async Task Session_OtherFileOpened_RaisesClosed()
+    public async Task Session_OtherFileOpened_RaisesFileChangedAndKeepsReporting()
     {
         await using var session = await LoadedAsync();
 
-        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1500.000");
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1300.000");
         _transport.Receive(MpcApi.CMD_NOTIFYSEEK, "3.000");
         _transport.Receive(MpcApi.CMD_NOTIFYENDOFSTREAM, "");
 
-        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.Closed()], _events.All);
+        Assert.Equal(
+        [
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)),
+            new PlaybackEvent.FileChanged(@"C:\Videos\test2.mp4"),
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1300)),
+            new PlaybackEvent.Position(TimeSpan.FromSeconds(3)),
+            new PlaybackEvent.Ended(),
+        ], _events.All);
     }
 
     [Fact]
@@ -225,14 +232,50 @@ public class MpcHcSessionTests
     [Theory]
     [InlineData("3")] // MLS_CLOSING
     [InlineData("0")] // MLS_CLOSED
-    public async Task Session_FileClosedAfterLoaded_RaisesClosed(string state)
+    public async Task Session_FileClosedAfterLoaded_RaisesFileChangedToNothing(string state)
     {
         await using var session = await LoadedAsync();
 
         _transport.Receive(MpcApi.CMD_STATE, state);
-        _transport.Receive(MpcApi.CMD_CURRENTPOSITION, "3.000");
 
-        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.Closed()], _events.All);
+        Assert.Equal([new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)), new PlaybackEvent.FileChanged(null)], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_FileClosedThenReopened_RaisesFileChangedForTheNewFile()
+    {
+        await using var session = await LoadedAsync();
+
+        _transport.Receive(MpcApi.CMD_STATE, "3"); // MLS_CLOSING
+        _transport.Receive(MpcApi.CMD_STATE, "0"); // MLS_CLOSED
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1300.000");
+        _transport.Receive(MpcApi.CMD_STATE, "2"); // MLS_LOADED
+
+        Assert.Equal(
+        [
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1500)),
+            new PlaybackEvent.FileChanged(null),
+            new PlaybackEvent.FileChanged(@"C:\Videos\test2.mp4"),
+            new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1300)),
+        ], _events.All);
+    }
+
+    [Fact]
+    public async Task Session_ResumesOnlyTheLaunchedFile()
+    {
+        await using var session = Create();
+        await session.StartAsync(@"C:\Videos\test.mp4", TimeSpan.FromSeconds(600), Ct);
+        _transport.Receive(MpcApi.CMD_CONNECT, "4660");
+        _transport.Receive(MpcApi.CMD_STATE, "2");
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"test|||C:\Videos\test.mp4|1500.000");
+        _transport.Receive(MpcApi.CMD_STATE, "3");
+        var seeks = _transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION).Count;
+
+        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1300.000");
+        _transport.Receive(MpcApi.CMD_STATE, "2");
+
+        Assert.Equal(1, seeks);
+        Assert.Equal(seeks, _transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION).Count);
     }
 
     [Fact]
@@ -419,15 +462,14 @@ public class MpcHcSessionTests
     }
 
     [Fact]
-    public async Task OtherFileOpened_ThenDispose_LeavesPlayerRunning()
+    public async Task OtherFileOpened_ThenDispose_ClosesPlayer()
     {
         var session = await LoadedAsync();
         _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1500.000");
 
         await session.DisposeAsync();
 
-        Assert.False(_process.CloseRequested);
-        Assert.False(_process.Killed);
+        Assert.True(_process.CloseRequested);
         Assert.True(_process.Disposed);
         Assert.True(_transport.Disposed);
     }
@@ -435,15 +477,14 @@ public class MpcHcSessionTests
     [Theory]
     [InlineData("3")] // MLS_CLOSING
     [InlineData("0")] // MLS_CLOSED
-    public async Task FileClosed_ThenDispose_LeavesPlayerRunning(string state)
+    public async Task FileClosed_ThenDispose_ClosesPlayer(string state)
     {
         var session = await LoadedAsync();
         _transport.Receive(MpcApi.CMD_STATE, state);
 
         await session.DisposeAsync();
 
-        Assert.False(_process.CloseRequested);
-        Assert.False(_process.Killed);
+        Assert.True(_process.CloseRequested);
         Assert.True(_process.Disposed);
     }
 
