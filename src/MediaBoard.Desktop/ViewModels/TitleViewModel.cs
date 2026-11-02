@@ -38,6 +38,10 @@ public sealed partial class TitleViewModel : PageViewModel
     private bool _onlineLoaded;
     private bool _headerLoaded;
     private Dictionary<(TargetKind, int), EditableItem> _items = [];
+    private int? _chosenSeason; // the season number the viewer picked; null until they pick one
+    private SeasonItem? _selected;
+    private EpisodeItem? _nextItem;
+    private bool _graphCanLoad;
 
     /// <summary>A page for a title in the library.</summary>
     public TitleViewModel(int titleId, TitleServices services, TitleNavigation navigation)
@@ -61,14 +65,30 @@ public sealed partial class TitleViewModel : PageViewModel
         _player = new Lazy<string?>(services.PlayerName);
         Header = new EditableItem(null, TargetKind.Title, titleId, "", false);
         PlayText = "Play";
-        Rows.Add(this);
     }
 
     /// <summary>
-    /// What the page lists, flat so the list virtualizes: this page for the header block, then seasons and episodes,
-    /// then <see cref="FilesHeader"/> and the loose files. A refresh changes it row by row.
+    /// What the list under the graph shows, flat so it virtualizes: the episodes of <see cref="ListedSeason"/>, then
+    /// <see cref="FilesHeader"/> and the loose files. A refresh changes it row by row.
     /// </summary>
     public ObservableCollection<object> Rows { get; } = [];
+
+    /// <summary>The height of an episode or file row in the list. TitleView's row style says the same number.</summary>
+    public const double RowHeight = 56;
+
+    /// <summary>The height of the "Other files" heading row. TitleView's template says the same number.</summary>
+    public const double FilesHeaderHeight = 48;
+
+    /// <summary>
+    /// What the list adds up to. Every row has a known height, so the list is given its full height at once: the scroll
+    /// bar is right from the first frame, and it does not jump when the list first scrolls into view.
+    /// </summary>
+    [ObservableProperty]
+    public partial double ListHeight { get; private set; }
+
+    /// <summary>The season whose episodes are listed; the viewer picks it in the graph or with the arrows on its header.</summary>
+    [ObservableProperty]
+    public partial SeasonItem? ListedSeason { get; private set; }
 
     /// <summary>A page for a TMDB title that is not in the library (an online search hit).</summary>
     public static TitleViewModel Online(int tmdbId, TitleKind kind, TitleServices services, TitleNavigation navigation) =>
@@ -221,7 +241,12 @@ public sealed partial class TitleViewModel : PageViewModel
             Seasons = [];
             Files = [];
             _items = [];
-            CollectionSync.Sync(Rows, [this]);
+            _selected = null;
+            ListedSeason = null;
+            _nextItem = null;
+            Graph = null;
+            Rows.Clear();
+            ListHeight = 0;
             CanPlay = false;
             PlayReason = null;
             OnPropertyChanged(nameof(WatchedText));
@@ -268,7 +293,6 @@ public sealed partial class TitleViewModel : PageViewModel
         Files = files;
         OnPropertyChanged(nameof(HasSeasons));
         OnPropertyChanged(nameof(ShowFiles));
-        SyncRows(seasons, files);
 
         var rows = seasons.SelectMany(s => s.Episodes).Concat(files).Where(i => i.FileId is not null).ToList();
         _files = rows.GroupBy(i => i.FileId!.Value).Select(g => (g.Key, g.Any(i => i.IsWatched))).ToList();
@@ -277,12 +301,87 @@ public sealed partial class TitleViewModel : PageViewModel
         OnPropertyChanged(nameof(CanMarkWatched));
 
         ApplyPlay(d, data.NextFileId, rows);
+        Select(seasons, data.NextFileId);
+        UpdateGraph(d);
+        SyncRows(files);
+    }
+
+    // The season the page lists: the one the viewer picked, else the one holding the episode Play starts, else the first
+    // that has a file, else the first.
+    private void Select(IReadOnlyList<SeasonItem> seasons, int? nextFileId)
+    {
+        _selected = seasons.FirstOrDefault(s => s.Number == _chosenSeason)
+            ?? seasons.FirstOrDefault(s => nextFileId is not null && s.Episodes.Any(e => e.FileId == nextFileId))
+            ?? seasons.FirstOrDefault(s => s.Episodes.Any(e => e.FileId is not null))
+            ?? seasons.FirstOrDefault();
+    }
+
+    // A show gets the episode graph above its list; it is told the library again after every change, so a watched
+    // episode changes colour at once.
+    private void UpdateGraph(TitleDetailsView d)
+    {
+        if (d.Kind != TitleKind.Show || d.Seasons.All(s => s.Number <= 0 || s.Episodes.Count == 0))
+        {
+            Graph = null;
+            return;
+        }
+
+        if (Graph is null)
+        {
+            Graph = new EpisodeGraphViewModel(d.TmdbId ?? 0, d.Seasons.Select(s => s.Number), _s.Search, _s.Posters.LoadStillAsync, library: true);
+            Graph.Chosen += OnGraphChosen;
+            _graphCanLoad = d.TmdbId is not null && !d.Offline;
+            if (_graphCanLoad) _ = Graph.LoadAsync();
+        }
+
+        Graph.SetLibrary(d.Seasons.Select(s => new LibrarySeason(s.Number, s.Episodes.Select(LibraryEpisodeOf).ToList())).ToList());
+        Graph.SelectedSeason = _selected?.Number;
+    }
+
+    private static LibraryEpisode LibraryEpisodeOf(EpisodeRow e)
+    {
+        var (state, status) = e.FileId is null ? (EpisodeState.NoFile, "No file")
+            : e.Missing ? (EpisodeState.Missing, "File missing")
+            : e.Watched ? (EpisodeState.Watched, "Watched")
+            : e.PositionS > 0 ? (EpisodeState.Started, $"Stopped at {TimeText.Format(e.PositionS)}")
+            : (EpisodeState.Unwatched, "Not watched");
+        var progress = state == EpisodeState.Started && e.DurationS > 0 ? Math.Clamp(e.PositionS / e.DurationS, 0, 1) : 0;
+        return new LibraryEpisode(e.Number, e.Name, e.AirDate, e.RuntimeMin, e.Hidden, state, progress, status);
+    }
+
+    /// <summary>Raised when the viewer pressed an episode in the graph: the list should bring that row into view.</summary>
+    public event Action<EpisodeItem>? ScrollRequested;
+
+    private void OnGraphChosen(int season, int? episode)
+    {
+        if (Seasons.FirstOrDefault(s => s.Number == season) is not { } target) return;
+
+        Choose(target);
+        if (episode is { } number && target.Episodes.FirstOrDefault(e => e.Label == $"E{number:00}") is { } item) ScrollRequested?.Invoke(item);
+    }
+
+    /// <summary>The season before (-1) or after (1) the listed one.</summary>
+    internal void StepSeason(int step)
+    {
+        var at = _selected is null ? -1 : Seasons.ToList().IndexOf(_selected);
+        if (at >= 0 && at + step >= 0 && at + step < Seasons.Count) Choose(Seasons[at + step]);
+    }
+
+    private void Choose(SeasonItem season)
+    {
+        _chosenSeason = season.Number;
+        _selected = season;
+        if (Graph is not null) Graph.SelectedSeason = season.Number;
+        SyncRows(Files);
     }
 
     private void ApplyPlay(TitleDetailsView d, int? next, List<EpisodeItem> rows)
     {
         var item = next is null ? null : rows.FirstOrDefault(i => i.FileId == next);
         _playFileId = next is not null && item?.Missing != true ? next : null;
+        if (_nextItem is not null && !ReferenceEquals(_nextItem, item)) _nextItem.IsNext = false;
+        _nextItem = item;
+        if (item is not null) item.IsNext = true;
 
         var code = item?.Code is { } c ? c + " " : "";
         var resume = item is { IsWatched: false, PositionS: > 0 };
@@ -322,18 +421,18 @@ public sealed partial class TitleViewModel : PageViewModel
         if (details.Kind != TitleKind.Show || details.SeasonNumbers.All(n => n <= 0)) return;
 
         Graph = new EpisodeGraphViewModel(_tmdbId, details.SeasonNumbers, _s.Search, _s.Posters.LoadStillAsync);
-        CollectionSync.Sync(Rows, [this, Graph]);
         _ = Graph.LoadAsync();
     }
 
-    /// <summary>The episode graph of an online show; null for a movie, a library title, or while TMDB has not answered.</summary>
-    public EpisodeGraphViewModel? Graph { get; private set; }
+    /// <summary>The episode graph of a show: ratings for one that is not in the library, progress for one that is; null for a movie.</summary>
+    [ObservableProperty]
+    public partial EpisodeGraphViewModel? Graph { get; private set; }
 
     public override void Closed() => Graph?.Stop();
 
     public override void Opened()
     {
-        if (Graph is { IsComplete: false } graph) _ = graph.LoadAsync();
+        if (Graph is { IsComplete: false } graph && (IsOnline || _graphCanLoad)) _ = graph.LoadAsync();
     }
 
     private static string? YearOf(int? year, int? endYear) =>
@@ -372,17 +471,19 @@ public sealed partial class TitleViewModel : PageViewModel
         return item;
     }
 
-    // One flat list for the page, so the list control builds only the rows in view: the page itself (its header
-    // block), then each season with its episodes, then the files that belong to no episode.
-    private void SyncRows(IReadOnlyList<SeasonItem> seasons, IReadOnlyList<EpisodeItem> files)
+    // The list under the graph: the listed season's episodes, then the files that belong to no episode. Only one season's
+    // rows exist at a time and every row has the same height, so the scroll bar does not move as the list scrolls.
+    private void SyncRows(IReadOnlyList<EpisodeItem> files)
     {
-        var rows = new List<object> { this };
-        foreach (var season in seasons)
+        var rows = new List<object>();
+        if (_selected is { } season)
         {
-            rows.Add(season);
+            var at = Seasons.ToList().IndexOf(season);
+            season.SetNeighbours(at > 0, at >= 0 && at < Seasons.Count - 1);
             rows.AddRange(season.Episodes);
         }
 
+        ListedSeason = _selected;
         if (ShowFiles)
         {
             rows.Add(FilesHeader.Instance);
@@ -390,6 +491,7 @@ public sealed partial class TitleViewModel : PageViewModel
         }
 
         CollectionSync.Sync(Rows, rows);
+        ListHeight = rows.Sum(r => r is FilesHeader ? FilesHeaderHeight : RowHeight);
     }
 
     // ---- Edits ----

@@ -77,22 +77,62 @@ public partial class EditableItem : ObservableObject
 
 public sealed partial class SeasonItem : EditableItem
 {
+    private readonly TitleViewModel _owner;
+
     public SeasonItem(TitleViewModel page, SeasonView season, IReadOnlyList<EpisodeItem> episodes)
         : base(page, TargetKind.Season, season.Id, season.Name, season.Hidden)
     {
+        _owner = page;
         Number = season.Number;
         Episodes = episodes;
+        Summary = SummaryOf(episodes);
     }
 
     public int Number { get; private set; }
 
     public IReadOnlyList<EpisodeItem> Episodes { get; private set; }
 
+    /// <summary>"3 of 8 watched", with the episodes that have no file named: what the season header says under its name.</summary>
+    [ObservableProperty]
+    public partial string Summary { get; private set; }
+
+    /// <summary>There is a season before this one on the page; the header's back button works.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(PreviousCommand))]
+    public partial bool CanPrevious { get; private set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(NextCommand))]
+    public partial bool CanNext { get; private set; }
+
     internal void Refresh(SeasonView season, IReadOnlyList<EpisodeItem> episodes)
     {
         Update(season.Name, season.Hidden);
         Number = season.Number;
         Episodes = episodes;
+        Summary = SummaryOf(episodes);
+    }
+
+    internal void SetNeighbours(bool previous, bool next)
+    {
+        CanPrevious = previous;
+        CanNext = next;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanPrevious))]
+    private void Previous() => _owner.StepSeason(-1);
+
+    [RelayCommand(CanExecute = nameof(CanNext))]
+    private void Next() => _owner.StepSeason(1);
+
+    private static string SummaryOf(IReadOnlyList<EpisodeItem> episodes)
+    {
+        var withFile = episodes.Count(e => e.FileId is not null);
+        if (withFile == 0) return episodes.Count == 0 ? "No episodes" : "No files";
+
+        var watched = episodes.Count(e => e.IsWatched);
+        var without = episodes.Count - withFile;
+        return without == 0 ? $"{watched} of {withFile} watched" : $"{watched} of {withFile} watched, {without} without a file";
     }
 }
 
@@ -122,17 +162,28 @@ public sealed partial class EpisodeItem : EditableItem
 
     public static EpisodeItem Of(TitleViewModel page, EpisodeRow row) =>
         new(page, TargetKind.Episode, row.EpisodeId, row.Name, row.Hidden, $"E{row.Number:00}", $"S{row.Season:00}E{row.Number:00}", row.FileId, row.Watched,
-            row.PositionS, row.DurationS, row.Missing);
+            row.PositionS, row.DurationS, row.Missing) { Meta = MetaOf(row) };
 
     public static EpisodeItem Of(TitleViewModel page, FileView file) =>
         new(page, TargetKind.File, file.FileId, file.Name, file.Hidden, null, null, file.FileId, file.Watched,
-            file.PositionS, file.DurationS, file.Missing);
+            file.PositionS, file.DurationS, file.Missing) { Meta = file.RelPath };
+
+    // "12 Mar 2021, 24 min": what is known about the episode besides its name; empty when nothing is.
+    private static string MetaOf(EpisodeRow row)
+    {
+        var parts = new List<string>(2);
+        if (row.AirDate is { } date && DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var aired))
+            parts.Add(aired.ToString("d MMM yyyy", CultureInfo.InvariantCulture));
+        if (row.RuntimeMin is { } minutes and > 0) parts.Add($"{minutes} min");
+        return string.Join(", ", parts);
+    }
 
     /// <summary>Takes what the library says now; the row stays the same object, so the list control keeps its elements.</summary>
     internal void Refresh(EpisodeRow row)
     {
         Update(row.Name, row.Hidden);
         Set($"E{row.Number:00}", $"S{row.Season:00}E{row.Number:00}", row.FileId, row.Watched, row.PositionS, row.DurationS, row.Missing);
+        Meta = MetaOf(row);
         RaiseAll();
     }
 
@@ -140,6 +191,7 @@ public sealed partial class EpisodeItem : EditableItem
     {
         Update(file.Name, file.Hidden);
         Set(null, null, file.FileId, file.Watched, file.PositionS, file.DurationS, file.Missing);
+        Meta = file.RelPath;
         RaiseAll();
     }
 
@@ -167,7 +219,7 @@ public sealed partial class EpisodeItem : EditableItem
     private static readonly string[] Derived =
     [
         nameof(Label), nameof(Code), nameof(PositionS), nameof(FileId), nameof(IsWatched), nameof(Missing), nameof(Progress),
-        nameof(HasProgress), nameof(StatusText), nameof(HasStatus), nameof(HasLabel), nameof(CanPlay), nameof(CanMarkWatched), nameof(WatchedText),
+        nameof(HasProgress), nameof(Meta), nameof(StatusText), nameof(HasStatus), nameof(HasLabel), nameof(CanPlay), nameof(CanMarkWatched), nameof(WatchedText),
     ];
 
     /// <summary>"E04"; null for a file with no episode.</summary>
@@ -195,6 +247,13 @@ public sealed partial class EpisodeItem : EditableItem
     public bool HasStatus => StatusText.Length > 0;
 
     public bool HasLabel => Label is not null;
+
+    /// <summary>The air date and length of an episode, or the path of a loose file; empty when nothing is known.</summary>
+    public string Meta { get; private set; } = "";
+
+    /// <summary>The episode the Play button starts: its row is marked.</summary>
+    [ObservableProperty]
+    public partial bool IsNext { get; internal set; }
 
     public bool CanPlay => FileId is not null && !Missing;
 

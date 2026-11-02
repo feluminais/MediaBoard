@@ -250,7 +250,7 @@
         <Style Selector="Button.card:focus-visible Border.frame">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
-        <Style Selector="StackPanel.dimmed, DockPanel.dimmed">
+        <Style Selector="StackPanel.dimmed, DockPanel.dimmed, Grid.dimmed">
             <Setter Property="Opacity" Value="0.5" />
         </Style>
 

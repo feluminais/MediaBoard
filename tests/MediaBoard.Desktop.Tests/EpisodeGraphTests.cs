@@ -49,7 +49,8 @@ public class EpisodeGraphTests
 
         Assert.Equal([true, false, false], layout.Columns.Select(c => c.Rail));
         Assert.Equal([0, 1, 2], layout.Columns.Select(c => c.Season));
-        Assert.Equal(GraphLayout.HeaderHeight + 10 * GraphLayout.Pitch - GraphLayout.Gap, layout.Size.Height);
+        var m = GraphMetrics.Regular;
+        Assert.Equal(m.HeaderHeight + 10 * m.Pitch - m.Gap, layout.Size.Height);
     }
 
     [Fact]
@@ -80,7 +81,8 @@ public class EpisodeGraphTests
 
         Assert.Equal(25, layout.Columns.Count);
         Assert.True(layout.Size.Width <= 980);
-        Assert.True(layout.Size.Height < 6 * (GraphLayout.HeaderHeight + GraphLayout.MaxRows * GraphLayout.Pitch));
+        var m = GraphMetrics.Regular;
+        Assert.True(layout.Size.Height < 6 * (m.HeaderHeight + m.MaxRows * m.Pitch));
     }
 
     [Fact]
@@ -102,7 +104,7 @@ public class EpisodeGraphTests
             {
                 var rect = layout.CellRect(column, row);
                 Assert.Equal((column.Season, column.Start + row), layout.HitTest(rect.Center));
-                Assert.Null(layout.HitTest(new Point(rect.Center.X, rect.Bottom + GraphLayout.Gap / 2)));
+                Assert.Null(layout.HitTest(new Point(rect.Center.X, rect.Bottom + layout.Metrics.Gap / 2)));
                 hits++;
             }
         }
@@ -135,8 +137,10 @@ public class EpisodeGraphTests
         Assert.Equal("9.7", episode.RatingText);
         Assert.Equal(RatingBand.Absolute, RatingBands.Of(episode.RoundedRating));
         Assert.Equal("?", new GraphEpisode(1, 1, "A", null, 0, null, null).RatingText);
-        Assert.Equal("Season 3 Episode 5 · 1,387 votes", new GraphEpisode(3, 5, "A", 8.2, 1387, null, null).Subtitle);
-        Assert.Equal("Season 3 Episode 5 · 1 vote", new GraphEpisode(3, 5, "A", 8.2, 1, null, null).Subtitle);
+        Assert.Equal("Season 3 Episode 5", new GraphEpisode(3, 5, "A", 8.2, 1387, null, null).Subtitle);
+        Assert.Equal("1,387 votes", new GraphEpisode(3, 5, "A", 8.2, 1387, null, null).Facts);
+        Assert.Equal("1 vote", new GraphEpisode(3, 5, "A", 8.2, 1, null, null).Facts);
+        Assert.Equal("Watched, 2021-03-12, 24 min", new GraphEpisode(1, 1, "A", null, 0, null, null, EpisodeState.Watched, 0, false, 24, "2021-03-12", "Watched").Facts);
     }
 
     // ---- The page ----
@@ -152,7 +156,7 @@ public class EpisodeGraphTests
         var graph = page.Graph!;
         await Ui.WaitUntil(() => graph.IsComplete);
 
-        Assert.Equal([page, graph], page.Rows);
+        Assert.Empty(page.Rows); // the graph sits above the list, not in it
         Assert.Equal([1, 2, 3], graph.Seasons.Select(s => s.Number));
         Assert.Equal([6, 4, 8], graph.Seasons.Select(s => s.Episodes.Count));
         Assert.DoesNotContain(_t.Search.SeasonRequests, r => r.Season == 0);
@@ -168,7 +172,7 @@ public class EpisodeGraphTests
         await movie.RefreshAsync();
 
         Assert.Null(movie.Graph);
-        Assert.Equal([movie], movie.Rows);
+        Assert.Empty(movie.Rows);
         Assert.Empty(_t.Search.SeasonRequests);
     }
 

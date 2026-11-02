@@ -23,6 +23,7 @@ public partial class EpisodeGraphView : UserControl
     {
         InitializeComponent();
         Graph.HoverChanged += OnHoverChanged;
+        Graph.Chosen += (_, e) => (DataContext as EpisodeGraphViewModel)?.Choose(e.Season, e.Episode);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)

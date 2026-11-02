@@ -49,6 +49,13 @@ public class FocusAndScaleTests
         window.UpdateLayout();
     }
 
+    // The list sits under the header and the graph, out of the first screen: bring it into view so its rows exist.
+    private static void ScrollToList(Window window, TitleView view)
+    {
+        view.GetVisualDescendants().OfType<ScrollViewer>().First().ScrollToEnd();
+        Settle(window);
+    }
+
     private static IInputElement? Focused(Window window) => window.FocusManager!.GetFocusedElement();
 
     // Season 1..seasons, perSeason episodes each; the first episode is watched when asked.
@@ -86,7 +93,9 @@ public class FocusAndScaleTests
 
         var (page, view, window) = await ShownTitle(2);
 
-        Assert.Equal(1 + 10 + 1000, page.Rows.Count);
+        // One season's episodes are listed at a time (the graph picks the season), every row the same height.
+        Assert.Equal(100, page.Rows.Count);
+        Assert.Equal(100 * TitleViewModel.RowHeight, page.ListHeight);
         Assert.InRange(view.GetVisualDescendants().OfType<Button>().Count(), 1, 400);
         window.Close();
     }
@@ -96,7 +105,8 @@ public class FocusAndScaleTests
     {
         LongShow(2, 10);
         var (page, view, window) = await ShownTitle(2);
-        var button = view.GetVisualDescendants().OfType<Button>().First(b => b.Content as string == "Mark watched" && b.Classes.Contains("small"));
+        ScrollToList(window, view);
+        var button = view.GetVisualDescendants().OfType<Button>().First(b => b.Content as string == "Mark watched" && b.Classes.Contains("rowAction"));
         button.Focus();
         Assert.Same(button, Focused(window));
 
@@ -115,6 +125,7 @@ public class FocusAndScaleTests
         LongShow(1, 5);
         var (page, view, window) = await ShownTitle(2);
         var episode = page.Seasons[0].Episodes[1];
+        ScrollToList(window, view);
         var rename = view.GetVisualDescendants().OfType<Button>().First(b => ReferenceEquals(b.Command, episode.BeginRenameCommand));
         rename.Focus();
 
