@@ -9,11 +9,16 @@
     <Button Classes="card" Command="{Binding OpenCommand}">
         <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
             <Panel Width="160" Height="240">
-                <Border Classes="frame" CornerRadius="8" ClipToBounds="True">
-                    <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="240" />
+                <!-- The poster and progress bar are clipped to the rounded corners; the hover ring is a separate border on top,
+                     so the image's square corners never poke over its inside edge. -->
+                <Border CornerRadius="8" ClipToBounds="True">
+                    <Panel>
+                        <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="240" />
+                        <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"
+                                     Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
+                    </Panel>
                 </Border>
-                <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"
-                             Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
+                <Border Classes="frame" CornerRadius="8" IsHitTestVisible="False" />
             </Panel>
             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                        ToolTip.Tip="{Binding Name}" />
