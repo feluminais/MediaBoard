@@ -337,10 +337,8 @@
                                     chrome:WindowDecorationProperties.ElementRole="TitleBar" />
                             <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0" VerticalAlignment="Center"
                                         IsHitTestVisible="False">
-                                <Border Width="18" Height="18" CornerRadius="5" Background="{DynamicResource AccentBrush}">
-                                    <Path Data="M7.2 5.6 L13.2 9 L7.2 12.4 Z" Fill="{DynamicResource OnAccentBrush}"
-                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
+                                <Image Source="avares://MediaBoard.Desktop/Assets/app-mark.png" Width="20" Height="20"
+                                       RenderOptions.BitmapInterpolationMode="HighQuality" />
                                 <TextBlock Text="{TemplateBinding Title}" FontSize="12" FontWeight="SemiBold"
                                            Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
                             </StackPanel>

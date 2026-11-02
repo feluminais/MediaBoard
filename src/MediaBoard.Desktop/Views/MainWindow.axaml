@@ -254,10 +254,8 @@
                     <Border DockPanel.Dock="Top" Height="40" Background="Transparent"
                             chrome:WindowDecorationProperties.ElementRole="TitleBar">
                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="20,0,0,0" VerticalAlignment="Center">
-                            <Border Width="20" Height="20" CornerRadius="6" Background="{DynamicResource AccentBrush}">
-                                <Path Data="M8 6.2 L14.2 10 L8 13.8 Z" Fill="{DynamicResource OnAccentBrush}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
+                            <Image Source="avares://MediaBoard.Desktop/Assets/app-mark.png" Width="26" Height="26"
+                                   RenderOptions.BitmapInterpolationMode="HighQuality" />
                             <TextBlock Text="MediaBoard" FontFamily="{StaticResource DisplayFont}" FontSize="14"
                                        FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
