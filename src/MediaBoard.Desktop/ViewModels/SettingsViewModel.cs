@@ -49,6 +49,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         try
         {
             FollowOtherPlayers = saved.FollowOtherPlayers;
+            MpcPort = saved.MpcWebPort.ToString(CultureInfo.InvariantCulture);
             VlcPort = saved.VlcWebPort.ToString(CultureInfo.InvariantCulture);
             VlcPassword = saved.VlcWebPassword ?? "";
         }
@@ -188,10 +189,15 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public string MpvLine => @"input-ipc-server=\\.\pipe\" + PlayerWatcher.MpvPipeName;
 
+    public string MpcHint => "MPC-HC and MPC-BE: turn on the web interface under Options, Player, and enter its port here.";
+
     public string VlcHint => "VLC: turn on Web under Interface, Main interfaces (show all settings), set its Lua password, and enter the port and password here.";
 
     [ObservableProperty]
     public partial bool FollowOtherPlayers { get; set; }
+
+    [ObservableProperty]
+    public partial string MpcPort { get; set; } = "";
 
     [ObservableProperty]
     public partial string VlcPort { get; set; } = "";
@@ -208,24 +214,42 @@ public sealed partial class SettingsViewModel : PageViewModel
         if (!_applying) Update(s => s with { FollowOtherPlayers = value });
     }
 
+    partial void OnMpcPortChanged(string value) => FollowStatus = "";
+
     partial void OnVlcPortChanged(string value) => FollowStatus = "";
 
     partial void OnVlcPasswordChanged(string value) => FollowStatus = "";
 
     [RelayCommand]
+    private void SaveMpc()
+    {
+        if (!TryReadPort(MpcPort, out var port)) return;
+
+        var saved = Update(s => s with { MpcWebPort = port });
+        MpcPort = port.ToString(CultureInfo.InvariantCulture);
+        FollowStatus = SaveStatus(saved);
+    }
+
+    private bool TryReadPort(string text, out int port)
+    {
+        if (int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535) return true;
+
+        FollowStatus = "The port is a number from 1 to 65535.";
+        return false;
+    }
+
+    private string SaveStatus(bool saved) => _readFailed ? UnreadableMessage : saved ? "Saved" : "Couldn't save. See the activity panel.";
+
+    [RelayCommand]
     private void SaveVlc()
     {
-        if (!int.TryParse(VlcPort.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535)
-        {
-            FollowStatus = "The port is a number from 1 to 65535.";
-            return;
-        }
+        if (!TryReadPort(VlcPort, out var port)) return;
 
         var password = VlcPassword.Trim();
         var saved = Update(s => s with { VlcWebPort = port, VlcWebPassword = password.Length == 0 ? null : password });
         VlcPort = port.ToString(CultureInfo.InvariantCulture);
         VlcPassword = password;
-        FollowStatus = _readFailed ? UnreadableMessage : saved ? "Saved" : "Couldn't save. See the activity panel.";
+        FollowStatus = SaveStatus(saved);
     }
 
     // ---- About ----

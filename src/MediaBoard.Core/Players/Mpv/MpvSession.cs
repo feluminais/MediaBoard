@@ -346,7 +346,7 @@ public sealed class MpvSession : IPlayerSession, IAttachableSession
         // Before the first file is open mpv has no path; that is not a file closing.
         if (file is null && !_pathSeen) return;
         _pathSeen = true;
-        if (SamePath(file, _currentFile)) return;
+        if (PlayerPaths.Same(file, _currentFile)) return;
 
         _currentFile = file;
         _loadedRaised = false;
@@ -354,25 +354,6 @@ public sealed class MpvSession : IPlayerSession, IAttachableSession
         _lastPositionStamp = null;
         lock (_gate) _lastTimePos = null;
         _pump.Raise(new PlaybackEvent.FileChanged(file));
-    }
-
-    private static bool SamePath(string? a, string? b)
-    {
-        if (a is null || b is null) return a is null && b is null;
-
-        return string.Equals(Normalize(a), Normalize(b), StringComparison.OrdinalIgnoreCase);
-
-        static string Normalize(string path)
-        {
-            try
-            {
-                return Path.IsPathRooted(path) ? Path.GetFullPath(path) : path;
-            }
-            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-            {
-                return path;
-            }
-        }
     }
 
     private void OnTimePos(TimeSpan at)

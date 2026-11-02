@@ -56,6 +56,13 @@
                 <CheckBox Content="{Binding FollowLabel}" IsChecked="{Binding FollowOtherPlayers}" />
                 <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding MpvHint}" />
                 <SelectableTextBlock Text="{Binding MpvLine}" FontFamily="Consolas" TextWrapping="Wrap" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding MpcHint}" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"
+                            Command="{Binding SaveMpcCommand}" />
+                    <TextBox Width="90" HorizontalAlignment="Left" Text="{Binding MpcPort}"
+                             PlaceholderText="MPC port" AutomationProperties.Name="MPC-HC port" />
+                </DockPanel>
                 <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlcHint}" />
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"

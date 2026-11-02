@@ -115,6 +115,40 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void SaveMpc_StoresThePort_AndLeavesVlcAlone()
+    {
+        var store = Store;
+        store.Save(new AppSettings { VlcWebPort = 9090, VlcWebPassword = "secret" });
+        var vm = Create(store);
+        Assert.Equal("13579", vm.MpcPort);
+        vm.MpcPort = " 13580 ";
+
+        vm.SaveMpcCommand.Execute(null);
+
+        var saved = Store.Load();
+        Assert.Equal(13580, saved.MpcWebPort);
+        Assert.Equal(9090, saved.VlcWebPort);
+        Assert.Equal("secret", saved.VlcWebPassword);
+        Assert.Equal("Saved", vm.FollowStatus);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [InlineData("70000")]
+    public void SaveMpc_BadPort_SavesNothingAndSaysSo(string port)
+    {
+        var vm = Create();
+        vm.MpcPort = port;
+
+        vm.SaveMpcCommand.Execute(null);
+
+        Assert.Equal(13579, Store.Load().MpcWebPort);
+        Assert.Equal("The port is a number from 1 to 65535.", vm.FollowStatus);
+    }
+
+    [Fact]
     public void SaveVlc_EmptyPassword_ClearsIt()
     {
         var store = Store;

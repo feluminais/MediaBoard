@@ -9,10 +9,13 @@ public sealed record AppSettings
     public string? CustomPlayerPath { get; init; }
 
     /// <summary>
-    /// Follow an mpv or VLC the viewer started without MediaBoard, when it was set up to listen (mpv's
-    /// <c>input-ipc-server</c>, VLC's web interface), and record the progress of the library files it plays.
+    /// Follow an mpv, VLC or MPC-HC the viewer started without MediaBoard, when it was set up to listen (mpv's
+    /// <c>input-ipc-server</c>, the web interface of the others), and record the progress of the library files it plays.
     /// </summary>
     public bool FollowOtherPlayers { get; init; } = true;
+
+    /// <summary>The port of the web interface of the viewer's own MPC-HC or MPC-BE (their default).</summary>
+    public int MpcWebPort { get; init; } = 13579;
 
     /// <summary>The port of the web interface of the viewer's own VLC.</summary>
     public int VlcWebPort { get; init; } = 8080;

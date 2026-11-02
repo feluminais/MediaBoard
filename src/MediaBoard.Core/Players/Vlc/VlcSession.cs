@@ -322,25 +322,11 @@ public sealed class VlcSession : IPlayerSession, IAttachableSession
         }
 
         _lastPlaylistId = status.PlaylistId;
-        if (string.Equals(NormalizePath(path), NormalizePath(_currentFile), StringComparison.OrdinalIgnoreCase)) return;
+        if (PlayerPaths.Same(path, _currentFile)) return;
 
         _currentFile = path;
         (_loadedRaised, _sawPlaying, _endedRaised, _lastState) = (false, false, false, null);
         _pump.Raise(new PlaybackEvent.FileChanged(path));
-    }
-
-    private static string NormalizePath(string? path)
-    {
-        if (string.IsNullOrEmpty(path)) return "";
-
-        try
-        {
-            return Path.GetFullPath(path);
-        }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return path;
-        }
     }
 
     private void Apply(VlcStatus status)

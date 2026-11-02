@@ -304,7 +304,7 @@ public sealed class MpcHcSession : IPlayerSession
         lock (_gate)
         {
             _nowPlaying = nowPlaying;
-            otherFile = !SamePath(nowPlaying.FileName, _filePath);
+            otherFile = !PlayerPaths.Same(nowPlaying.FileName, _filePath);
             if (otherFile)
             {
                 _filePath = nowPlaying.FileName;
@@ -314,21 +314,6 @@ public sealed class MpcHcSession : IPlayerSession
 
         if (otherFile) Raise(new PlaybackEvent.FileChanged(nowPlaying.FileName));
         RaiseLoadedOnce();
-    }
-
-    private static bool SamePath(string a, string b) =>
-        string.Equals(NormalizePath(a), NormalizePath(b), StringComparison.OrdinalIgnoreCase);
-
-    private static string NormalizePath(string path)
-    {
-        try
-        {
-            return Path.GetFullPath(path);
-        }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return path;
-        }
     }
 
     /// <summary>Loaded needs both the Loaded state and the now-playing duration; MPC-HC sends the state first.</summary>

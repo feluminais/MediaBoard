@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using MediaBoard.Core.Players;
+using MediaBoard.Core.Players.MpcHc;
 using MediaBoard.Core.Players.Mpv;
 using MediaBoard.Core.Players.Vlc;
 using MediaBoard.Core.Settings;
@@ -10,8 +11,8 @@ namespace MediaBoard.Core.Playback;
 /// Looks every few seconds for a player the viewer started without MediaBoard, and hands the one it finds to the
 /// playback service, so an episode watched that way keeps its progress too. It only looks while nothing is followed
 /// and <see cref="AppSettings.FollowOtherPlayers"/> is on. A player is found only if it was set up to listen: mpv
-/// with <c>input-ipc-server=\\.\pipe\mediaboard-mpv</c> in its <c>mpv.conf</c>, VLC with its web interface on and
-/// the port and password from the settings.
+/// with <c>input-ipc-server=\\.\pipe\mediaboard-mpv</c> in its <c>mpv.conf</c>, VLC and MPC-HC with their web
+/// interfaces on and the ports (and for VLC the password) from the settings.
 /// </summary>
 public sealed class PlayerWatcher : IAsyncDisposable
 {
@@ -51,13 +52,17 @@ public sealed class PlayerWatcher : IAsyncDisposable
         _interval = interval ?? DefaultInterval;
     }
 
-    /// <summary>mpv on its fixed pipe; VLC on its web interface, when VLC runs and a password is set.</summary>
+    /// <summary>
+    /// mpv on its fixed pipe; VLC on its web interface, when VLC runs and a password is set; MPC-HC or MPC-BE on its
+    /// web interface, when one of them runs.
+    /// </summary>
     public static IReadOnlyList<Probe> DefaultProbes { get; } =
     [
         _ => MpvSession.CreateAttached(MpvPipeName),
         s => !string.IsNullOrEmpty(s.VlcWebPassword) && IsRunning("vlc")
             ? VlcSession.CreateAttached(s.VlcWebPort, s.VlcWebPassword)
             : null,
+        s => RunningMpc() is { } name ? MpcHcWebSession.CreateAttached(name, s.MpcWebPort) : null,
     ];
 
     /// <summary>Starts looking. Call once.</summary>
@@ -124,6 +129,12 @@ public sealed class PlayerWatcher : IAsyncDisposable
             Trace.TraceError($"Looking for players stopped: {e}");
         }
     }
+
+    // Only a running player is tried, so nothing else on the web interface's port is asked.
+    private static string? RunningMpc() =>
+        IsRunning("mpc-hc64") || IsRunning("mpc-hc") ? "MPC-HC"
+        : IsRunning("mpc-be64") || IsRunning("mpc-be") ? "MPC-BE"
+        : null;
 
     private static bool IsRunning(string processName)
     {
