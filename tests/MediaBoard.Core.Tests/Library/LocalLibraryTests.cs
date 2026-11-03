@@ -540,6 +540,7 @@ public sealed class LocalLibraryTests : IDisposable
         var row = _library.Folders().Single(f => f.Id == folderB.Id);
         Assert.False(row.Enabled);
         Assert.Equal(1, row.FileCount);
+        Assert.Equal((1, 0), (row.ShowCount, row.MovieCount)); // a disabled folder still says what it holds
         var episodes = _library.Title(mixed)!.Seasons.SelectMany(s => s.Episodes).Where(e => e.FileId is not null).ToList();
         Assert.Single(episodes); // only the enabled folder's episode has a file
         Assert.Equal(["Mixed"], _library.Titles(TitleKind.Show, TitleSort.Name, false).Select(c => c.Name));

@@ -320,6 +320,21 @@ public sealed class FoldersViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task Summary_CountsShowsAndMovies_NotFiles()
+    {
+        var library = new FakeLibrary();
+        library.FolderRows.Add(FakeLibrary.Folder(1, @"G:\A") with { FileCount = 777, ShowCount = 3, MovieCount = 12 });
+        library.FolderRows.Add(FakeLibrary.Folder(2, @"G:\B") with { FileCount = 40, ShowCount = 1 });
+        library.FolderRows.Add(FakeLibrary.Folder(3, @"G:\C") with { FileCount = 5, MovieCount = 1 });
+        library.FolderRows.Add(FakeLibrary.Folder(4, @"G:\D") with { FileCount = 6 }); // nothing identified yet
+        var vm = CreateOver(library);
+
+        await vm.RefreshAsync();
+
+        Assert.Equal(["3 shows, 12 movies", "1 show", "1 movie", "6 files"], vm.Folders.Select(f => f.Summary));
+    }
+
+    [AvaloniaFact]
     public async Task ScanningFolder_ShowsItsProgress_LiveWithoutARefresh()
     {
         var library = new FakeLibrary();

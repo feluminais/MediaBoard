@@ -61,12 +61,14 @@ internal sealed class LibrarySnapshot
         IReadOnlyList<LibraryFolder> folders,
         List<FileEntry> files,
         Dictionary<int, int> fileCountByFolder,
+        Dictionary<int, (int Shows, int Movies)> titleCountByFolder,
         Dictionary<int, TitleRow> titles,
         Dictionary<(TargetKind, int), OverrideRow> overrides)
     {
         Folders = folders;
         Files = files;
         FileCountByFolder = fileCountByFolder;
+        TitleCountByFolder = titleCountByFolder;
         _overrides = overrides;
         FilesById = files.ToDictionary(f => f.Id);
 
@@ -93,6 +95,9 @@ internal sealed class LibrarySnapshot
 
     /// <summary>Media files per folder, disabled folders included (the Folders page still counts them).</summary>
     public Dictionary<int, int> FileCountByFolder { get; }
+
+    /// <summary>Distinct shows and movies the media files of each folder belong to, disabled folders included.</summary>
+    public Dictionary<int, (int Shows, int Movies)> TitleCountByFolder { get; }
 
     public Dictionary<int, FileEntry> FilesById { get; }
 
@@ -139,7 +144,24 @@ internal sealed class LibrarySnapshot
                 TitleId = (int?)r.TitleId,
             })
             .ToList();
+        var titles = connection.Query<TitleDto>(
+                """
+                SELECT id, tmdb_id AS TmdbId, kind, name, year, end_year AS EndYear, overview, rating, poster_path AS PosterPath
+                FROM titles
+                """)
+            .Select(r => new TitleRow(
+                (int)r.Id, (int?)r.TmdbId, r.Kind == "show" ? TitleKind.Show : TitleKind.Movie, r.Name, (int?)r.Year,
+                (int?)r.EndYear, r.Overview, r.Rating, r.PosterPath, null))
+            .ToDictionary(t => t.Id);
+
         var fileCountByFolder = files.GroupBy(f => f.FolderId).ToDictionary(g => g.Key, g => g.Count());
+        var titleCountByFolder = new Dictionary<int, (int Shows, int Movies)>();
+        foreach (var group in files.Where(f => f.TitleId is { } id && titles.ContainsKey(id)).GroupBy(f => f.FolderId))
+        {
+            var kinds = group.Select(f => f.TitleId!.Value).Distinct().Select(id => titles[id].Kind).ToList();
+            titleCountByFolder[group.Key] = (kinds.Count(k => k == TitleKind.Show), kinds.Count(k => k == TitleKind.Movie));
+        }
+
         var disabled = folders.Where(f => !f.Enabled).Select(f => f.Id).ToHashSet();
         if (disabled.Count > 0) files = files.Where(f => !disabled.Contains(f.FolderId)).ToList();
         var byId = files.ToDictionary(f => f.Id);
@@ -171,17 +193,7 @@ internal sealed class LibrarySnapshot
                           || (overrides.TryGetValue((TargetKind.File, file.Id), out var o) && o.Hidden);
         }
 
-        var titles = connection.Query<TitleDto>(
-                """
-                SELECT id, tmdb_id AS TmdbId, kind, name, year, end_year AS EndYear, overview, rating, poster_path AS PosterPath
-                FROM titles
-                """)
-            .Select(r => new TitleRow(
-                (int)r.Id, (int?)r.TmdbId, r.Kind == "show" ? TitleKind.Show : TitleKind.Movie, r.Name, (int?)r.Year,
-                (int?)r.EndYear, r.Overview, r.Rating, r.PosterPath, null))
-            .ToDictionary(t => t.Id);
-
-        return new LibrarySnapshot(folders, files, fileCountByFolder, titles, overrides);
+        return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides);
     }
 
     private static DateTime ParseTime(string text) =>

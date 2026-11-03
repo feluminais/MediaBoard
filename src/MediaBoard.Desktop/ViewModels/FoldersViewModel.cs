@@ -60,7 +60,17 @@ public sealed partial class FolderItem : ObservableObject
             ? "Unavailable. Reconnect the drive, or locate the folder."
             : scanFailed ? "Scan failed"
             : !row.Enabled ? "Disabled"
-            : row.FileCount switch { 0 => "No videos found", 1 => "1 file", var n => $"{n} files" };
+            : row.FileCount == 0 ? "No videos found"
+            : CountTitles(row) ?? (row.FileCount == 1 ? "1 file" : $"{row.FileCount} files");
+    }
+
+    /// <summary>"3 shows, 12 movies": what the folder holds, not how many files; null while none of its files has a title yet.</summary>
+    private static string? CountTitles(FolderRow row)
+    {
+        var parts = new List<string>(2);
+        if (row.ShowCount > 0) parts.Add(row.ShowCount == 1 ? "1 show" : $"{row.ShowCount} shows");
+        if (row.MovieCount > 0) parts.Add(row.MovieCount == 1 ? "1 movie" : $"{row.MovieCount} movies");
+        return parts.Count == 0 ? null : string.Join(", ", parts);
     }
 
     public int Id { get; }
@@ -79,7 +89,7 @@ public sealed partial class FolderItem : ObservableObject
 
     public string ToggleLabel => IsEnabled ? "Disable" : "Enable";
 
-    /// <summary>"Scanning… 120 of 810 files", "Waiting to scan", "No videos found", "12 files"…</summary>
+    /// <summary>"Scanning… 120 of 810 files", "Waiting to scan", "No videos found", "3 shows, 12 movies"…</summary>
     [ObservableProperty]
     public partial string Summary { get; private set; } = "";
 

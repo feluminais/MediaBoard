@@ -105,6 +105,8 @@ public sealed record ReviewItem(
 
 /// <param name="Unavailable">The folder could not be read (a drive that is not connected).</param>
 /// <param name="IgnoredFolders">Top-level folders with no video below them ("Ignored: no video"), as relative paths.</param>
+/// <param name="ShowCount">Shows the folder's files belong to; a show spread over several folders counts in each.</param>
+/// <param name="MovieCount">Movies the folder's files belong to.</param>
 public sealed record FolderRow(
     int Id,
     string Path,
@@ -112,7 +114,9 @@ public sealed record FolderRow(
     bool Hidden,
     bool Unavailable,
     int FileCount,
-    IReadOnlyList<string> IgnoredFolders);
+    IReadOnlyList<string> IgnoredFolders,
+    int ShowCount = 0,
+    int MovieCount = 0);
 
 /// <param name="MayDeletePermanently">
 /// The file is not on a fixed local disk (network or removable drive), where Windows may delete for good instead of

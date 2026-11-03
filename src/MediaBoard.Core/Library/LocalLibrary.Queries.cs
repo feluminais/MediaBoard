@@ -165,10 +165,11 @@ public sealed partial class LocalLibrary
         return snapshot.Folders.Select(folder =>
         {
             var scan = _scans.GetValueOrDefault(folder.Id);
+            var (shows, movies) = snapshot.TitleCountByFolder.GetValueOrDefault(folder.Id);
             return new FolderRow(
                 folder.Id, folder.Path, folder.Enabled, snapshot.IsHidden(TargetKind.Folder, folder.Id),
                 (scan?.Unavailable ?? false) || !Directory.Exists(folder.Path), counts.GetValueOrDefault(folder.Id),
-                scan?.IgnoredFolders ?? []);
+                scan?.IgnoredFolders ?? [], shows, movies);
         }).ToList();
     }
 
