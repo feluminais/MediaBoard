@@ -259,7 +259,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     }
 
     // The library's own hits, then TMDB hits the library already has (the local search missed them, for instance
-    // because it matched the original title): they open the local page and are not listed under Online again.
+    // because it matched the original title): they open the local page. Online lists them again, as the full TMDB page.
     private void AddLibraryGroup(List<PaletteRow> rows)
     {
         var shown = new HashSet<int>(_libraryHits.Select(h => h.TitleId));
@@ -283,7 +283,9 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         switch (_onlineState)
         {
             case OnlineState.Ok:
-                var hits = _onlineHits.Where(h => h.LibraryTitleId is null).Select(h => h.Candidate).ToList();
+                // Every hit is listed, library titles too: the library page only has the seasons on disk,
+                // the online page has all of them with their ratings.
+                var hits = _onlineHits.Select(h => h.Candidate).ToList();
                 if (hits.Count == 0) return;
                 rows.Add(Header(OnlineHeader));
                 rows.AddRange(hits.Select(c => Item(

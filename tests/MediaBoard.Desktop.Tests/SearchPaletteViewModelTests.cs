@@ -212,7 +212,7 @@ public class SearchPaletteViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task OnlineHitAlreadyInTheLibrary_IsAnItemOfTheLibraryGroup_NotShownTwice()
+    public async Task OnlineHitAlreadyInTheLibrary_IsInBothGroups_SoItsOnlinePageStaysReachable()
     {
         var rig = WithLibrary(FakeLibrary.Card(7, "The Matrix", year: 1999));
         rig.Search.Candidates.AddRange([Matrix, Severance]);
@@ -222,11 +222,16 @@ public class SearchPaletteViewModelTests
         await rig.TypeAsync("matrix");
         await rig.PauseAsync();
 
-        Assert.Equal(["Library", "The Matrix", "Severance"], rig.Texts);
+        Assert.Equal(["Library", "The Matrix", "Severance", "Online", "The Matrix", "Severance"], rig.Texts);
 
         rig.Palette.Rows[2].OpenCommand.Execute(null);
 
-        Assert.Equal(["title:9"], rig.Calls); // the local page, not the online one
+        Assert.Equal(["title:9"], rig.Calls); // the Library row opens the local page
+
+        rig.Palette.Rows[4].OpenCommand.Execute(null);
+
+        Assert.Equal(2, rig.Calls.Count);
+        Assert.StartsWith("online:", rig.Calls[1]); // the Online row opens the TMDB page, all seasons
     }
 
     [AvaloniaFact]
