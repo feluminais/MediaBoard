@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
@@ -179,6 +181,64 @@ public class HomeViewModelTests : IDisposable
         Assert.Contains("Recently added", texts);
         Assert.Contains("Klaus", texts);
         Assert.Contains("Coco", texts);
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 500, 0, 300, false)]   // down, page not at the bottom: the page scrolls
+    [InlineData(-1, 0, 500, 300, 300, true)]  // down, page at the bottom: the row scrolls
+    [InlineData(-1, 500, 500, 300, 300, false)] // down, row at its end: nothing left to scroll
+    [InlineData(1, 0, 500, 300, 300, false)]  // up, row at its start: the page scrolls up
+    [InlineData(1, 200, 500, 300, 300, true)] // up, row scrolled sideways: back to its start first
+    [InlineData(-1, 0, 0, 300, 300, false)]   // a row that fits never takes the wheel
+    [InlineData(-1, 0, 500, 0, 0, true)]      // a page that fits is always at its bottom
+    public void RowTakesWheel_OnlyAtTheBottomOfThePage(double deltaY, double rowX, double rowMax, double pageY, double pageMax, bool expected) =>
+        Assert.Equal(expected, HomeView.RowTakesWheel(deltaY, rowX, rowMax, pageY, pageMax));
+
+    [AvaloniaFact]
+    public async Task Wheel_ScrollsThePageFirst_ThenTheRowSideways_AndBack()
+    {
+        for (var i = 1; i <= 14; i++)
+        {
+            _library.Recent.Add(FakeLibrary.Card(i, $"Film {i}"));
+            _library.Continue.Add(FakeLibrary.Resume(i, $"Show {i}"));
+        }
+        var (_, home) = await LoadedHome();
+        var view = new HomeView { DataContext = home };
+        var window = new Window { Width = 700, Height = 420, Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var page = view.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "Page");
+        var rows = view.GetVisualDescendants().OfType<ScrollViewer>().Where(s => s.Classes.Contains("row")).ToList();
+        var row = rows[^1];
+        Assert.True(page.Extent.Height > page.Viewport.Height, "the page must overflow for this test");
+        Assert.True(row.Extent.Width > row.Viewport.Width, "the row must overflow for this test");
+
+        void Wheel(double y, ScrollViewer over)
+        {
+            var at = over.TranslatePoint(new Point(40, 40), window) ?? default;
+            window.MouseWheel(at, new Vector(0, y));
+            Ui.Flush();
+        }
+
+        Wheel(-1, rows[0]);
+        Assert.True(page.Offset.Y > 0);
+        Assert.Equal(0, rows[0].Offset.X);
+        Assert.Equal(0, row.Offset.X);
+
+        page.ScrollToEnd();
+        Ui.Flush();
+        var bottom = page.Offset.Y;
+        Wheel(-1, row);
+        Assert.Equal(bottom, page.Offset.Y);
+        Assert.True(row.Offset.X > 0);
+
+        Wheel(1, row);
+        Assert.Equal(0, row.Offset.X);
+        Assert.Equal(bottom, page.Offset.Y);
+
+        Wheel(1, row);
+        Assert.True(page.Offset.Y < bottom);
     }
 
     [AvaloniaFact]

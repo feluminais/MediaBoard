@@ -26,7 +26,7 @@
                     IsVisible="{Binding ShowKeyPrompt}" Command="{Binding AddKeyCommand}" />
         </StackPanel>
 
-        <ScrollViewer IsVisible="{Binding ShowRows}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="Page" IsVisible="{Binding ShowRows}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="32" Margin="0,0,0,16">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
