@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
@@ -77,6 +78,42 @@ public class HomeViewModelTests : IDisposable
         Assert.Equal("Not identified (offline)", home.RecentlyAdded[0].Subtitle);
         Assert.Equal(HomeViewModel.RowLimit, _library.Limits.First(l => l.Query == "ContinueWatching").Limit);
         Assert.False(home.NothingInProgress);
+    }
+
+    [AvaloniaFact]
+    public async Task ContinueCard_Remove_DropsItFromTheRowOnly()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
+        _library.Continue.Add(FakeLibrary.Resume(2, "Arcane"));
+        _library.Recent.Add(FakeLibrary.Card(3, "Coco"));
+        var (_, home) = await LoadedHome();
+        Assert.All(home.ContinueWatching, c => Assert.True(c.CanRemove));
+        Assert.False(home.RecentlyAdded[0].CanRemove);
+
+        home.ContinueWatching.Single(c => c.Name == "Klaus").RemoveCommand.Execute(null);
+
+        await Ui.WaitUntil(() => home.ContinueWatching.Count == 1);
+        Assert.Equal("Arcane", home.ContinueWatching[0].Name);
+        Assert.Contains("dismiss:1", _library.Edits);
+        Assert.Single(home.RecentlyAdded);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PosterCard_RightClick_OpensTheMenuOnlyOnAContinueCard(bool continueCard)
+    {
+        var card = continueCard
+            ? PosterCardViewModel.For(FakeLibrary.Resume(1, "Klaus"), Posters.None(), _ => { }, _ => { })
+            : PosterCardViewModel.For(FakeLibrary.Card(1, "Klaus"), Posters.None(), _ => { });
+        var view = new PosterCard { DataContext = card };
+        var window = new Window { Content = view };
+        window.Show();
+        var button = view.GetVisualDescendants().OfType<Button>().First();
+
+        button.RaiseEvent(new ContextRequestedEventArgs());
+
+        Assert.Equal(continueCard, button.ContextMenu!.IsOpen);
     }
 
     [AvaloniaFact]

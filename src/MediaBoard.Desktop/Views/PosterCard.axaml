@@ -8,6 +8,11 @@
                   Width="{DynamicResource PosterWidth}">
     <!-- Top-aligned: cards in a row stretch to the tallest one, and a card without a subtitle would otherwise sit centred in that height. -->
     <Button Classes="card" VerticalAlignment="Top" Command="{Binding OpenCommand}">
+        <Button.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Remove from list" Command="{Binding RemoveCommand}" />
+            </ContextMenu>
+        </Button.ContextMenu>
         <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
             <Panel Width="{DynamicResource PosterWidth}" Height="{DynamicResource PosterHeight}">
                 <!-- The poster and progress bar are clipped to the rounded corners; the hover ring is a separate border on top,

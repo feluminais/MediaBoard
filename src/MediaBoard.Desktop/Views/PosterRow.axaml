@@ -7,6 +7,11 @@
                   x:DataType="vm:PosterCardViewModel">
     <Button Classes="card" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
             Command="{Binding OpenCommand}">
+        <Button.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Remove from list" Command="{Binding RemoveCommand}" />
+            </ContextMenu>
+        </Button.ContextMenu>
         <DockPanel Classes.dimmed="{Binding IsDimmed}" Margin="0,4">
             <Panel DockPanel.Dock="Left" Width="48" Height="72" Margin="0,0,16,0">
                 <Border CornerRadius="6" ClipToBounds="True">

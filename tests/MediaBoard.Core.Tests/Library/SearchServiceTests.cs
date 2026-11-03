@@ -268,6 +268,8 @@ public sealed class SearchServiceTests : IDisposable
             _cards.Where(c => c.Name.Contains(query, StringComparison.OrdinalIgnoreCase)).Take(limit).ToList();
 
         public IReadOnlyList<ContinueItem> ContinueWatching(int limit) => throw new NotSupportedException();
+
+        public void DismissContinue(int titleId) => throw new NotSupportedException();
         public IReadOnlyList<TitleCard> RecentlyAdded(int limit) => throw new NotSupportedException();
         public IReadOnlyList<TitleCard> Titles(TitleKind kind, TitleSort sort, bool includeHidden) => throw new NotSupportedException();
         public TitleDetailsView? Title(int titleId) => throw new NotSupportedException();

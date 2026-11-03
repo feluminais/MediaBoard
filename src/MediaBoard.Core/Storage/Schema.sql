@@ -1,4 +1,4 @@
--- Schema v2 for a new database. Applied once by LibraryDatabase when PRAGMA user_version is 0; an older
+-- Schema v3 for a new database. Applied once by LibraryDatabase when PRAGMA user_version is 0; an older
 -- database is migrated step by step there instead.
 -- Timestamps are ISO 8601 text; booleans are 0/1 integers.
 -- Tables an overrides row can point at use AUTOINCREMENT so a deleted id is never reused (overrides has no foreign key).
@@ -84,6 +84,13 @@ CREATE TABLE progress (
     last_played TEXT
 );
 CREATE INDEX ix_progress_last_played ON progress(last_played);
+
+-- A title the user removed from Continue watching. played_at is the last_played of what the row showed then: the
+-- title comes back once something is played after it. Progress itself is left alone.
+CREATE TABLE continue_dismissed (
+    title_id  INTEGER PRIMARY KEY REFERENCES titles(id) ON DELETE CASCADE,
+    played_at TEXT    NOT NULL
+);
 
 -- target_id points at a title or a file depending on target_kind, so it has no foreign key.
 CREATE TABLE overrides (

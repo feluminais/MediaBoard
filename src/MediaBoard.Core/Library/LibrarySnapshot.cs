@@ -63,8 +63,10 @@ internal sealed class LibrarySnapshot
         Dictionary<int, int> fileCountByFolder,
         Dictionary<int, (int Shows, int Movies)> titleCountByFolder,
         Dictionary<int, TitleRow> titles,
-        Dictionary<(TargetKind, int), OverrideRow> overrides)
+        Dictionary<(TargetKind, int), OverrideRow> overrides,
+        Dictionary<int, DateTime> continueDismissed)
     {
+        ContinueDismissed = continueDismissed;
         Folders = folders;
         Files = files;
         FileCountByFolder = fileCountByFolder;
@@ -105,6 +107,9 @@ internal sealed class LibrarySnapshot
     public Dictionary<int, TitleRow> Titles { get; }
 
     public Dictionary<int, List<FileEntry>> FilesByTitle { get; }
+
+    /// <summary>Titles removed from Continue watching, with the last_played they showed then.</summary>
+    public Dictionary<int, DateTime> ContinueDismissed { get; }
 
     public string? NameOverride(TargetKind kind, int id) =>
         _overrides.TryGetValue((kind, id), out var row) ? row.DisplayName : null;
@@ -193,7 +198,10 @@ internal sealed class LibrarySnapshot
                           || (overrides.TryGetValue((TargetKind.File, file.Id), out var o) && o.Hidden);
         }
 
-        return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides);
+        var dismissed = connection.Query<DismissedDto>("SELECT title_id AS TitleId, played_at AS PlayedAt FROM continue_dismissed")
+            .ToDictionary(r => (int)r.TitleId, r => ParseTime(r.PlayedAt));
+
+        return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides, dismissed);
     }
 
     private static DateTime ParseTime(string text) =>
@@ -225,6 +233,12 @@ internal sealed class LibrarySnapshot
         public double DurationS { get; set; }
         public long Watched { get; set; }
         public string? LastPlayed { get; set; }
+    }
+
+    private sealed class DismissedDto
+    {
+        public long TitleId { get; set; }
+        public string PlayedAt { get; set; } = "";
     }
 
     private sealed class FileEpisodeDto

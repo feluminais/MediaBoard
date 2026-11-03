@@ -13,12 +13,15 @@ public sealed partial class PosterCardViewModel : ObservableObject
 {
     private readonly PosterLoader _loader;
     private readonly Action<PosterCardViewModel> _open;
+    private readonly Action<PosterCardViewModel>? _remove;
     private CancellationTokenSource? _request;
 
     private PosterCardViewModel(
         object source, string key, int titleId, int? fileId, string name, string? subtitle, string? detail,
-        string? posterPath, double progress, bool isDimmed, PosterLoader loader, Action<PosterCardViewModel> open)
+        string? posterPath, double progress, bool isDimmed, PosterLoader loader, Action<PosterCardViewModel> open,
+        Action<PosterCardViewModel>? remove = null)
     {
+        _remove = remove;
         Source = source;
         Key = key;
         TitleId = titleId;
@@ -72,18 +75,26 @@ public sealed partial class PosterCardViewModel : ObservableObject
     [ObservableProperty]
     public partial string? PosterLocalPath { get; private set; }
 
+    /// <summary>A Continue watching card can be taken off the list.</summary>
+    public bool CanRemove => _remove is not null;
+
     [RelayCommand]
     private void Open() => _open(this);
+
+    /// <summary>Takes the title off Continue watching; its progress stays.</summary>
+    [RelayCommand]
+    private void Remove() => _remove?.Invoke(this);
 
     public static PosterCardViewModel For(TitleCard card, PosterLoader loader, Action<PosterCardViewModel> open, bool withDate = false) =>
         new(card, $"t{card.TitleId}", card.TitleId, null, card.Name, TitleSubtitle(card),
             withDate ? "Added " + card.DateAdded.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture) : null,
             card.PosterPath, 0, card.Hidden || card.Missing, loader, open);
 
-    public static PosterCardViewModel For(ContinueItem item, PosterLoader loader, Action<PosterCardViewModel> open) =>
+    public static PosterCardViewModel For(
+        ContinueItem item, PosterLoader loader, Action<PosterCardViewModel> open, Action<PosterCardViewModel>? remove = null) =>
         new(item, $"f{item.FileId}", item.TitleId, item.FileId, item.TitleName, ContinueSubtitle(item), null,
             item.PosterPath, item.IsNext || item.DurationS <= 0 ? 0 : Math.Clamp(item.PositionS / item.DurationS, 0, 1),
-            item.Missing, loader, open);
+            item.Missing, loader, open, remove);
 
     /// <summary>
     /// Starts finding the poster unless it is found, being found, or there is none to find. Call when the card is

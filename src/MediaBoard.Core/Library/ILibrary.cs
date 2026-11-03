@@ -16,6 +16,12 @@ public interface ILibrary
     /// <summary>In-progress files and the next episode of shows that were being watched, most recently played first.</summary>
     IReadOnlyList<ContinueItem> ContinueWatching(int limit);
 
+    /// <summary>
+    /// Takes the title off <see cref="ContinueWatching"/> without touching its progress. It returns once something
+    /// of the title is played again.
+    /// </summary>
+    void DismissContinue(int titleId);
+
     /// <summary>Newest first by the date a file of the title was first seen. <c>int.MaxValue</c> returns the whole library.</summary>
     IReadOnlyList<TitleCard> RecentlyAdded(int limit);
 

@@ -25,10 +25,23 @@ public sealed partial class LocalLibrary
         foreach (var (titleId, title) in snapshot.Titles)
         {
             if (snapshot.IsTitleHidden(titleId)) continue;
-            if (ResumePoint(title, snapshot.FilesByTitle[titleId]) is { } point) items.Add(ContinueItemOf(snapshot, title, point));
+            if (ResumePoint(title, snapshot.FilesByTitle[titleId]) is not { } point) continue;
+            // Removed by the user; it returns when the title is played again.
+            if (snapshot.ContinueDismissed.TryGetValue(titleId, out var dismissedAt) && point.LastPlayed <= dismissedAt) continue;
+            items.Add(ContinueItemOf(snapshot, title, point));
         }
 
         return items.OrderByDescending(i => i.LastPlayed).ThenBy(i => i.TitleName, StringComparer.OrdinalIgnoreCase).Take(limit).ToList();
+    }
+
+    public void DismissContinue(int titleId)
+    {
+        var snapshot = LibrarySnapshot.Load(_db);
+        if (!snapshot.Titles.TryGetValue(titleId, out var title)) return;
+        if (ResumePoint(title, snapshot.FilesByTitle[titleId]) is not { } point) return;
+
+        _progress.DismissContinue(titleId, point.LastPlayed);
+        RaiseChanged();
     }
 
     public IReadOnlyList<TitleCard> RecentlyAdded(int limit)

@@ -49,6 +49,14 @@ internal sealed class FakeLibrary : ILibrary
         return Continue.OrderByDescending(i => i.LastPlayed).Take(limit).ToList();
     }
 
+    /// <summary>Removes the title's entry from <see cref="Continue"/> and raises <see cref="Changed"/>, as the real library does.</summary>
+    public void DismissContinue(int titleId)
+    {
+        lock (Edits) Edits.Add($"dismiss:{titleId}");
+        Continue.RemoveAll(i => i.TitleId == titleId);
+        RaiseChanged();
+    }
+
     public IReadOnlyList<TitleCard> RecentlyAdded(int limit)
     {
         OnQuery?.Invoke(nameof(RecentlyAdded));

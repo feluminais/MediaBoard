@@ -243,6 +243,58 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.Empty(_library.ContinueWatching(10));
     }
 
+    [Fact]
+    public async Task DismissContinue_RemovesTheTitleButKeepsItsProgress()
+    {
+        var heat = await Linked(@"Heat (1995).mkv", MovieTitle("Heat", 949, 1995));
+        Played(heat, 600, 7200, false, 11);
+        var titleId = _library.ContinueWatching(10).Single().TitleId;
+        _changed = 0;
+
+        _library.DismissContinue(titleId);
+
+        Assert.Empty(_library.ContinueWatching(10));
+        Assert.Equal(1, _changed);
+        Assert.Equal(600, Scalar<double>("SELECT position_s FROM progress WHERE file_id = @heat", new { heat }));
+        Assert.Equal(Utc(11), Scalar<string>("SELECT last_played FROM progress WHERE file_id = @heat", new { heat }));
+    }
+
+    [Fact]
+    public async Task DismissContinue_ReturnsWhenTheTitleIsPlayedAgain()
+    {
+        var show = ShowTitle("Skippy", 5, 4);
+        var e1 = await Linked(@"Skippy\Skippy.S01E01.mkv", show, (1, 1));
+        var e2 = await Linked(@"Skippy\Skippy.S01E02.mkv", show, (1, 2));
+        var e3 = await Linked(@"Skippy\Skippy.S01E03.mkv", show, (1, 3));
+        Played(e1, 0, 2000, true, 10);
+        _library.DismissContinue(show); // the next episode, e2, was on the list
+
+        Assert.Empty(_library.ContinueWatching(10));
+
+        Played(e2, 300, 2000, false, 12);
+        Assert.Equal(e2, Assert.Single(_library.ContinueWatching(10)).FileId);
+
+        // Removing it again hides what is shown now, not the earlier play.
+        _library.DismissContinue(show);
+        Assert.Empty(_library.ContinueWatching(10));
+        Played(e2, 0, 2000, true, 13);
+        Assert.Equal(e3, Assert.Single(_library.ContinueWatching(10)).FileId);
+    }
+
+    [Fact]
+    public async Task DismissContinue_TitleNotOnTheList_ChangesNothing()
+    {
+        var klaus = await Linked(@"Klaus (2019).mkv", MovieTitle("Klaus", 508439, 2019));
+        Played(klaus, 5000, 5400, true, 12);
+        _changed = 0;
+
+        _library.DismissContinue(Scalar<int>("SELECT id FROM titles LIMIT 1"));
+        _library.DismissContinue(9999);
+
+        Assert.Equal(0, _changed);
+        Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM continue_dismissed"));
+    }
+
     // ---- Recently added ----
 
     [Fact]

@@ -64,6 +64,21 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         }
     }
 
+    /// <summary>
+    /// Takes the title off Continue watching until something of it is played after <paramref name="playedAt"/>. The
+    /// progress rows are not touched.
+    /// </summary>
+    public void DismissContinue(int titleId, DateTime playedAt)
+    {
+        using var connection = db.Open();
+        connection.Execute(
+            """
+            INSERT INTO continue_dismissed(title_id, played_at) VALUES (@titleId, @playedAt)
+            ON CONFLICT(title_id) DO UPDATE SET played_at = excluded.played_at
+            """,
+            new { titleId, playedAt = FileStore.FormatTime(new DateTimeOffset(DateTime.SpecifyKind(playedAt, DateTimeKind.Utc))) });
+    }
+
     /// <summary>The ids of the episodes covered by a watched file, each once.</summary>
     public IReadOnlyList<int> WatchedEpisodeIds()
     {

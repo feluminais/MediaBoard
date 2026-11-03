@@ -10,7 +10,7 @@ namespace MediaBoard.Core.Storage;
 /// </summary>
 public sealed class LibraryDatabase
 {
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
     private const string SchemaResource = "Schema.sql";
 
     private readonly string _connectionString;
@@ -86,8 +86,19 @@ public sealed class LibraryDatabase
         }
         else
         {
-            // v1 to v2: the meta table. No parser version is recorded, so the stored parses are redone once.
-            Execute(connection, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+            if (version < 2)
+            {
+                // v1 to v2: the meta table. No parser version is recorded, so the stored parses are redone once.
+                Execute(connection, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+            }
+
+            if (version < 3)
+            {
+                // v2 to v3: titles removed from Continue watching.
+                Execute(connection,
+                    "CREATE TABLE continue_dismissed (" +
+                    "title_id INTEGER PRIMARY KEY REFERENCES titles(id) ON DELETE CASCADE, played_at TEXT NOT NULL)");
+            }
         }
 
         Execute(connection, $"PRAGMA user_version = {CurrentVersion}");

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using MediaBoard.Desktop.Controls;
 using MediaBoard.Desktop.ViewModels;
@@ -25,6 +26,12 @@ public abstract class PosterHost : UserControl
         {
             if (e.Property.Name == nameof(IsEffectivelyVisible)) Update();
         };
+
+        // Only a Continue watching card has a menu (to remove it); a right-click on any other card opens nothing.
+        AddHandler(ContextRequestedEvent, (_, e) =>
+        {
+            if (DataContext is not PosterCardViewModel { CanRemove: true }) e.Handled = true;
+        }, RoutingStrategies.Tunnel);
     }
 
     private bool Shown => _attached && !_parked && !_offScreen && IsEffectivelyVisible;
