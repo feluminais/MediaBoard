@@ -89,6 +89,47 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Display_ShowsTheSavedSizes_WithoutSavingThem()
+    {
+        var store = Store;
+        store.Save(new AppSettings { UiSizePercent = 130, PosterSize = PosterSize.Large, GrowWithWindow = false });
+        var changes = 0;
+        store.Changed += _ => changes++;
+
+        var vm = Create(store);
+
+        Assert.Equal(130, vm.SelectedUiSize?.Percent);
+        Assert.Equal(PosterSize.Large, vm.SelectedPosterSize?.Size);
+        Assert.False(vm.GrowWithWindow);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void Display_DefaultsTo100PercentMediumPosters_GrowingWithTheWindow()
+    {
+        var vm = Create();
+
+        Assert.Equal("100%", vm.SelectedUiSize?.Label);
+        Assert.Equal(PosterSize.Medium, vm.SelectedPosterSize?.Size);
+        Assert.True(vm.GrowWithWindow);
+    }
+
+    [Fact]
+    public void Display_EachChoiceIsSaved()
+    {
+        var vm = Create();
+
+        vm.SelectedUiSize = vm.UiSizeOptions.Single(o => o.Percent == 115);
+        vm.SelectedPosterSize = vm.PosterSizeOptions.Single(o => o.Size == PosterSize.Small);
+        vm.GrowWithWindow = false;
+
+        var saved = Store.Load();
+        Assert.Equal(115, saved.UiSizePercent);
+        Assert.Equal(PosterSize.Small, saved.PosterSize);
+        Assert.False(saved.GrowWithWindow);
+    }
+
+    [Fact]
     public void FollowOtherPlayers_ToggleIsSaved()
     {
         var vm = Create();

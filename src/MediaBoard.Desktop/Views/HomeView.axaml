@@ -40,7 +40,7 @@
                         <ItemsControl ItemsSource="{Binding ContinueWatching}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,0,0,12" />
+                                    <StackPanel Orientation="Horizontal" Spacing="{DynamicResource PosterGap}" Margin="0,0,0,12" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                         </ItemsControl>
@@ -63,7 +63,7 @@
                         <ItemsControl ItemsSource="{Binding RecentlyAdded}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,0,0,12" />
+                                    <StackPanel Orientation="Horizontal" Spacing="{DynamicResource PosterGap}" Margin="0,0,0,12" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                         </ItemsControl>

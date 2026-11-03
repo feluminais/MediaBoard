@@ -5,16 +5,16 @@
                   xmlns:controls="using:MediaBoard.Desktop.Controls"
                   x:Class="MediaBoard.Desktop.Views.PosterCard"
                   x:DataType="vm:PosterCardViewModel"
-                  Width="160">
+                  Width="{DynamicResource PosterWidth}">
     <!-- Top-aligned: cards in a row stretch to the tallest one, and a card without a subtitle would otherwise sit centred in that height. -->
     <Button Classes="card" VerticalAlignment="Top" Command="{Binding OpenCommand}">
         <StackPanel Spacing="6" Classes.dimmed="{Binding IsDimmed}">
-            <Panel Width="160" Height="240">
+            <Panel Width="{DynamicResource PosterWidth}" Height="{DynamicResource PosterHeight}">
                 <!-- The poster and progress bar are clipped to the rounded corners; the hover ring is a separate border on top,
                      so the image's square corners never poke over its inside edge. -->
                 <Border CornerRadius="8" ClipToBounds="True">
                     <Panel>
-                        <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="240" />
+                        <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="{DynamicResource PosterDecodeWidth}" />
                         <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"
                                      Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
                     </Panel>
@@ -23,7 +23,7 @@
             </Panel>
             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                        ToolTip.Tip="{Binding Name}" />
-            <TextBlock Classes="muted" Text="{Binding Subtitle}" FontSize="12" TextTrimming="CharacterEllipsis"
+            <TextBlock Classes="muted" Text="{Binding Subtitle}" FontSize="{DynamicResource SmallFontSize}" TextTrimming="CharacterEllipsis"
                        IsVisible="{Binding HasSubtitle}" />
         </StackPanel>
     </Button>

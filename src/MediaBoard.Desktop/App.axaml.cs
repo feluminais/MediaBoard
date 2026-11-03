@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using MediaBoard.Desktop.Sizing;
 using MediaBoard.Desktop.ViewModels;
 using MediaBoard.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +30,8 @@ public partial class App : Application
             _services = Composition.Build();
             _services.GetRequiredService<ErrorReporter>().Install();
             var window = new MainWindow { DataContext = _services.GetRequiredService<MainWindowViewModel>() };
+            // Kept alive by the window and settings events it listens to.
+            _ = new UiSizeController(window, _services.GetRequiredService<Core.Settings.SettingsStore>(), Resources);
             _services.GetRequiredService<Dialogs>().Owner = window;
             desktop.MainWindow = window;
             window.Closing += OnMainWindowClosing;

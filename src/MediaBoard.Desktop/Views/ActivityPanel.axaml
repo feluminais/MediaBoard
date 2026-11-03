@@ -34,7 +34,7 @@
                                     <SelectableTextBlock Text="{Binding Message}" TextWrapping="Wrap" IsTabStop="False"
                                                          Classes.error="{Binding IsError}"
                                                          Classes.warning="{Binding IsWarning}" />
-                                    <SelectableTextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" FontSize="12" IsTabStop="False"
+                                    <SelectableTextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}" IsTabStop="False"
                                                          IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 </StackPanel>
                             </Grid>

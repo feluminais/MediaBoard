@@ -18,7 +18,7 @@
                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                 <TextBlock Classes="muted" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis"
                            IsVisible="{Binding HasSubtitle}" />
-                <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" TextTrimming="CharacterEllipsis"
+                <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="{DynamicResource SmallFontSize}" TextTrimming="CharacterEllipsis"
                            IsVisible="{Binding HasDetail}" />
                 <ProgressBar Height="4" MinHeight="0" Minimum="0" Maximum="1" MaxWidth="240" HorizontalAlignment="Left"
                              Value="{Binding Progress}" IsVisible="{Binding HasProgress}" Margin="0,4,0,0" />

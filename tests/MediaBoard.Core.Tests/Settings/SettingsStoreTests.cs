@@ -26,6 +26,17 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SettingsStore_WritesThePosterSizeByName()
+    {
+        var store = new SettingsStore(SettingsPath);
+
+        store.Save(new AppSettings { PosterSize = PosterSize.Large, UiSizePercent = 115 });
+
+        Assert.Contains("\"posterSize\": \"Large\"", File.ReadAllText(SettingsPath));
+        Assert.Equal(PosterSize.Large, new SettingsStore(SettingsPath).Load().PosterSize);
+    }
+
+    [Fact]
     public void SettingsStore_MissingFile_ReturnsDefaults()
     {
         var loaded = new SettingsStore(SettingsPath).Load();

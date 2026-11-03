@@ -34,11 +34,12 @@
             <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <ItemsRepeater x:Name="Cards" ItemsSource="{Binding Items}">
                     <ItemsRepeater.Layout>
+                        <!-- The cell size follows the poster size resources; GridView binds them. -->
                         <UniformGridLayout MinItemWidth="176" MinItemHeight="304" ItemsStretch="None" />
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="vm:PosterCardViewModel">
-                            <views:PosterCard Margin="0,0,16,12" />
+                            <views:PosterCard Margin="{DynamicResource PosterCardMargin}" />
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>

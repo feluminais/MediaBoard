@@ -41,7 +41,7 @@
                                     </StackPanel>
                                     <StackPanel Margin="0,0,12,0">
                                         <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Path}" TextTrimming="CharacterEllipsis" IsTabStop="False" />
+                                        <SelectableTextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Path}" TextTrimming="CharacterEllipsis" IsTabStop="False" />
                                     </StackPanel>
                                 </DockPanel>
 
@@ -56,7 +56,7 @@
                                                 </Border>
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" />
+                                                    <TextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Detail}" />
                                                 </StackPanel>
                                             </DockPanel>
                                         </DataTemplate>

@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Layout;
 using MediaBoard.Desktop.Controls;
 
 namespace MediaBoard.Desktop.Views;
@@ -13,6 +14,13 @@ public partial class GridView : UserControl
     public GridView()
     {
         InitializeComponent();
+
+        // The cells follow the poster size, which changes with the Display settings and the window's width.
+        if (Cards.Layout is UniformGridLayout layout)
+        {
+            layout.Bind(UniformGridLayout.MinItemWidthProperty, this.GetResourceObservable("PosterCellWidth"));
+            layout.Bind(UniformGridLayout.MinItemHeightProperty, this.GetResourceObservable("PosterCellHeight"));
+        }
 
         // The repeater keeps the cards it scrolled past in a pool, still in the tree, and may keep an early view
         // realized: tell the cards, so they stop asking for posters and let go of their bitmaps until they are

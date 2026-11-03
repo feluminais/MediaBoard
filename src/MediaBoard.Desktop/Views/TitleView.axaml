@@ -23,7 +23,7 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="8,4" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
@@ -69,7 +69,7 @@
                         <TextBlock Classes="muted" Text="{Binding NotFoundText}" IsVisible="{Binding NotFound}" />
                         <StackPanel Spacing="4" IsVisible="{Binding HasOfflineMessage}">
                             <Border Classes="tag" HorizontalAlignment="Left" IsVisible="{Binding HasTag}">
-                                <TextBlock Text="{Binding Tag}" FontSize="12" />
+                                <TextBlock Text="{Binding Tag}" FontSize="{DynamicResource SmallFontSize}" />
                             </Border>
                             <TextBlock Classes="emptyTitle" Text="{Binding OfflineMessage}" />
                             <TextBlock Classes="muted" Text="Connect to the internet to load details."
@@ -77,9 +77,9 @@
                         </StackPanel>
 
                         <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowDetails}">
-                            <Border Grid.Column="0" Width="220" Height="330" CornerRadius="10" ClipToBounds="True"
+                            <Border Grid.Column="0" Width="{DynamicResource TitlePosterWidth}" Height="{DynamicResource TitlePosterHeight}" CornerRadius="10" ClipToBounds="True"
                                     VerticalAlignment="Top" Margin="0,0,28,0">
-                                <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Header.Name}" DecodeWidth="360" />
+                                <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Header.Name}" DecodeWidth="{DynamicResource TitlePosterDecodeWidth}" />
                             </Border>
 
                             <StackPanel Grid.Column="1" Spacing="12">
@@ -105,10 +105,10 @@
                                     <TextBlock Text="{Binding RatingText}" VerticalAlignment="Center"
                                                IsVisible="{Binding RatingText, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                     <Border Classes="tag" IsVisible="{Binding HasTag}">
-                                        <TextBlock Text="{Binding Tag}" FontSize="12" />
+                                        <TextBlock Text="{Binding Tag}" FontSize="{DynamicResource SmallFontSize}" />
                                     </Border>
                                     <Border Classes="tag" IsVisible="{Binding ShowHiddenTag}">
-                                        <TextBlock Text="Hidden" FontSize="12" />
+                                        <TextBlock Text="Hidden" FontSize="{DynamicResource SmallFontSize}" />
                                     </Border>
                                 </StackPanel>
 
@@ -190,7 +190,7 @@
                                     </controls:RenameBox.KeyBindings>
                                 </controls:RenameBox>
                             </DockPanel>
-                            <TextBlock Classes="muted" FontSize="13" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="muted" FontSize="{DynamicResource MetaFontSize}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                             <Button Content="Rename" Classes="rowAction" Command="{Binding BeginRenameCommand}" />
@@ -220,9 +220,9 @@
                             <!-- Name and meta, renamed in place: both lines are always there, so every row is the same height. -->
                             <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0" IsVisible="{Binding !IsEditing}">
                                 <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Meta}" TextTrimming="CharacterEllipsis" MinHeight="16" />
+                                <TextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Meta}" TextTrimming="CharacterEllipsis" MinHeight="16" />
                             </StackPanel>
-                            <TextBlock Grid.Column="3" Classes="muted" FontSize="13" Text="{Binding StatusText}" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="3" Classes="muted" FontSize="{DynamicResource MetaFontSize}" Text="{Binding StatusText}" VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsEditing}" />
                             <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="0,0,4,0">
                                 <Panel Width="64">

@@ -50,7 +50,7 @@
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Padding" Value="12,0" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="{DynamicResource NavItemHeight}" />
             <Setter Property="CornerRadius" Value="8" />
         </Style>
         <Style Selector="Button.nav /template/ ContentPresenter#PART_ContentPresenter">
@@ -125,13 +125,13 @@
             <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Height" Value="28" />
+            <Setter Property="Height" Value="{DynamicResource SearchPillHeight}" />
             <Setter Property="Padding" Value="10,0" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="{DynamicResource MetaFontSize}" />
         </Style>
         <Style Selector="Button.searchPill /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
@@ -148,7 +148,7 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="16,0" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalAlignment" Value="Stretch" />
@@ -169,7 +169,7 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
             <Setter Property="Padding" Value="16,0" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="VerticalAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -247,7 +247,7 @@
                                  IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsActivityOpen}" />
 
             <!-- Sidebar: runs the full height, so the mark sits in the title strip's band. -->
-            <Border DockPanel.Dock="Left" Width="220"
+            <Border DockPanel.Dock="Left" Width="{DynamicResource SidebarWidth}"
                     Background="{DynamicResource SidebarBrush}"
                     BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
                 <DockPanel>
@@ -256,7 +256,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="20,0,0,0" VerticalAlignment="Center">
                             <Image Source="avares://MediaBoard.Desktop/Assets/app-mark.png" Width="26" Height="26"
                                    RenderOptions.BitmapInterpolationMode="HighQuality" />
-                            <TextBlock Text="MediaBoard" FontFamily="{StaticResource DisplayFont}" FontSize="14"
+                            <TextBlock Text="MediaBoard" FontFamily="{StaticResource DisplayFont}" FontSize="{DynamicResource BodyFontSize}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
@@ -312,7 +312,7 @@
                                 chrome:WindowDecorationProperties.ElementRole="User">
                             <DockPanel>
                                 <Border DockPanel.Dock="Right" Classes="kbd" VerticalAlignment="Center">
-                                    <TextBlock Text="Ctrl+F" FontSize="11" />
+                                    <TextBlock Text="Ctrl+F" FontSize="{DynamicResource CaptionFontSize}" />
                                 </Border>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Path Classes="icon search" />
@@ -334,7 +334,7 @@
                     </Grid>
                 </Border>
 
-                <ContentControl x:Name="PageHost" Content="{Binding CurrentPage}" Margin="32,12,32,0" />
+                <ContentControl x:Name="PageHost" Content="{Binding CurrentPage}" Margin="{DynamicResource PageMargin}" />
             </DockPanel>
         </DockPanel>
 

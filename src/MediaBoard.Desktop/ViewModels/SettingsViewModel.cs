@@ -52,6 +52,10 @@ public sealed partial class SettingsViewModel : PageViewModel
             MpcPort = saved.MpcWebPort.ToString(CultureInfo.InvariantCulture);
             VlcPort = saved.VlcWebPort.ToString(CultureInfo.InvariantCulture);
             VlcPassword = saved.VlcWebPassword ?? "";
+            SelectedUiSize = UiSizeOptions.FirstOrDefault(o => o.Percent == saved.UiSizePercent)
+                ?? UiSizeOptions.First(o => o.Percent == 100);
+            SelectedPosterSize = PosterSizeOptions.First(o => o.Size == saved.PosterSize);
+            GrowWithWindow = saved.GrowWithWindow;
         }
         finally
         {
@@ -252,6 +256,49 @@ public sealed partial class SettingsViewModel : PageViewModel
         FollowStatus = SaveStatus(saved);
     }
 
+    // ---- Display ----
+
+    public string DisplayTitle => "Display";
+
+    public string GrowLabel => "Grow with window";
+
+    public string GrowHint => "Text and posters get bigger when the window is wide.";
+
+    /// <summary>The size of text and controls. Saving it resizes the app at once (Sizing.UiSizeController).</summary>
+    public IReadOnlyList<UiSizeOption> UiSizeOptions { get; } =
+        Sizing.UiSizes.UiSizeChoices.Select(p => new UiSizeOption(p, $"{p}%")).ToList();
+
+    public IReadOnlyList<PosterSizeOption> PosterSizeOptions { get; } =
+    [
+        new(PosterSize.Small, "Small"),
+        new(PosterSize.Medium, "Medium"),
+        new(PosterSize.Large, "Large"),
+    ];
+
+    [ObservableProperty]
+    public partial UiSizeOption? SelectedUiSize { get; set; }
+
+    [ObservableProperty]
+    public partial PosterSizeOption? SelectedPosterSize { get; set; }
+
+    [ObservableProperty]
+    public partial bool GrowWithWindow { get; set; }
+
+    partial void OnSelectedUiSizeChanged(UiSizeOption? value)
+    {
+        if (!_applying && value is not null) Update(s => s with { UiSizePercent = value.Percent });
+    }
+
+    partial void OnSelectedPosterSizeChanged(PosterSizeOption? value)
+    {
+        if (!_applying && value is not null) Update(s => s with { PosterSize = value.Size });
+    }
+
+    partial void OnGrowWithWindowChanged(bool value)
+    {
+        if (!_applying) Update(s => s with { GrowWithWindow = value });
+    }
+
     // ---- About ----
 
     public string AppName => "MediaBoard";
@@ -298,3 +345,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
     }
 }
+
+public sealed record UiSizeOption(int Percent, string Label);
+
+public sealed record PosterSizeOption(PosterSize Size, string Label);

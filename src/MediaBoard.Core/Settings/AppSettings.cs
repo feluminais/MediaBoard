@@ -25,4 +25,21 @@ public sealed record AppSettings
 
     /// <summary>Full path to ffprobe.exe; null looks "ffprobe" up on PATH.</summary>
     public string? FfprobePath { get; init; }
+
+    /// <summary>The size of text and controls, in percent of the default, on top of Windows' own display scaling.</summary>
+    public int UiSizePercent { get; init; } = 100;
+
+    /// <summary>The size of the poster cards in the grids and Home rows.</summary>
+    public PosterSize PosterSize { get; init; } = PosterSize.Medium;
+
+    /// <summary>Text and posters step up in a wide window (UiSizes in the desktop app); off keeps the chosen sizes at every width.</summary>
+    public bool GrowWithWindow { get; init; } = true;
+}
+
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<PosterSize>))]
+public enum PosterSize
+{
+    Small,
+    Medium,
+    Large,
 }

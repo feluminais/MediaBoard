@@ -12,7 +12,7 @@
             <Button x:Name="DeleteButton" Content="Delete" MinWidth="88" Classes="accent" />
         </StackPanel>
         <StackPanel Spacing="10">
-            <TextBlock Text="{Binding Heading}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Heading}" FontSize="{DynamicResource DialogTitleFontSize}" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="{Binding Intro}" TextWrapping="Wrap" />
             <TextBlock Classes="muted" Text="{Binding SizeText}" />
             <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
@@ -25,8 +25,8 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:PathRow">
                             <StackPanel Margin="0,0,0,6">
-                                <SelectableTextBlock Text="{Binding Path}" TextWrapping="Wrap" FontSize="12" IsTabStop="False" />
-                                <TextBlock Classes="muted" Text="{Binding Note}" FontSize="12"
+                                <SelectableTextBlock Text="{Binding Path}" TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}" IsTabStop="False" />
+                                <TextBlock Classes="muted" Text="{Binding Note}" FontSize="{DynamicResource SmallFontSize}"
                                            IsVisible="{Binding Note, Converter={x:Static ObjectConverters.IsNotNull}}" />
                             </StackPanel>
                         </DataTemplate>

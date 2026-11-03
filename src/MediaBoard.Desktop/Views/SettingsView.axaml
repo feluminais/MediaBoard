@@ -5,7 +5,7 @@
              x:Class="MediaBoard.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
     <ScrollViewer>
-        <StackPanel Spacing="16" MaxWidth="640" HorizontalAlignment="Left" Margin="0,0,0,16">
+        <StackPanel Spacing="16" MaxWidth="{DynamicResource ReadingWidth}" HorizontalAlignment="Left" Margin="0,0,0,16">
             <TextBlock Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,4" />
 
             <Border Classes="panel">
@@ -47,6 +47,34 @@
                 </DockPanel>
                 <TextBlock Text="{Binding InUse}" TextWrapping="Wrap" />
                 <SelectableTextBlock Classes="muted" Text="{Binding InUseDetail}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="{Binding DisplayTitle}" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="8">
+                    <TextBlock Text="UI size" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinWidth="140" ItemsSource="{Binding UiSizeOptions}"
+                              SelectedItem="{Binding SelectedUiSize}" AutomationProperties.Name="UI size">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UiSizeOption">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Grid.Row="1" Text="Poster size" VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="140" ItemsSource="{Binding PosterSizeOptions}"
+                              SelectedItem="{Binding SelectedPosterSize}" AutomationProperties.Name="Poster size">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PosterSizeOption">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+                <CheckBox Content="{Binding GrowLabel}" IsChecked="{Binding GrowWithWindow}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding GrowHint}" />
             </StackPanel>
             </Border>
 

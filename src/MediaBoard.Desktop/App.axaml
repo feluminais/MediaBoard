@@ -18,6 +18,34 @@
             <CornerRadius x:Key="PanelRadius">10</CornerRadius>
             <CornerRadius x:Key="ChipRadius">6</CornerRadius>
 
+            <!-- Sizes: the defaults (100%, medium posters, a normal window). Sizing/UiSizes writes the live values over
+                 these from the Display settings and the window's width; every view reads them as DynamicResource. -->
+            <x:Double x:Key="CaptionFontSize">11</x:Double>
+            <x:Double x:Key="SmallFontSize">12</x:Double>
+            <x:Double x:Key="MetaFontSize">13</x:Double>
+            <x:Double x:Key="BodyFontSize">14</x:Double>
+            <x:Double x:Key="ControlContentThemeFontSize">14</x:Double>
+            <x:Double x:Key="RowTitleFontSize">17</x:Double>
+            <x:Double x:Key="DialogTitleFontSize">18</x:Double>
+            <x:Double x:Key="EmptyTitleFontSize">20</x:Double>
+            <x:Double x:Key="OpenAllFontSize">22</x:Double>
+            <x:Double x:Key="PageTitleFontSize">28</x:Double>
+            <x:Double x:Key="PosterWidth">160</x:Double>
+            <x:Double x:Key="PosterHeight">240</x:Double>
+            <x:Int32 x:Key="PosterDecodeWidth">240</x:Int32>
+            <x:Double x:Key="PosterGap">16</x:Double>
+            <Thickness x:Key="PosterCardMargin">0,0,16,12</Thickness>
+            <x:Double x:Key="PosterCellWidth">176</x:Double>
+            <x:Double x:Key="PosterCellHeight">304</x:Double>
+            <x:Double x:Key="TitlePosterWidth">220</x:Double>
+            <x:Double x:Key="TitlePosterHeight">330</x:Double>
+            <x:Int32 x:Key="TitlePosterDecodeWidth">360</x:Int32>
+            <x:Double x:Key="SidebarWidth">220</x:Double>
+            <x:Double x:Key="NavItemHeight">36</x:Double>
+            <x:Double x:Key="ReadingWidth">640</x:Double>
+            <x:Double x:Key="SearchPillHeight">28</x:Double>
+            <Thickness x:Key="PageMargin">32,12,32,0</Thickness>
+
             <ResourceDictionary.ThemeDictionaries>
                 <!-- Light: lavender paper, one deep violet. -->
                 <ResourceDictionary x:Key="Light">
@@ -155,6 +183,7 @@
 
         <Style Selector="Window">
             <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}" />
         </Style>
 
         <!-- Text -->
@@ -163,17 +192,17 @@
         </Style>
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
-            <Setter Property="FontSize" Value="28" />
+            <Setter Property="FontSize" Value="{DynamicResource PageTitleFontSize}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="TextBlock.rowTitle">
             <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
-            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontSize" Value="{DynamicResource RowTitleFontSize}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="TextBlock.emptyTitle">
             <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
-            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontSize" Value="{DynamicResource EmptyTitleFontSize}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
@@ -201,7 +230,7 @@
         </Style>
         <Style Selector="Button.small">
             <Setter Property="Padding" Value="10,4" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
         </Style>
         <Style Selector="Button.textLink">
             <Setter Property="Background" Value="Transparent" />
@@ -225,7 +254,7 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="6,0" />
-            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontSize" Value="{DynamicResource OpenAllFontSize}" />
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
         </Style>
         <Style Selector="Button.openAll:pointerover /template/ ContentPresenter#PART_ContentPresenter">
@@ -349,7 +378,7 @@
                                         IsHitTestVisible="False">
                                 <Image Source="avares://MediaBoard.Desktop/Assets/app-mark.png" Width="20" Height="20"
                                        RenderOptions.BitmapInterpolationMode="HighQuality" />
-                                <TextBlock Text="{TemplateBinding Title}" FontSize="12" FontWeight="SemiBold"
+                                <TextBlock Text="{TemplateBinding Title}" FontSize="{DynamicResource SmallFontSize}" FontWeight="SemiBold"
                                            Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
                             </StackPanel>
                             <!-- The content is the word, for screen readers and tests; the template draws the cross. -->
