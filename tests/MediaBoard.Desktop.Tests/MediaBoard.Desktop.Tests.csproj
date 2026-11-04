@@ -15,6 +15,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <!-- 18.0.6 is the newest that loads under xunit.v3 3.2.2 (MTP v1); 18.1+ throws TypeLoadException. -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.6" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaBoard.Desktop\MediaBoard.Desktop.csproj" />

@@ -1,0 +1,12 @@
+[*.cs]
+# Tests: culture, comparer and naming rules add nothing here.
+dotnet_diagnostic.MA0002.severity = none
+dotnet_diagnostic.MA0011.severity = none
+dotnet_diagnostic.MA0015.severity = none
+dotnet_diagnostic.MA0016.severity = none
+dotnet_diagnostic.MA0074.severity = none
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1310.severity = none
+dotnet_diagnostic.CA1816.severity = none
+dotnet_diagnostic.CA1861.severity = none

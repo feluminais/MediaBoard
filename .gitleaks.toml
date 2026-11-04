@@ -1,0 +1,12 @@
+title = "MediaBoard"
+
+[extend]
+useDefault = true
+
+# Dummy API key and JWT-shaped strings used as test fixtures, not real credentials.
+[[allowlists]]
+description = "TMDB test fixtures"
+paths = [
+  '''tests/MediaBoard\.Core\.Tests/Metadata/FixtureHandlerRecordTests\.cs''',
+  '''tests/MediaBoard\.Core\.Tests/Metadata/TmdbClientTests\.cs''',
+]

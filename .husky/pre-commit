@@ -1,0 +1,9 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Secret scan on staged changes. After a fresh clone run once: dotnet tool restore && dotnet husky install
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --redact --no-banner
+else
+  echo "gitleaks not installed, skipping the secret scan (scoop install gitleaks)"
+fi

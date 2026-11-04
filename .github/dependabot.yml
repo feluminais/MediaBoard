@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      avalonia:
+        patterns:
+          - "Avalonia*"
+    ignore:
+      # xunit.v3 4.x breaks the Avalonia headless tests (Avalonia.Headless.XUnit targets 3.x).
+      - dependency-name: xunit.v3
+        update-types:
+          - version-update:semver-major
+      # 18.1+ needs MTP v2, which xunit.v3 3.x does not load.
+      - dependency-name: Microsoft.Testing.Extensions.CodeCoverage
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor

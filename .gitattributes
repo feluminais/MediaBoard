@@ -1,0 +1,2 @@
+# The hook runs under sh; CRLF would break it.
+.husky/pre-commit text eol=lf
