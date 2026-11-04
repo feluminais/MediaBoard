@@ -56,7 +56,7 @@ public partial class EpisodeGraphView : UserControl
     private void Place(Rect cell)
     {
         CardBox.Measure(new Size(CardWidth, double.PositiveInfinity));
-        var height = CardBox.DesiredSize.Height;
+        var height = CardBox.DesiredSize.Height - CardBox.Margin.Top; // the desired size includes the margin that placed the card last time
         var x = Math.Clamp(cell.X, 0, Math.Max(0, Host.Bounds.Width - CardWidth));
 
         var below = cell.Bottom + CardOffset;
