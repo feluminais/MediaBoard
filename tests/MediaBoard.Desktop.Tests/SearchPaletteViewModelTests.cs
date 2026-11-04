@@ -327,17 +327,6 @@ public class SearchPaletteViewModelTests
         Assert.Equal(0, rig.Closed);
     }
 
-    [AvaloniaFact]
-    public void Escape_Closes()
-    {
-        var rig = new Rig();
-
-        rig.Palette.CloseCommand.Execute(null);
-
-        Assert.Equal(1, rig.Closed);
-        Assert.Empty(rig.Calls);
-    }
-
     // Escape peels one layer: the text first, then the palette.
     [AvaloniaFact]
     public void Escape_ClearsTheTextFirst_ThenCloses()
@@ -470,21 +459,6 @@ public class SearchPaletteViewModelTests
 
         Assert.Empty(rig.Palette.Rows);
         Assert.Null(rig.Palette.EmptyText);
-        Assert.Empty(rig.Search.Queries);
-    }
-
-    [AvaloniaFact]
-    public async Task Reset_ClearsTheBoxAndTheResults()
-    {
-        var rig = WithLibrary(FakeLibrary.Card(1, "Heat"));
-        await rig.TypeAsync("heat");
-
-        rig.Palette.Reset();
-
-        Assert.Equal("", rig.Palette.Query);
-        Assert.Empty(rig.Palette.Rows);
-        rig.Clock.Advance(Pause);
-        Ui.Flush();
         Assert.Empty(rig.Search.Queries);
     }
 

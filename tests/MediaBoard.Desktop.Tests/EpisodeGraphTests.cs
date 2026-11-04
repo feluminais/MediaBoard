@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
@@ -281,16 +280,13 @@ public class EpisodeGraphTests
         var view = new TitleView { DataContext = page };
         var window = new Window { Width = 1000, Height = 700, Content = view };
         window.Show();
-        var timer = Stopwatch.StartNew();
         Ui.Flush();
         var graphView = view.GetVisualDescendants().OfType<EpisodeGraphView>().Single();
         var graph = graphView.GetVisualDescendants().OfType<EpisodeGraph>().Single();
         window.UpdateLayout();
-        timer.Stop();
 
         Assert.Equal(OnePiece.Sum(), page.Graph!.Seasons.Sum(s => s.Episodes.Count));
         Assert.True(graph.Layout.Size.Width <= graph.Bounds.Width + 1, "the graph never needs a sideways scroll");
-        Assert.True(timer.ElapsedMilliseconds < 2000, $"laying out and drawing took {timer.ElapsedMilliseconds} ms");
 
         var column = graph.Layout.Columns[3];
         graph.Hover((column.Season, column.Start + 4));

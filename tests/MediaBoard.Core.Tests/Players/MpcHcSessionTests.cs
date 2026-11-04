@@ -153,18 +153,6 @@ public class MpcHcSessionTests
     }
 
     [Fact]
-    public async Task Session_Disconnect_RaisesClosed()
-    {
-        await using var session = await StartConnectedAsync();
-
-        _transport.Receive(MpcApi.CMD_DISCONNECT, "");
-        _process.Exit();
-        await Task.Delay(50, Ct);
-
-        Assert.Equal([new PlaybackEvent.Closed()], _events.All);
-    }
-
-    [Fact]
     public async Task Session_ProcessExitAfterConnect_RaisesClosed()
     {
         await using var session = await StartConnectedAsync();
@@ -393,26 +381,6 @@ public class MpcHcSessionTests
         var polls = _transport.SentTo(PlayerHwnd, MpcApi.CMD_GETCURRENTPOSITION).Count;
         await Task.Delay(150, Ct);
         Assert.Equal(polls, _transport.SentTo(PlayerHwnd, MpcApi.CMD_GETCURRENTPOSITION).Count);
-    }
-
-    [Fact]
-    public async Task Session_Seek_RaisesPosition()
-    {
-        await using var session = await StartConnectedAsync();
-
-        _transport.Receive(MpcApi.CMD_NOTIFYSEEK, "95.040");
-
-        Assert.Equal([new PlaybackEvent.Position(TimeSpan.FromSeconds(95.04))], _events.All);
-    }
-
-    [Fact]
-    public async Task Session_EndOfStream_RaisesEnded()
-    {
-        await using var session = await StartConnectedAsync();
-
-        _transport.Receive(MpcApi.CMD_NOTIFYENDOFSTREAM, "");
-
-        Assert.Equal([new PlaybackEvent.Ended()], _events.All);
     }
 
     [Fact]

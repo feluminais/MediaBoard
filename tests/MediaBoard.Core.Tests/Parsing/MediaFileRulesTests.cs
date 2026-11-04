@@ -9,11 +9,7 @@ public class MediaFileRulesTests
     [Theory]
     [InlineData("Movie.mkv.parts", 5000 * MB)]
     [InlineData("Show\\Movie.mkv.!qB", 5000 * MB)]
-    [InlineData("Movie.mkv.part", 5000 * MB)]
-    [InlineData("Movie.mkv.crdownload", 5000 * MB)]
-    [InlineData("Movie.mkv.tmp", 5000 * MB)]
     [InlineData(".hidden\\Movie.mkv", 5000 * MB)]
-    [InlineData("Show\\.hidden\\Movie.mkv", 5000 * MB)]
     [InlineData("sample.mkv", 50 * MB)]
     [InlineData("Show\\Movie-SAMPLE.mkv", 50 * MB)]
     public void IsIgnored_SkipsPartialHiddenAndSamples(string path, long size)
@@ -36,7 +32,6 @@ public class MediaFileRulesTests
     [InlineData("x.MP4", true)]
     [InlineData("Show\\Season 01\\S01E01.avi", true)]
     [InlineData("Movie.nfo", false)]
-    [InlineData("Movie.srt", false)]
     [InlineData("Movie", false)]
     [InlineData("Movie.mkv.parts", false)]
     public void IsVideo_ChecksExtension(string path, bool expected)

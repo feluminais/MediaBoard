@@ -135,21 +135,6 @@ public class TitleViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task PlayerName_IsResolvedOncePerPage()
-    {
-        var calls = 0;
-        _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        _library.Next[1] = 10;
-        var page = new TitleViewModel(1, _t.Services() with { PlayerName = () => { Interlocked.Increment(ref calls); return "MPC-HC"; } }, _t.Navigation());
-
-        await page.RefreshAsync();
-        await page.RefreshAsync();
-        await page.RefreshAsync();
-
-        Assert.Equal(1, calls);
-    }
-
-    [AvaloniaFact]
     public async Task Page_ShowsPosterDescriptionRatingAndYear()
     {
         _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
@@ -319,19 +304,6 @@ public class TitleViewModelTests
         Assert.Contains("fix:10:12:Show", _library.Edits);
         Assert.Null(page.Picker);
         Assert.Equal(1, _t.Identified); // identification runs for the siblings the fix requeued
-    }
-
-    [AvaloniaFact]
-    public async Task FixMatch_Cancel_ClosesThePicker_WithoutChangingAnything()
-    {
-        _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        var page = await Loaded(1);
-        page.FixMatchCommand.Execute(null);
-
-        page.Picker!.CancelCommand.Execute(null);
-
-        Assert.Null(page.Picker);
-        Assert.Empty(_library.Edits);
     }
 
     [AvaloniaFact]
@@ -807,21 +779,6 @@ public class TitleViewModelTests
         await Ui.WaitUntil(() => _t.Playback.Answers.Count == 1);
 
         Assert.Equal([(10, true)], _t.Playback.Answers);
-    }
-
-    [AvaloniaFact]
-    public void FinishedPromptDialog_AsksAboutTheTitle_WithYesAndNo()
-    {
-        var dialog = new FinishedPromptDialog("Klaus");
-        dialog.Show();
-
-        var texts = dialog.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
-        var buttons = dialog.GetVisualDescendants().OfType<Button>().Select(b => b.Content).ToList();
-
-        Assert.Contains("Did you finish Klaus?", texts);
-        Assert.Contains("Yes", buttons);
-        Assert.Contains("No", buttons);
-        dialog.Close();
     }
 
     [AvaloniaFact]

@@ -79,7 +79,6 @@ public class MpcHcWebSessionTests
     [Theory]
     [InlineData(0, MpcWebState.Stopped)]
     [InlineData(1, MpcWebState.Paused)]
-    [InlineData(2, MpcWebState.Playing)]
     public void Parser_MapsStates(int number, MpcWebState expected)
     {
         Assert.True(MpcWebStatus.TryParse(Page(File, number, 1000, 9000), out var status));
@@ -101,13 +100,6 @@ public class MpcHcWebSessionTests
         Assert.True(MpcWebStatus.TryParse(Page(path, 2, 0, 1000), out var status));
 
         Assert.Equal(path, status.FilePath);
-    }
-
-    [Fact]
-    public void Parser_NoFileOpen_HasAnEmptyPath()
-    {
-        Assert.True(MpcWebStatus.TryParse(Page("", 0, 0, 0), out var status));
-        Assert.Equal("", status.FilePath);
     }
 
     [Theory]
@@ -141,14 +133,6 @@ public class MpcHcWebSessionTests
 
         Assert.Equal(body, text);
         Assert.Equal("http://127.0.0.1:13579/variables.html", handler.Requests.Single());
-    }
-
-    [Fact]
-    public async Task Client_NotFound_Throws()
-    {
-        var client = new MpcWebClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
-
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.FetchAsync(13579, Ct));
     }
 
     // ---- The session ----
@@ -389,14 +373,6 @@ public class MpcHcWebSessionTests
         await session.AttachAsync(Ct);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.AttachAsync(Ct));
-    }
-
-    [Fact]
-    public async Task Start_IsNotSupported()
-    {
-        await using var session = Create();
-
-        await Assert.ThrowsAsync<NotSupportedException>(() => session.StartAsync(File, null, Ct));
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

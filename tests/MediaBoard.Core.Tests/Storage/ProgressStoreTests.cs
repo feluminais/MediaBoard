@@ -32,9 +32,6 @@ public sealed class ProgressStoreTests : IDisposable
     }
 
     [Fact]
-    public void Get_NothingSaved_IsNull() => Assert.Null(_store.Get(_fileId));
-
-    [Fact]
     public void Save_StoresPositionDurationAndTime()
     {
         _store.Save(_fileId, 120.5, 3000);

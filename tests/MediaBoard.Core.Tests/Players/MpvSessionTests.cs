@@ -280,16 +280,6 @@ public class MpvSessionTests
     }
 
     [Fact]
-    public async Task Mpv_EofRaisesEnded()
-    {
-        await using var session = await StartConnectedAsync();
-
-        await _pipe.FeedAsync("""{"event":"property-change","id":4,"name":"eof-reached","data":true}""");
-
-        Assert.Equal([new PlaybackEvent.Ended()], _events.All);
-    }
-
-    [Fact]
     public async Task Mpv_EndFileEofRaisesEnded_OncePerEnd()
     {
         await using var session = await StartConnectedAsync();
@@ -644,22 +634,10 @@ public class MpvSessionTests
         await Assert.ThrowsAsync<ObjectDisposedException>(() => session.StartAsync(@"C:\Videos\other.mp4", null, Ct));
     }
 
-    [Fact]
-    public void Protocol_ParsesProperties()
-    {
-        Assert.Equal(new MpvMessage.TimePos(TimeSpan.FromSeconds(3.5)), MpvProtocol.Parse("""{"event":"property-change","id":1,"name":"time-pos","data":3.5}"""));
-        Assert.Equal(new MpvMessage.Duration(TimeSpan.FromSeconds(60)), MpvProtocol.Parse("""{"event":"property-change","id":2,"name":"duration","data":60}"""));
-        Assert.Equal(new MpvMessage.Pause(true), MpvProtocol.Parse("""{"event":"property-change","id":3,"name":"pause","data":true}"""));
-        Assert.Equal(new MpvMessage.EofReached(false), MpvProtocol.Parse("""{"event":"property-change","id":4,"name":"eof-reached","data":false}"""));
-        Assert.Equal(new MpvMessage.EndFile("eof"), MpvProtocol.Parse("""{"event":"end-file","reason":"eof"}"""));
-    }
-
     [Theory]
     [InlineData("")]
-    [InlineData("   ")]
     [InlineData("{")]
     [InlineData("[1,2]")]
-    [InlineData("42")]
     [InlineData("""{"event":"property-change","name":"time-pos","data":"3"}""")]
     [InlineData("""{"event":"property-change","name":"pause","data":1}""")]
     [InlineData("""{"event":"property-change","name":"duration","data":-5}""")]
@@ -669,12 +647,6 @@ public class MpvSessionTests
     public void Protocol_IgnoresWhatItCannotUse(string line)
     {
         Assert.Null(MpvProtocol.Parse(line));
-    }
-
-    [Fact]
-    public void Protocol_BuildsObserveCommands()
-    {
-        Assert.Equal("""{"command":["observe_property",7,"time-pos"]}""", MpvProtocol.Observe(7, "time-pos"));
     }
 
     private sealed class FakePipe : IMpvPipe

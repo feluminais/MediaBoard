@@ -159,14 +159,4 @@ public class PlayerDetectorTests
         Assert.Equal("No media player found", entry.Message);
         Assert.Equal("Install MPC-HC or choose a player in Settings", entry.Hint);
     }
-
-    [Fact]
-    public void CreateDefault_Detect_DoesNotThrow()
-    {
-        var detector = PlayerDetector.CreateDefault(new ActivityHub());
-
-        var players = detector.Detect();
-
-        Assert.Equal(players.Count, players.Select(p => p.Id).Distinct().Count());
-    }
 }

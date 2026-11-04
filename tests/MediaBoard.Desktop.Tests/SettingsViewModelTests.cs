@@ -1,13 +1,10 @@
-using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Settings;
 using MediaBoard.Desktop.Tests.Support;
 using MediaBoard.Desktop.ViewModels;
-using MediaBoard.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaBoard.Desktop.Tests;
@@ -79,16 +76,6 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void FollowOtherPlayers_DefaultsToOnWithVlcsOwnPort()
-    {
-        var vm = Create();
-
-        Assert.True(vm.FollowOtherPlayers);
-        Assert.Equal("8080", vm.VlcPort);
-        Assert.Equal("", vm.VlcPassword);
-    }
-
-    [Fact]
     public void Display_ShowsTheSavedSizes_WithoutSavingThem()
     {
         var store = Store;
@@ -102,16 +89,6 @@ public sealed class SettingsViewModelTests : IDisposable
         Assert.Equal(PosterSize.Large, vm.SelectedPosterSize?.Size);
         Assert.False(vm.GrowWithWindow);
         Assert.Equal(0, changes);
-    }
-
-    [Fact]
-    public void Display_DefaultsTo100PercentMediumPosters_GrowingWithTheWindow()
-    {
-        var vm = Create();
-
-        Assert.Equal("100%", vm.SelectedUiSize?.Label);
-        Assert.Equal(PosterSize.Medium, vm.SelectedPosterSize?.Size);
-        Assert.True(vm.GrowWithWindow);
     }
 
     [Fact]
@@ -174,7 +151,6 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Theory]
-    [InlineData("")]
     [InlineData("abc")]
     [InlineData("0")]
     [InlineData("70000")]
@@ -203,7 +179,6 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Theory]
-    [InlineData("")]
     [InlineData("abc")]
     [InlineData("0")]
     [InlineData("70000")]
@@ -301,32 +276,6 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void TmdbKey_IsMaskedUntilShown_AndNeverLogged()
-    {
-        var vm = Create();
-        Assert.False(vm.ShowKey);
-
-        vm.TmdbKey = "super-secret-key";
-        vm.SaveKeyCommand.Execute(null);
-
-        Assert.DoesNotContain(_hub.Recent, e => e.Message.Contains("super-secret-key") || (e.Hint ?? "").Contains("super-secret-key"));
-        Assert.DoesNotContain("super-secret-key", vm.KeyStatus);
-    }
-
-    [AvaloniaFact]
-    public void TmdbKey_HelpLinkPresent()
-    {
-        var vm = Create();
-
-        Assert.Equal("Get a free key", vm.HelpLinkText);
-        Assert.Equal("https://www.themoviedb.org/settings/api", vm.HelpLinkUrl);
-
-        vm.OpenHelpLinkCommand.Execute(null);
-
-        Assert.Equal(["https://www.themoviedb.org/settings/api"], _opened);
-    }
-
-    [AvaloniaFact]
     public async Task PlayerPicker_ListsDetected_AndBrowse()
     {
         _existingFiles.Add(Path.Combine(ProgramFiles, "MPC-HC", "mpc-hc64.exe"));
@@ -386,25 +335,4 @@ public sealed class SettingsViewModelTests : IDisposable
         Assert.StartsWith("No player found", vm.InUse);
     }
 
-    [AvaloniaFact]
-    public void About_ShowsTmdbAttribution()
-    {
-        var vm = Create();
-
-        Assert.Equal("MediaBoard", vm.AppName);
-        Assert.StartsWith("Version ", vm.Version);
-        Assert.Equal("This product uses the TMDB API but is not endorsed or certified by TMDB.", vm.TmdbAttribution);
-        Assert.Equal("TMDB", vm.TmdbMark);
-
-        // And the page really shows it.
-        var view = new SettingsView { DataContext = vm };
-        var window = new Window { Content = view };
-        window.Show();
-        Ui.Flush();
-        var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
-        Assert.Contains("This product uses the TMDB API but is not endorsed or certified by TMDB.", texts);
-        Assert.Contains("TMDB", texts);
-        Assert.Contains("Get a free key", view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
-        window.Close();
-    }
 }

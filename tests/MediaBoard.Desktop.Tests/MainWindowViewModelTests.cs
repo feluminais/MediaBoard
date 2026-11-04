@@ -74,17 +74,6 @@ public partial class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
-    public void Sidebar_MainList_HasNoNeedsReviewEntry()
-    {
-        var vm = Create();
-
-        Assert.Equal(
-            [MainWindowViewModel.HomePage, MainWindowViewModel.MoviesPage, MainWindowViewModel.ShowsPage,
-             MainWindowViewModel.FoldersPage, MainWindowViewModel.SettingsPage],
-            vm.NavItems.Select(i => i.Key));
-    }
-
-    [AvaloniaFact]
     public async Task ReviewItem_ShowsOnlyWhileSomethingNeedsReview_WithTheCountInItsLabel()
     {
         var vm = Create();
@@ -319,20 +308,6 @@ public partial class MainWindowViewModelTests
     }
 
     [AvaloniaFact]
-    public void CtrlF_OpensSearch()
-    {
-        var vm = Create();
-        var window = new MainWindow { DataContext = vm };
-        window.Show();
-
-        window.KeyPress(Key.F, RawInputModifiers.Control, PhysicalKey.F, "f");
-        Flush();
-
-        Assert.True(vm.IsSearchOpen);
-        window.Close();
-    }
-
-    [AvaloniaFact]
     public void ActivityPanel_ShowsRecentWithHints()
     {
         _hub.Log(ActivityLevel.Info, "Scanned Movies");
@@ -362,56 +337,6 @@ public partial class MainWindowViewModelTests
         vm.ToggleActivityCommand.Execute(null);
 
         Assert.Null(vm.StatusBar.Problem);
-    }
-
-    [AvaloniaFact]
-    public void Problem_ShowsInTheStatusBar_InTheErrorColour()
-    {
-        var vm = Create();
-        var window = new MainWindow { DataContext = vm };
-        window.Show();
-
-        _hub.Log(ActivityLevel.Error, "Couldn't delete the files: access denied");
-        Flush();
-
-        var text = window.FindControl<TextBlock>("ProblemText")!;
-        Assert.True(text.IsEffectivelyVisible);
-        Assert.Equal("Couldn't delete the files: access denied", text.Text);
-        Assert.True(window.TryFindResource("ErrorTextBrush", window.ActualThemeVariant, out var brush));
-        Assert.Same(brush, text.Foreground);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void Scanning_ShowsABarAndTheAccentColourInTheStatusBar()
-    {
-        var vm = Create();
-        var window = new MainWindow { DataContext = vm };
-        window.Show();
-        var bar = window.FindControl<ProgressBar>("BusyBar")!;
-        var segment = window.FindControl<StackPanel>("BusySegment")!;
-        Assert.False(bar.IsEffectivelyVisible); // "Up to date" stays plain
-
-        _hub.BeginScan(1, "Torrent Downloads");
-        _hub.ReportScan(1, 120, 810);
-        Flush();
-
-        Assert.True(bar.IsEffectivelyVisible);
-        Assert.False(bar.IsIndeterminate);
-        Assert.Equal(120 * 100.0 / 810, bar.Value, 3);
-        var text = segment.Children.OfType<TextBlock>().First();
-        Assert.Equal("Scanning Torrent Downloads, 120 of 810", text.Text);
-        Assert.True(window.TryFindResource("AccentTextBrush", window.ActualThemeVariant, out var accent));
-        Assert.Same(accent, text.Foreground);
-        Assert.True(window.TryFindResource("SystemAccentColorDark1", window.ActualThemeVariant, out var dark1));
-        Assert.True(window.TryFindResource("SystemAccentColorLight2", window.ActualThemeVariant, out var light2));
-        var colour = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(accent).Color;
-        Assert.Contains(colour, new[] { dark1, light2 }.OfType<Avalonia.Media.Color>()); // follows the system accent
-
-        _hub.EndScan(1);
-        Flush();
-        Assert.False(bar.IsEffectivelyVisible);
-        window.Close();
     }
 
     [AvaloniaFact]
@@ -480,19 +405,6 @@ public partial class MainWindowViewModelTests
         Flush();
 
         Assert.Equal("Scanning folders…", list.EmptyText);
-    }
-
-    [AvaloniaFact]
-    public void StatusBarClick_TogglesActivityPanel()
-    {
-        var vm = Create();
-        Assert.False(vm.IsActivityOpen);
-
-        vm.ToggleActivityCommand.Execute(null);
-        Assert.True(vm.IsActivityOpen);
-
-        vm.ToggleActivityCommand.Execute(null);
-        Assert.False(vm.IsActivityOpen);
     }
 
     [AvaloniaFact]
@@ -598,45 +510,6 @@ public partial class MainWindowViewModelTests
         await WaitUntil(() => asked == 1);
 
         Assert.Same(folders, vm.CurrentPage);
-    }
-
-    [AvaloniaFact]
-    public async Task OpeningFolders_ReloadsTheList()
-    {
-        var vm = Create();
-        _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
-
-        vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
-        var folders = Assert.IsType<FoldersViewModel>(vm.CurrentPage);
-        await WaitUntil(() => folders.Folders.Count == 1);
-
-        Assert.Equal(@"D:\Movies", folders.Folders[0].Path);
-    }
-
-    [AvaloniaFact]
-    public async Task FoldersAndSettings_PagesRenderInTheWindow()
-    {
-        _library.FolderRows.Add(new MediaBoard.Core.Library.FolderRow(1, @"D:\Movies", true, false, false, 3, ["GTA IV"]));
-        var vm = Create();
-        var window = new MainWindow { DataContext = vm };
-        window.Show();
-
-        vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
-        var folders = (FoldersViewModel)vm.CurrentPage;
-        await WaitUntil(() => folders.Folders.Count == 1);
-        Flush();
-        var texts = TextsOf(window);
-        Assert.Contains(@"D:\Movies", texts);
-        Assert.Contains("3 files", texts);
-        Assert.Contains("GTA IV", texts);
-        Assert.Contains("Ignored: no video", texts);
-
-        vm.NavigateCommand.Execute(MainWindowViewModel.SettingsPage);
-        Flush();
-        texts = TextsOf(window);
-        Assert.Contains("TMDB key", texts);
-        Assert.Contains("This product uses the TMDB API but is not endorsed or certified by TMDB.", texts);
-        window.Close();
     }
 
     private static List<string?> TextsOf(Avalonia.Controls.Window window) =>

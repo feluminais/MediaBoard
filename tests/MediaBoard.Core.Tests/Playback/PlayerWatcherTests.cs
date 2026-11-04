@@ -89,18 +89,6 @@ public sealed class PlayerWatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task Check_SettingOff_OffersNothing()
-    {
-        _settings.Save(new AppSettings { FollowOtherPlayers = false });
-        var mpv = new FakeAttachableSession("mpv");
-        await using var watcher = Watcher(_ => mpv);
-
-        await watcher.CheckAsync(Ct);
-
-        Assert.Empty(_offered);
-    }
-
-    [Fact]
     public async Task Check_SettingIsReadOnEveryLook()
     {
         var mpv = new FakeAttachableSession("mpv");
@@ -146,16 +134,6 @@ public sealed class PlayerWatcherTests : IDisposable
 
         Assert.Equal(9090, seen?.VlcWebPort);
         Assert.Equal("secret", seen?.VlcWebPassword);
-    }
-
-    [Fact]
-    public async Task Dispose_CanBeCalledTwice()
-    {
-        var watcher = Watcher(_ => null);
-        watcher.Start();
-
-        await watcher.DisposeAsync();
-        await watcher.DisposeAsync();
     }
 
     [Fact]

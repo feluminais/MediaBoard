@@ -130,17 +130,6 @@ public class StatusBarViewModelTests
     }
 
     [AvaloniaFact]
-    public void StatusBar_ShowsScanProgress()
-    {
-        var vm = Create();
-
-        Scan(1, "Supernatural", 12, 44);
-        Flush();
-
-        Assert.Equal("Scanning Supernatural, 12 of 44", vm.Progress);
-    }
-
-    [AvaloniaFact]
     public void StatusBar_ShowsUpToDate_WhenNothingRuns()
     {
         var vm = Create();

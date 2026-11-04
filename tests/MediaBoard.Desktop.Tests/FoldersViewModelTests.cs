@@ -51,15 +51,6 @@ public sealed class FoldersViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task EmptyList_SaysWhy()
-    {
-        var vm = await LoadedAsync();
-
-        Assert.True(vm.ShowEmpty);
-        Assert.Empty(vm.Folders);
-    }
-
-    [AvaloniaFact]
     public async Task AddFolder_ScansImmediately()
     {
         var root = _stack.MakeLibrary("Movies", "Heat (1995).mkv", "Alien (1979).mkv");

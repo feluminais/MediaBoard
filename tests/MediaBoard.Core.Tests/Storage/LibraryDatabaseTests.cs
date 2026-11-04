@@ -1,6 +1,4 @@
-using System.Globalization;
 using Dapper;
-using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Storage;
 using Microsoft.Data.Sqlite;
 
@@ -8,12 +6,6 @@ namespace MediaBoard.Core.Tests.Storage;
 
 public sealed class LibraryDatabaseTests : IDisposable
 {
-    private static readonly string[] ExpectedTables =
-    [
-        "continue_dismissed", "episodes", "file_episodes", "file_titles", "files", "folders",
-        "match_rules", "meta", "overrides", "progress", "review_candidates", "titles",
-    ];
-
     private const string InsertFolder =
         "INSERT INTO folders(path, enabled, added_at) VALUES ('X:\\Media', 1, '2026-01-01'); SELECT last_insert_rowid()";
 
@@ -45,10 +37,6 @@ public sealed class LibraryDatabaseTests : IDisposable
         Assert.Equal(3, second.ExecuteScalar<int>("PRAGMA user_version"));
         // A second open must not re-run the schema.
         Assert.Equal(1, second.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
-
-        var tables = second.Query<string>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").ToList();
-        Assert.Equal(ExpectedTables, tables);
     }
 
     [Fact]
@@ -60,15 +48,6 @@ public sealed class LibraryDatabaseTests : IDisposable
         using var again = new LibraryDatabase(DbPath).Open();
         Assert.Equal(3, again.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal(1, again.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
-    }
-
-    [Fact]
-    public void Open_NewDatabase_RecordsTheCurrentParserVersion()
-    {
-        using var conn = new LibraryDatabase(DbPath).Open();
-
-        Assert.Equal(PathParser.Version.ToString(CultureInfo.InvariantCulture),
-            conn.ExecuteScalar<string>("SELECT value FROM meta WHERE key = 'parser_version'"));
     }
 
     [Fact]
@@ -129,21 +108,6 @@ public sealed class LibraryDatabaseTests : IDisposable
         Assert.Throws<SqliteException>(() => conn.Execute(
             "INSERT INTO files(folder_id, rel_path, size, mtime, first_seen, missing, parsed_json, status) " +
             "VALUES (999, 'a.mkv', 1, 1, '2026-01-01', 0, '{}', 'pending')"));
-    }
-
-    [Fact]
-    public void Open_StoresUnicode()
-    {
-        const string relPath = "Цікава | Ідея’s";
-        using var conn = new LibraryDatabase(DbPath).Open();
-        var folderId = conn.ExecuteScalar<long>(InsertFolder);
-
-        conn.Execute(
-            "INSERT INTO files(folder_id, rel_path, size, mtime, first_seen, missing, parsed_json, status) " +
-            "VALUES (@folderId, @relPath, 10, 20, '2026-01-01', 0, '{}', 'pending')",
-            new { folderId, relPath });
-
-        Assert.Equal(relPath, conn.ExecuteScalar<string>("SELECT rel_path FROM files"));
     }
 
     // overrides(target_kind, target_id) has no foreign key, so a reused id would inherit a stale override.

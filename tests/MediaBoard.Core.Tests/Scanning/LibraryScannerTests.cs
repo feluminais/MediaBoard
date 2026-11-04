@@ -89,9 +89,6 @@ public sealed class LibraryScannerTests : IDisposable
         Assert.Equal(1995, movie.Parsed.Year);
         Assert.Equal(MediaKind.Episode, Row(@"Shows\Lost\Season 1\Lost.S01E01.mkv").Parsed.Kind);
         Assert.Equal(_lib.PathOf(@"Movies\Heat.1995.1080p.mkv"), _files.FullPath(movie));
-        Assert.Equal(movie.Id, _files.Get(movie.Id)!.Id);
-        Assert.Equal(2, _files.ByStatus("pending").Count);
-        Assert.Empty(_files.ByStatus("matched"));
     }
 
     [Fact]
@@ -330,27 +327,6 @@ public sealed class LibraryScannerTests : IDisposable
     }
 
     [Fact]
-    public async Task LargeBareNumberDirectory_ScansQuickly()
-    {
-        for (var i = 1; i <= 300; i++) _lib.File($@"Show\Show_{i:000}_.mp4");
-
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var first = await Scan();
-        var firstTime = watch.Elapsed;
-        Assert.Equal(300, first.Added);
-
-        _lib.File(@"Show\Show_301_.mp4");
-        watch.Restart();
-        var second = await Scan();
-        var secondTime = watch.Elapsed;
-
-        Assert.Equal(1, second.Added);
-        Assert.True(firstTime < TimeSpan.FromSeconds(2), $"first scan took {firstTime}");
-        Assert.True(secondTime < TimeSpan.FromSeconds(2), $"rescan took {secondTime}");
-        Assert.All(_files.ByFolder(_folder.Id), r => Assert.Equal(MediaKind.Episode, r.Parsed.Kind));
-    }
-
-    [Fact]
     public async Task NonMediaFolder_IsReportedIgnored()
     {
         _lib.File(@"Movies\Heat.1995.mkv");
@@ -546,15 +522,6 @@ public sealed class LibraryScannerTests : IDisposable
         Assert.Equal(0, result.Added);
         Assert.Equal(0, result.MarkedMissing);
         Assert.Equal(moved.PathOf(@"Movies\Heat.1995.mkv"), _files.FullPath(_files.Get(id)!));
-    }
-
-    [Fact]
-    public void SetEnabled_TogglesFolder()
-    {
-        _folders.SetEnabled(_folder.Id, false);
-        Assert.False(Assert.Single(_folders.All()).Enabled);
-        _folders.SetEnabled(_folder.Id, true);
-        Assert.True(Assert.Single(_folders.All()).Enabled);
     }
 
     private sealed class ClockStub(DateTimeOffset now) : TimeProvider

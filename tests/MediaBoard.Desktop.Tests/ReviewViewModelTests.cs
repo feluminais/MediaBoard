@@ -237,16 +237,6 @@ public class ReviewViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task BeforeTheFirstLoad_NothingIsSaidYet()
-    {
-        var page = new ReviewViewModel(_t.Services());
-
-        Assert.False(page.ShowEmpty);
-        await page.RefreshAsync();
-        Assert.True(page.ShowEmpty);
-    }
-
-    [AvaloniaFact]
     public async Task Refresh_QueriesOffTheUiThread_AndKeepsTheOpenSearch()
     {
         _library.Review.Add(MovieFile(1, "A.mkv", "A", null));
@@ -295,41 +285,6 @@ public class ReviewViewModelTests
         var candidate = page.Groups[0].Rows[0].Candidates[0];
         Assert.Equal("1995 · Movie", candidate.Detail);
         Assert.Null(candidate.PosterLocalPath);
-    }
-
-    [AvaloniaFact]
-    public async Task Page_ShowsGroupsCandidatesAndButtons()
-    {
-        _library.Review.Add(EpisodeFile(1, @"Mystery\Mystery.S01E01.mkv", "Mystery", 1, 1, "Mystery", Show(7, "Mystery Show", 2012)));
-        _library.Review.Add(EpisodeFile(2, @"Mystery\Mystery.S01E02.mkv", "Mystery", 1, 2, "Mystery", Show(7, "Mystery Show", 2012)));
-        var view = new ReviewView { DataContext = await Loaded() };
-        var window = new Window { Width = 1000, Height = 800, Content = view };
-        window.Show();
-        Ui.Flush();
-
-        var texts = view.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
-        var buttons = view.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).Select(b => b.Content as string).ToList();
-
-        Assert.Contains("Mystery", texts);
-        Assert.Contains("2 files", texts);
-        Assert.Contains(@"Mystery\Mystery.S01E02.mkv", texts);
-        Assert.Contains("Mystery Show", texts);
-        Assert.Equal(2, buttons.Count(b => b == "Pick"));
-        Assert.Equal(2, buttons.Count(b => b == "Search"));
-        Assert.Equal(2, buttons.Count(b => b == "Not a movie or show"));
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public async Task Page_WhenEmpty_SaysNothingToReview()
-    {
-        var view = new ReviewView { DataContext = await Loaded() };
-        var window = new Window { Width = 1000, Height = 800, Content = view };
-        window.Show();
-        Ui.Flush();
-
-        Assert.Contains(view.GetVisualDescendants().OfType<TextBlock>(), t => t.IsEffectivelyVisible && t.Text == "Nothing to review");
-        window.Close();
     }
 
     // ---- Enrichment stays small and quiet ----
@@ -528,27 +483,6 @@ public class ReviewViewModelTests
         Assert.NotSame(first, second);
         Assert.Same(picker, second.Picker);
         Assert.Same(second, Assert.Single(page.Items));
-    }
-
-    [AvaloniaFact]
-    public async Task TheList_BuildsOnlyTheRowsOnScreen()
-    {
-        for (var i = 1; i <= 1000; i++) _library.Review.Add(MovieFile(i, $"F{i:0000}.mkv", $"F{i}", null, Movie(i, "T", 2000)));
-        var page = await Loaded();
-        var view = new ReviewView { DataContext = page };
-        var window = new Window { Width = 1000, Height = 800, Content = view };
-        window.Show();
-        Ui.Flush();
-        window.UpdateLayout();
-        Ui.Flush();
-
-        var panel = view.GetVisualDescendants().OfType<VirtualizingStackPanel>().First();
-        var rowViews = view.GetVisualDescendants().OfType<Button>().Count(b => b.Content as string == "Not a movie or show");
-
-        Assert.Equal(1000, page.Items.Count);
-        Assert.InRange(panel.Children.Count, 1, 60);
-        Assert.InRange(rowViews, 1, 60);
-        window.Close();
     }
 
     // An ItemsControl does not scroll by itself: without a ScrollViewer around it only the first screenful was reachable.

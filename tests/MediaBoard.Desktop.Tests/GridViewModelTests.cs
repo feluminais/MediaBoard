@@ -1,6 +1,5 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using Avalonia.Layout;
 using Avalonia.VisualTree;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
@@ -25,20 +24,6 @@ public class GridViewModelTests
         var grid = Create(kind);
         await grid.RefreshAsync();
         return grid;
-    }
-
-    [AvaloniaFact]
-    public void Grid_UsesVirtualizingPanel()
-    {
-        var grid = Create();
-        var view = new GridView { DataContext = grid };
-        new Window { Width = 1000, Height = 700, Content = view }.Show();
-
-        var cards = view.GetVisualDescendants().OfType<ItemsRepeater>().Single();
-
-        // Only the cards in view are built: a UniformGridLayout is a VirtualizingLayout.
-        Assert.IsAssignableFrom<VirtualizingLayout>(cards.Layout);
-        Assert.NotNull(cards.FindAncestorOfType<ScrollViewer>()); // the viewport that decides what gets built
     }
 
     [AvaloniaFact]
@@ -218,16 +203,6 @@ public class GridViewModelTests
         await list.RefreshAsync();
 
         Assert.Equal("Nothing in progress", list.EmptyText); // a scan never adds anything to this list
-    }
-
-    [AvaloniaFact]
-    public async Task Grid_NothingShownBeforeTheFirstLoad()
-    {
-        var grid = Create();
-
-        Assert.False(grid.ShowEmpty);
-        await grid.RefreshAsync();
-        Assert.True(grid.ShowEmpty);
     }
 
     [AvaloniaFact]

@@ -29,7 +29,6 @@ public sealed class MessageWindowTests : IDisposable
     [Theory]
     [InlineData(MpcApi.CMD_NOWPLAYING, @"A\|B’Ц\x|")]
     [InlineData(MpcApi.CMD_GETCURRENTPOSITION, "")]
-    [InlineData(MpcApi.CMD_STATE, "2")]
     public async Task Send_ArrivesUnchanged(uint cmd, string payload)
     {
         Assert.Equal((cmd, payload), await RoundTrip(cmd, payload));

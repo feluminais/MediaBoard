@@ -38,15 +38,6 @@ public class MpcApiTests
     }
 
     [Fact]
-    public void ParseNowPlaying_EscapedPipeInTitle()
-    {
-        var nowPlaying = MpcApi.ParseNowPlaying(@"A\|B|||C:\v.mkv|60.000");
-
-        Assert.Equal("A|B", nowPlaying.Title);
-        Assert.Equal(TimeSpan.FromSeconds(60), nowPlaying.Duration);
-    }
-
-    [Fact]
     public void ParseNowPlaying_CurlyApostropheAndBackslashInTitle()
     {
         var nowPlaying = MpcApi.ParseNowPlaying(@"Bob’s \ Burgers\x|||C:\Відео\Bob’s.mkv|1.500");

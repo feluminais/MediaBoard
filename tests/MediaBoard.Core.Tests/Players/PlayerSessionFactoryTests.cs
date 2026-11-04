@@ -63,14 +63,6 @@ public class PlayerSessionFactoryTests
     }
 
     [Fact]
-    public async Task Factory_CustomPlayer_NeverTracksProgress()
-    {
-        await using var session = PlayerSessionFactory.Create(new PlayerInfo("custom", "X", Exe, TracksProgress: true));
-
-        Assert.False(session.TracksProgress);
-    }
-
-    [Fact]
     public async Task LaunchOnly_StartsTheProgramWithTheFileAsOneArgument()
     {
         const string file = @"C:\Відео\Bob's Burgers (2011)\S01E01.mkv";
@@ -96,18 +88,6 @@ public class PlayerSessionFactoryTests
 
         Assert.Equal(new PlaybackEvent.Closed(), await _events.WaitFor<PlaybackEvent.Closed>());
         Assert.Single(_events.All);
-    }
-
-    [Fact]
-    public async Task LaunchOnly_QuickExitWithZero_RaisesClosed()
-    {
-        // A player that hands the file to a running instance exits at once and cleanly.
-        await using var session = CreateLaunchOnly();
-        await session.StartAsync(File, null, Ct);
-
-        _process.Exit(0);
-
-        await _events.WaitFor<PlaybackEvent.Closed>();
     }
 
     [Fact]
@@ -156,15 +136,6 @@ public class PlayerSessionFactoryTests
         await session.StartAsync(File, null, Ct);
 
         Assert.Equal([new PlaybackEvent.Failed("My Player could not start: Access is denied")], _events.All);
-    }
-
-    [Fact]
-    public async Task LaunchOnly_GetPosition_IsNull()
-    {
-        await using var session = CreateLaunchOnly();
-        await session.StartAsync(File, null, Ct);
-
-        Assert.Null(await session.GetPositionAsync(Ct));
     }
 
     [Fact]

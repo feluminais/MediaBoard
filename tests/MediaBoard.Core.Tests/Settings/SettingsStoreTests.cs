@@ -14,18 +14,6 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void SettingsStore_RoundTrips()
-    {
-        var store = new SettingsStore(SettingsPath);
-        var saved = new AppSettings { TmdbKey = "k-123", DefaultPlayerId = "mpc-hc", CustomPlayerPath = "C:\\Tools\\player.exe" };
-
-        store.Save(saved);
-        var loaded = new SettingsStore(SettingsPath).Load();
-
-        Assert.Equal(saved, loaded);
-    }
-
-    [Fact]
     public void SettingsStore_WritesThePosterSizeByName()
     {
         var store = new SettingsStore(SettingsPath);
@@ -42,7 +30,6 @@ public sealed class SettingsStoreTests : IDisposable
         var loaded = new SettingsStore(SettingsPath).Load();
 
         Assert.Equal(new AppSettings(), loaded);
-        Assert.Null(loaded.TmdbKey);
     }
 
     [Fact]

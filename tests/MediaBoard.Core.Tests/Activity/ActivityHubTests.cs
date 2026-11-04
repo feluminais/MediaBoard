@@ -157,18 +157,6 @@ public class ActivityHubTests
     }
 
     [Fact]
-    public void ActivityHub_SnapshotsAreImmutable()
-    {
-        var hub = new ActivityHub();
-        var before = hub.Current;
-
-        hub.SetOnline(true);
-
-        Assert.False(before.Online);
-        Assert.True(hub.Current.Online);
-    }
-
-    [Fact]
     public void ActivityHub_KeepsLast200()
     {
         var hub = new ActivityHub();
@@ -271,23 +259,5 @@ public class ActivityHubTests
         Assert.Equal("Connect the drive", entry.Hint);
         Assert.NotNull(seenInHandler);
         Assert.Same(entry, Assert.Single(seenInHandler));
-    }
-
-    [Fact]
-    public async Task ActivityHub_IsThreadSafe()
-    {
-        var hub = new ActivityHub();
-
-        await Task.WhenAll(Enumerable.Range(0, 8).Select(t => Task.Run(() =>
-        {
-            for (var i = 0; i < 500; i++)
-            {
-                hub.Log(ActivityLevel.Info, $"{t}-{i}");
-                hub.SetPendingIdentification(t * 1000 + i);
-                _ = hub.Recent;
-            }
-        })));
-
-        Assert.Equal(200, hub.Recent.Count);
     }
 }

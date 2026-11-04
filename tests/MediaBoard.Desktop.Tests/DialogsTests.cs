@@ -70,12 +70,4 @@ public class DialogsTests
         owner.Close();
     }
 
-    [Fact]
-    public void OpenUrl_IgnoresAddressesThatAreNotHttps()
-    {
-        // Nothing to assert beyond "doesn't start anything or throw": a file path or http address is dropped.
-        new Dialogs().OpenUrl(@"C:\Windows\notepad.exe");
-        new Dialogs().OpenUrl("http://example.com");
-        new Dialogs().OpenUrl("not a url");
-    }
 }

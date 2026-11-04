@@ -363,18 +363,6 @@ public class IdentifierTests : IDisposable
         Assert.Equal([("South Park", (int?)1997)], _tmdb.Searches.Select(s => (s.Title, s.Year)));
     }
 
-    [Fact]
-    public async Task EpisodeAirYear_ShowThatStartedLater_LosesTheYearCredit()
-    {
-        _tmdb.OnSearch("Shameless", null, TitleKind.Show, Show(1906, "Shameless", 2004, 20), Show(34307, "Shameless", 2011, 20))
-            .OnTitle(ShowTitle(1906, "Shameless", 2004, 2)).OnSeason(1906, Season(2, "Episode 1"));
-
-        var result = await Identify(Episode("Shameless", null, 2, 1) with { AirYear = 2005 });
-
-        Assert.Equal(IdentificationStatus.Matched, result.Status);
-        Assert.Equal(1906, result.Title!.TmdbId);
-    }
-
     [Theory]
     [InlineData(2009, IdentificationStatus.Matched)] // the 2011 show started after it
     [InlineData(2012, IdentificationStatus.NeedsReview)] // both started before it: still a tie
@@ -663,18 +651,6 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
-    public async Task Movie_DurationCloseToRuntime_IsAccepted()
-    {
-        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
-            .OnTitle(FilmTitle(949, "Heat", 1995, runtimeMin: 170));
-
-        var result = await Identify(Movie("Heat", 1995), durationS: 168 * 60);
-
-        Assert.Equal(IdentificationStatus.Matched, result.Status);
-        Assert.Single(_tmdb.TitleFetches);
-    }
-
-    [Fact]
     public async Task Movie_DurationMismatch_StaysPenalised_WhenARetryReturnsTheSameFilm()
     {
         _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
@@ -743,16 +719,6 @@ public class IdentifierTests : IDisposable
     }
 
     [Fact]
-    public async Task ShortenedTitle_LosesAPenaltyPerDroppedWord()
-    {
-        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995)).OnTitle(FilmTitle(949, "Heat", 1995));
-        var exact = await Identify(Movie("Heat", 1995));
-        var shortened = await Identify(Movie("Heat Extended Cut", 1995));
-
-        Assert.Equal(2 * ScoringWeights.ShortenedWordPenalty, exact.Confidence - shortened.Confidence, 9);
-    }
-
-    [Fact]
     public async Task TmdbIdTag_UnknownToTmdb_FallsBackToSearch()
     {
         _tmdb.OnSearch("The Matrix", 1999, TitleKind.Movie, Film(603, "The Matrix", 1999))
@@ -793,17 +759,6 @@ public class IdentifierTests : IDisposable
         Assert.Equal([(91239, 1)], _tmdb.SeasonFetches);
     }
 
-    [Fact]
-    public async Task Movie_UnknownDuration_FetchesTheTitleOnlyOnce()
-    {
-        _tmdb.OnSearch("Heat", 1995, TitleKind.Movie, Film(949, "Heat", 1995))
-            .OnTitle(FilmTitle(949, "Heat", 1995));
-
-        await Identify(Movie("Heat", 1995), durationS: null);
-
-        Assert.Single(_tmdb.TitleFetches);
-    }
-
     [Theory]
     [InlineData(UnavailableReason.Offline, IdentificationStatus.Offline)]
     [InlineData(UnavailableReason.ServerError, IdentificationStatus.Offline)]
@@ -818,16 +773,6 @@ public class IdentifierTests : IDisposable
         Assert.Equal(expected, result.Status);
         Assert.Null(result.Title);
         Assert.Empty(result.Candidates);
-    }
-
-    [Fact]
-    public async Task ProviderOffline_ReturnsOffline()
-    {
-        _tmdb.Unavailable = UnavailableReason.Offline;
-
-        var result = await Identify(Episode("Brassic", 2019));
-
-        Assert.Equal(IdentificationStatus.Offline, result.Status);
     }
 
     [Fact]

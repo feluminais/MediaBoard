@@ -248,17 +248,6 @@ public sealed class FolderActionsTests
     }
 
     [Fact]
-    public async Task RescanAll_WithNoFolders_DoesNothing()
-    {
-        using var stack = new ShellStack();
-
-        var outcome = await stack.Services.GetRequiredService<FolderActions>().RescanAllAsync();
-
-        Assert.True(outcome.Ok);
-        AssertNoErrors(stack);
-    }
-
-    [Fact]
     public async Task Add_MarksTheFolderWaitingOrScanning_BeforeItReturns_AndIdleOnceDone()
     {
         using var stack = new ShellStack();

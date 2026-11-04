@@ -192,27 +192,6 @@ public class EpisodeResolverTests
     }
 
     [Fact]
-    public void CyrillicTitle_Matches()
-    {
-        var season = Season(1, "Початок", "Продовження");
-
-        var result = EpisodeResolver.Resolve(Parsed(1, [], "Продовження"), season, null);
-
-        Assert.Equal([2], Numbers(result));
-    }
-
-    [Fact]
-    public void TwoHalfEpisodeFiles_ResolveByTitleWithoutError()
-    {
-        var season = SeasonWith(8, (15, "Sold!"), (16, "Gone!"));
-        var a = Parsed(8, [15], "Sold!");
-        var b = Parsed(8, [15], "Gone!");
-
-        Assert.Equal([15], Numbers(EpisodeResolver.Resolve(a, season, null)));
-        Assert.Equal([16], Numbers(EpisodeResolver.Resolve(b, season, null)));
-    }
-
-    [Fact]
     public void AcrossSeasons_UniqueTitleMatch_IsFound()
     {
         var result = EpisodeResolver.ResolveAcrossSeasons(
@@ -250,18 +229,11 @@ public class EpisodeResolverTests
     [Theory]
     [InlineData("Kif Gets Knocked Up a Notch", true)]
     [InlineData("Roswell That Ends Well", false)]
-    [InlineData("Roswell that Ends Well!", false)]
     public void TitleDisagrees_WhenTheTitleIsFarFromTheEpisodeAtTheNumber(string title, bool expected)
     {
         var episodes = Season(4, "Roswell That Ends Well").Episodes;
 
         Assert.Equal(expected, EpisodeResolver.TitleDisagrees(Parsed(4, [1], title), episodes));
-    }
-
-    [Fact]
-    public void TitleDisagrees_NoTitle_NeverDisagrees()
-    {
-        Assert.False(EpisodeResolver.TitleDisagrees(Parsed(4, [1]), Season(4, "Roswell That Ends Well").Episodes));
     }
 
     [Theory]

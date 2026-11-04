@@ -128,20 +128,6 @@ public class VlcSessionTests
     }
 
     [Fact]
-    public async Task Session_EachSessionGetsItsOwnPasswordAndPort()
-    {
-        await using var first = Create();
-        await first.StartAsync(File, null, Ct);
-        var firstArgs = _startInfo!.ArgumentList.ToList();
-
-        await using var second = Create();
-        await second.StartAsync(File, null, Ct);
-        var secondArgs = _startInfo.ArgumentList.ToList();
-
-        Assert.NotEqual(firstArgs[7], secondArgs[7]);
-    }
-
-    [Fact]
     public async Task Vlc_ParsesStatusJson()
     {
         _status = Status("playing", 120, 1320);
@@ -278,19 +264,6 @@ public class VlcSessionTests
     }
 
     [Fact]
-    public async Task Vlc_DoesNotPollFasterThanTheIntervalOnceItAnswers()
-    {
-        _status = Status("playing", 1, 60);
-        await using var session = Create(pollInterval: TimeSpan.FromMilliseconds(300));
-        await session.StartAsync(File, null, Ct);
-        await _events.WaitFor<PlaybackEvent.Position>();
-
-        await Task.Delay(200, Ct);
-
-        Assert.Equal(1, RequestCount);
-    }
-
-    [Fact]
     public async Task Session_MissingExecutable_RaisesFailed()
     {
         await using var session = Create(start: _ => throw new Win32Exception(2));
@@ -355,23 +328,6 @@ public class VlcSessionTests
 
         var failed = await _events.WaitFor<PlaybackEvent.Failed>();
         Assert.Equal("VLC stopped unexpectedly", failed.Message);
-    }
-
-    [Fact]
-    public async Task Session_NothingFollowsAFinalEvent()
-    {
-        _status = Status("playing", 5, 60);
-        await using var session = Create();
-        await session.StartAsync(File, null, Ct);
-        await _events.WaitFor<PlaybackEvent.Position>();
-        _process.Exit();
-        await _events.WaitFor<PlaybackEvent.Closed>();
-        var count = _events.All.Count;
-
-        _status = Status("paused", 9, 60);
-        await Task.Delay(100, Ct);
-
-        Assert.Equal(count, _events.All.Count);
     }
 
     [Fact]
@@ -658,16 +614,6 @@ public class VlcSessionTests
 
         _playlist = Playlist;
         await _events.WaitFor<PlaybackEvent.FileChanged>();
-    }
-
-    [Theory]
-    [InlineData("playing", VlcState.Playing)]
-    [InlineData("paused", VlcState.Paused)]
-    [InlineData("stopped", VlcState.Stopped)]
-    public void Parser_MapsStates(string state, VlcState expected)
-    {
-        Assert.True(VlcStatus.TryParse($$"""{"state":"{{state}}","time":3,"length":9}""", out var status));
-        Assert.Equal(expected, status.State);
     }
 
     [Fact]

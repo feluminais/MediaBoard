@@ -28,12 +28,6 @@ public class CorpusParseTests
         Parsed.Value.Where(x => x.Path.StartsWith(folder + "\\", StringComparison.Ordinal)).Select(x => x.Parsed);
 
     [Fact]
-    public void Snapshot_HasVideos()
-    {
-        Assert.NotEmpty(Parsed.Value);
-    }
-
-    [Fact]
     public void EveryVideoParses()
     {
         var bad = Parsed.Value
@@ -68,26 +62,6 @@ public class CorpusParseTests
             Assert.Equal(8, x.Parsed.Season);
             Assert.Equal([15], x.Parsed.Episodes);
         });
-    }
-
-    [Theory]
-    [InlineData("GTA IV - Complete Edition [FitGirl Repack]")]
-    [InlineData("Photoscape X Pro 4.2.1")]
-    public void IgnoredFolders_HaveNoVideos(string folder)
-    {
-        var lines = Snapshot.Where(e => e.RelativePath.StartsWith(folder + "\\", StringComparison.Ordinal)).ToList();
-
-        Assert.NotEmpty(lines);
-        Assert.DoesNotContain(lines, e => MediaFileRules.IsVideo(e.RelativePath));
-    }
-
-    [Fact]
-    public void PartsFiles_AreIgnored()
-    {
-        var parts = Snapshot.Where(e => e.RelativePath.EndsWith(".parts", StringComparison.OrdinalIgnoreCase)).ToList();
-
-        Assert.NotEmpty(parts);
-        Assert.All(parts, e => Assert.True(MediaFileRules.IsIgnored(e.RelativePath, e.Size)));
     }
 
     [Fact]

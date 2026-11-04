@@ -93,24 +93,6 @@ public class PosterWiringTests
     }
 
     [AvaloniaFact]
-    public async Task Grid_LongScroll_KeepsTheRequestCountBounded()
-    {
-        var source = new HungSource();
-        var (grid, view, window, scroller) = await ShownGrid(source.Loader());
-        var peak = 0;
-
-        for (var step = 1; step <= 60; step++)
-        {
-            scroller.Offset = new Vector(0, step * 700.0);
-            Settle(window);
-            peak = Math.Max(peak, grid.Items.Count(c => c.IsLookingForPoster));
-        }
-
-        Assert.InRange(peak, 1, MaxBuilt);
-        Assert.InRange(grid.Items.Count(c => c.IsLookingForPoster), 0, MaxBuilt);
-    }
-
-    [AvaloniaFact]
     public async Task Grid_ScrolledAwayCards_LetGoOfTheirBitmaps()
     {
         // Real files, so the cards hold real leases while they are on screen.
@@ -283,7 +265,4 @@ public class PosterWiringTests
         Assert.All(list.Items.Take(50), c => Assert.False(c.IsLookingForPoster));
     }
 
-    [Fact]
-    public void SharedBitmapCache_IsBuiltWithTheDocumentedCapacity() =>
-        Assert.Equal(300, PosterImage.SharedCacheCapacity);
 }

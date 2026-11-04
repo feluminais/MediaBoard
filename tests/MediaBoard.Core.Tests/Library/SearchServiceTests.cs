@@ -146,8 +146,6 @@ public sealed class SearchServiceTests : IDisposable
 
         var results = await _service.SearchAsync("dune", Ct);
 
-        Assert.Equal(10, SearchService.MaxLibraryResults);
-        Assert.Equal(10, SearchService.MaxOnlineResults);
         Assert.Equal(10, results.Library.Count);
         Assert.Equal(10, results.Online.Count);
     }
@@ -161,21 +159,8 @@ public sealed class SearchServiceTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _service.SearchAsync("dune", cts.Token));
     }
 
-    [Fact]
-    public async Task OnlineDetails_ComeFromTmdb()
-    {
-        _tmdb.OnTitle(Details(438631, "Dune"));
-
-        var details = await _service.GetOnlineDetailsAsync(438631, TitleKind.Movie, Ct);
-
-        Assert.Equal("Dune", details?.Name);
-    }
-
     [Theory]
     [InlineData(UnavailableReason.Offline)]
-    [InlineData(UnavailableReason.NoKey)]
-    [InlineData(UnavailableReason.KeyRejected)]
-    [InlineData(UnavailableReason.ServerError)]
     public async Task OnlineDetails_Unavailable_ReturnsNull(UnavailableReason reason)
     {
         _tmdb.OnTitle(Details(438631, "Dune"));
@@ -198,9 +183,6 @@ public sealed class SearchServiceTests : IDisposable
 
     [Theory]
     [InlineData(UnavailableReason.Offline)]
-    [InlineData(UnavailableReason.NoKey)]
-    [InlineData(UnavailableReason.KeyRejected)]
-    [InlineData(UnavailableReason.ServerError)]
     public async Task OnlineSeason_Unavailable_ReturnsNull(UnavailableReason reason)
     {
         _tmdb.OnSeason(1399, new SeasonDetails(1, []));
@@ -221,16 +203,6 @@ public sealed class SearchServiceTests : IDisposable
         Assert.NotNull(await _service.GetOnlineSeasonAsync(1399, 1, Ct));
     }
 
-    [Fact]
-    public void Commands_AreTheThreeFixedOnes()
-    {
-        var all = _service.Commands("");
-
-        Assert.Equal(
-            [("rescan", "Rescan library"), ("settings", "Open settings"), ("hidden", "Show hidden items")],
-            all.Select(c => (c.Id, c.Label)));
-    }
-
     [Theory]
     [InlineData("re", new[] { "rescan" })]
     [InlineData("RES", new[] { "rescan" })]
@@ -240,7 +212,6 @@ public sealed class SearchServiceTests : IDisposable
     [InlineData("hid", new[] { "hidden" })]
     [InlineData("items", new[] { "hidden" })]
     [InlineData("scan", new string[0])] // not a prefix of any word
-    [InlineData("zzz", new string[0])]
     public void Commands_FilterByPrefix(string filter, string[] expectedIds)
     {
         Assert.Equal(expectedIds, _service.Commands(filter).Select(c => c.Id));

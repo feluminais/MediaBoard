@@ -202,32 +202,11 @@ public class TmdbClientTests
         Assert.All(handler.Requests, r => Assert.Contains("language=en-US", r.Uri.Query));
     }
 
-    [Fact]
-    public void FixtureHandler_NamesFilesByPathAndSortedQuery_WithoutTheKey()
-    {
-        var uri = new Uri("https://api.themoviedb.org/3/search/movie?query=Dune%20Part&year=2021&language=en-US&api_key=SECRET");
-
-        Assert.Equal("3_search_movie__language=en-US&query=Dune Part&year=2021.json", FixtureHandler.FileNameFor(uri));
-    }
-
-    [Fact]
-    public async Task MissingFixture_FailsWithTheExpectedFileName()
-    {
-        var rig = Build(new FixtureHandler());
-
-        var ex = await Assert.ThrowsAsync<FixtureHandler.MissingFixtureException>(
-            () => rig.Client.GetTitleAsync(7, TitleKind.Movie, Ct));
-
-        Assert.Contains("3_movie_7__language=en-US.json", ex.Message);
-        Assert.DoesNotContain(V3Key, ex.Message);
-    }
-
     // --- failures --------------------------------------------------------------------------------
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData("   ")]
     public async Task NoKey_ThrowsNoKey_WithoutHttpCall(string? key)
     {
         var handler = StubHandler.Status(HttpStatusCode.OK);

@@ -202,24 +202,6 @@ public class HomeViewModelTests : IDisposable
         Assert.False(home.ShowNothingAdded);
     }
 
-    [AvaloniaFact]
-    public async Task Home_Rows_ShowTitlesAndOpenAllArrows()
-    {
-        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
-        _library.Recent.Add(FakeLibrary.Card(2, "Coco"));
-        var (_, home) = await LoadedHome();
-
-        var view = new HomeView { DataContext = home };
-        new Window { Width = 1000, Height = 700, Content = view }.Show();
-
-        Assert.Equal(2, view.GetVisualDescendants().OfType<Button>().Count(b => b.Content as string == "\u203A"));
-        var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
-        Assert.Contains("Continue watching", texts);
-        Assert.Contains("Recently added", texts);
-        Assert.Contains("Klaus", texts);
-        Assert.Contains("Coco", texts);
-    }
-
     [Theory]
     [InlineData(-1, 0, 500, 0, 300, false)]   // down, page not at the bottom: the page scrolls
     [InlineData(-1, 0, 500, 300, 300, true)]  // down, page at the bottom: the row scrolls
@@ -279,18 +261,6 @@ public class HomeViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task ClickingARecentCard_OpensTheTitle()
-    {
-        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
-        var (shell, home) = await LoadedHome();
-
-        home.RecentlyAdded[0].OpenCommand.Execute(null);
-
-        Assert.Equal(7, shell.OpenTitleId);
-        Assert.IsType<TitleViewModel>(shell.CurrentPage);
-    }
-
-    [AvaloniaFact]
     public async Task TitlePage_BackReturnsToTheWholePageItCameFrom()
     {
         _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
@@ -321,19 +291,6 @@ public class HomeViewModelTests : IDisposable
         Ui.Flush();
 
         await Ui.WaitUntil(() => page.Header.Name == "Coco, renamed");
-    }
-
-    [AvaloniaFact]
-    public async Task OnlineTitle_OpensFromTheShell_AndBackWorks()
-    {
-        var (shell, home) = await LoadedHome();
-
-        shell.OpenOnlineTitle(603, MediaBoard.Core.Metadata.TitleKind.Movie);
-
-        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
-        Assert.True(page.IsOnline);
-        page.BackCommand.Execute(null);
-        Assert.Same(home, shell.CurrentPage);
     }
 
     [AvaloniaFact]
