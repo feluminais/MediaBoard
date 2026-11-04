@@ -46,7 +46,8 @@ public sealed class GraphLayout
 
     /// <param name="episodeCounts">Episodes per season, in order.</param>
     /// <param name="width">The width to fill before wrapping; infinity for one band.</param>
-    public static GraphLayout Compute(IReadOnlyList<int> episodeCounts, double width, GraphMetrics? metrics = null)
+    /// <param name="labels">False leaves the episode labels out, for cells that already carry their episode number.</param>
+    public static GraphLayout Compute(IReadOnlyList<int> episodeCounts, double width, GraphMetrics? metrics = null, bool labels = true)
     {
         var m = metrics ?? GraphMetrics.Regular;
         var columns = new List<Column>();
@@ -59,15 +60,15 @@ public sealed class GraphLayout
             for (var start = 0; start < episodeCounts[season]; start += m.MaxRows)
             {
                 var count = Math.Min(m.MaxRows, episodeCounts[season] - start);
-                var rail = bandStart != start;
+                var rail = labels && bandStart != start;
                 var span = (rail ? m.RailWidth + m.Gap : 0) + m.CellWidth;
                 if (bandStart >= 0 && x + span > width)
                 {
                     bandTop += m.HeaderHeight + bandRows * m.Pitch - m.Gap + m.BandGap;
                     x = 0;
                     bandRows = 0;
-                    rail = true;
-                    span = m.RailWidth + m.Gap + m.CellWidth;
+                    rail = labels;
+                    span = (rail ? m.RailWidth + m.Gap : 0) + m.CellWidth;
                 }
 
                 columns.Add(new Column(season, start, count, x + (rail ? m.RailWidth + m.Gap : 0), bandTop + m.HeaderHeight, rail));

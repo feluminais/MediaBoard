@@ -53,6 +53,17 @@ public class EpisodeGraphTests
     }
 
     [Fact]
+    public void Layout_WithoutLabels_NoColumnHasARail_AndTheCellsMoveLeft()
+    {
+        var withLabels = GraphLayout.Compute([5, 130], 2000);
+        var without = GraphLayout.Compute([5, 130], 2000, labels: false);
+
+        Assert.All(without.Columns, c => Assert.False(c.Rail));
+        Assert.Equal(0, without.Columns[0].CellsX);
+        Assert.True(without.Size.Width < withLabels.Size.Width);
+    }
+
+    [Fact]
     public void Layout_ASeasonLongerThanTheCap_ContinuesInAnotherColumnWithItsOwnLabels()
     {
         var layout = GraphLayout.Compute([5, 130, 5], 2000);

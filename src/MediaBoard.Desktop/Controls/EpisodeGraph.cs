@@ -75,8 +75,9 @@ public sealed class EpisodeGraph : Control
 
     static EpisodeGraph()
     {
-        AffectsMeasure<EpisodeGraph>(SeasonsProperty, IsCompactProperty);
+        AffectsMeasure<EpisodeGraph>(SeasonsProperty, IsCompactProperty, ModeProperty);
         AffectsRender<EpisodeGraph>(SeasonsProperty, ModeProperty, SelectedSeasonProperty);
+        ModeProperty.Changed.AddClassHandler<EpisodeGraph>((graph, _) => graph.OnModeChanged());
         SeasonsProperty.Changed.AddClassHandler<EpisodeGraph>((graph, _) => graph.OnSeasonsChanged());
         IsCompactProperty.Changed.AddClassHandler<EpisodeGraph>((graph, _) => graph.OnSizesChanged());
     }
@@ -152,7 +153,8 @@ public sealed class EpisodeGraph : Control
         if (width.Equals(_layoutWidth)) return false;
 
         _layoutWidth = width;
-        _layout = GraphLayout.Compute(seasons.Select(s => s.Episodes.Count).ToList(), width, IsCompact ? GraphMetrics.Compact : GraphMetrics.Regular);
+        _layout = GraphLayout.Compute(seasons.Select(s => s.Episodes.Count).ToList(), width, IsCompact ? GraphMetrics.Compact : GraphMetrics.Regular,
+            labels: Mode != GraphMode.Progress); // a progress cell already shows its episode number
         return true;
     }
 
@@ -161,6 +163,14 @@ public sealed class EpisodeGraph : Control
         _layoutWidth = double.NaN;
         _cellText.Clear();
         _hover = null;
+    }
+
+    // The labels come and go with the mode, which moves the columns.
+    private void OnModeChanged()
+    {
+        _layoutWidth = double.NaN;
+        _hover = null;
+        HoverChanged?.Invoke(this, new GraphHoverEventArgs(null, default));
     }
 
     private void OnSeasonsChanged()
