@@ -5,22 +5,25 @@
                   xmlns:controls="using:MediaBoard.Desktop.Controls"
                   x:Class="MediaBoard.Desktop.Views.PosterRow"
                   x:DataType="vm:PosterCardViewModel">
-    <Button Classes="card" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-            Command="{Binding OpenCommand}">
-        <Button.ContextMenu>
+    <!-- Two hit areas, as on PosterCard: the poster runs OpenCommand, the text opens the title page. -->
+    <DockPanel Classes.dimmed="{Binding IsDimmed}" Margin="0,4" Background="Transparent">
+        <DockPanel.ContextMenu>
             <ContextMenu>
                 <MenuItem Header="Remove from list" Command="{Binding RemoveCommand}" />
             </ContextMenu>
-        </Button.ContextMenu>
-        <DockPanel Classes.dimmed="{Binding IsDimmed}" Margin="0,4">
-            <Panel DockPanel.Dock="Left" Width="48" Height="72" Margin="0,0,16,0">
+        </DockPanel.ContextMenu>
+        <Button Classes="card" DockPanel.Dock="Left" Margin="0,0,16,0" VerticalAlignment="Center" Command="{Binding OpenCommand}">
+            <Panel Width="48" Height="72">
                 <Border CornerRadius="6" ClipToBounds="True">
                     <controls:PosterImage LocalPath="{Binding PosterLocalPath}" DecodeWidth="96" />
                 </Border>
                 <Border Classes="frame" CornerRadius="6" IsHitTestVisible="False" />
             </Panel>
-            <StackPanel VerticalAlignment="Center" Spacing="2">
-                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+        </Button>
+        <Button Classes="card cardText" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalAlignment="Center"
+                Command="{Binding OpenTitleCommand}" IsTabStop="{Binding CanPlay}">
+            <StackPanel Spacing="2">
+                <TextBlock Classes="cardTitle" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                 <TextBlock Classes="muted" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis"
                            IsVisible="{Binding HasSubtitle}" />
                 <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="{DynamicResource SmallFontSize}" TextTrimming="CharacterEllipsis"
@@ -28,6 +31,6 @@
                 <ProgressBar Height="4" MinHeight="0" Minimum="0" Maximum="1" MaxWidth="240" HorizontalAlignment="Left"
                              Value="{Binding Progress}" IsVisible="{Binding HasProgress}" Margin="0,4,0,0" />
             </StackPanel>
-        </DockPanel>
-    </Button>
+        </Button>
+    </DockPanel>
 </views:PosterHost>

@@ -169,7 +169,7 @@ public sealed partial class HomeViewModel : PageViewModel
 
         var playing = PosterCards.Build(_library.ContinueWatching(RowLimit), known,
             item => PosterCardViewModel.For(item, _posters, card => _actions.PlayFile(card.FileId!.Value),
-                card => _library.DismissContinue(card.TitleId)));
+                card => _library.DismissContinue(card.TitleId), card => _actions.OpenTitle(card.TitleId)));
         var added = PosterCards.Build(_library.RecentlyAdded(RowLimit), known,
             card => PosterCardViewModel.For(card, _posters, c => _actions.OpenTitle(c.TitleId)));
         return new HomeData(false, playing, added);

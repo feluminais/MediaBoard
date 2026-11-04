@@ -14,14 +14,16 @@ public sealed partial class PosterCardViewModel : ObservableObject
     private readonly PosterLoader _loader;
     private readonly Action<PosterCardViewModel> _open;
     private readonly Action<PosterCardViewModel>? _remove;
+    private readonly Action<PosterCardViewModel>? _openTitle;
     private CancellationTokenSource? _request;
 
     private PosterCardViewModel(
         object source, string key, int titleId, int? fileId, string name, string? subtitle, string? detail,
         string? posterPath, double progress, bool isDimmed, PosterLoader loader, Action<PosterCardViewModel> open,
-        Action<PosterCardViewModel>? remove = null)
+        Action<PosterCardViewModel>? remove = null, Action<PosterCardViewModel>? openTitle = null)
     {
         _remove = remove;
+        _openTitle = openTitle;
         Source = source;
         Key = key;
         TitleId = titleId;
@@ -81,8 +83,13 @@ public sealed partial class PosterCardViewModel : ObservableObject
     /// <summary>A Continue watching card can be taken off the list.</summary>
     public bool CanRemove => _remove is not null;
 
+    /// <summary>Clicking the poster: starts the file on a Continue watching card, opens the title page on any other.</summary>
     [RelayCommand]
     private void Open() => _open(this);
+
+    /// <summary>Clicking the name and subtitle: always the title page, as if the title were opened from Movies or Shows.</summary>
+    [RelayCommand]
+    private void OpenTitle() => (_openTitle ?? _open)(this);
 
     /// <summary>Takes the title off Continue watching; its progress stays.</summary>
     [RelayCommand]
@@ -94,9 +101,10 @@ public sealed partial class PosterCardViewModel : ObservableObject
             card.PosterPath, 0, card.Hidden || card.Missing, loader, open);
 
     public static PosterCardViewModel For(
-        ContinueItem item, PosterLoader loader, Action<PosterCardViewModel> open, Action<PosterCardViewModel>? remove = null) =>
+        ContinueItem item, PosterLoader loader, Action<PosterCardViewModel> open, Action<PosterCardViewModel>? remove = null,
+        Action<PosterCardViewModel>? openTitle = null) =>
         new(item, $"f{item.FileId}", item.TitleId, item.FileId, item.TitleName, ContinueSubtitle(item), null,
-            item.PosterPath, item.IsNext ? 0 : StartedProgress(item), item.Missing, loader, open, remove);
+            item.PosterPath, item.IsNext ? 0 : StartedProgress(item), item.Missing, loader, open, remove, openTitle);
 
     /// <summary>The least a started file's bar shows, so a file opened for a moment (or with no known length) still looks started.</summary>
     internal const double MinStartedProgress = 0.03;

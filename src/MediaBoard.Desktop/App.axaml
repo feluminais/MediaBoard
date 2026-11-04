@@ -300,6 +300,10 @@
         <Style Selector="Button.card:pointerover Border.playOverlay, Button.card:focus-visible Border.playOverlay">
             <Setter Property="Opacity" Value="1" />
         </Style>
+        <!-- The text half of a card is its own button; hovering or focusing it tints the name instead of ringing the poster. -->
+        <Style Selector="Button.cardText:pointerover TextBlock.cardTitle, Button.cardText:focus-visible TextBlock.cardTitle">
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
         <Style Selector="StackPanel.dimmed, DockPanel.dimmed, Grid.dimmed">
             <Setter Property="Opacity" Value="0.5" />
         </Style>

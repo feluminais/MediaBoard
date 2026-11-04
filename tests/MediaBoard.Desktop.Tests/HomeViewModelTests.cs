@@ -109,11 +109,17 @@ public class HomeViewModelTests : IDisposable
         var view = new PosterCard { DataContext = card };
         var window = new Window { Content = view };
         window.Show();
-        var button = view.GetVisualDescendants().OfType<Button>().First();
+        var buttons = view.GetVisualDescendants().OfType<Button>().ToList();
+        var menuOwner = view.GetVisualDescendants().OfType<Control>().First(c => c.ContextMenu is not null);
+        Assert.Equal(2, buttons.Count); // the poster and the text
 
-        button.RaiseEvent(new ContextRequestedEventArgs());
+        foreach (var button in buttons)
+        {
+            button.RaiseEvent(new ContextRequestedEventArgs());
 
-        Assert.Equal(continueCard, button.ContextMenu!.IsOpen);
+            Assert.Equal(continueCard, menuOwner.ContextMenu!.IsOpen);
+            menuOwner.ContextMenu.Close();
+        }
     }
 
     [AvaloniaFact]
@@ -318,6 +324,33 @@ public class HomeViewModelTests : IDisposable
         Assert.Equal(70, fileId);
         Assert.False(fromStart);
         Assert.NotEqual(Environment.CurrentManagedThreadId, threadId);
+    }
+
+    [AvaloniaFact]
+    public async Task ContinueCard_Text_OpensTheTitlePage_WithoutPlaying()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(7, "Klaus"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Klaus");
+        var (shell, home) = await LoadedHome();
+
+        home.ContinueWatching[0].OpenTitleCommand.Execute(null);
+
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+        Assert.Equal("Klaus", page.Header.Name);
+        Assert.Empty(_playback.Played);
+    }
+
+    [AvaloniaFact]
+    public async Task TitleCard_Text_OpensTheTitlePage_LikeThePoster()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+
+        home.RecentlyAdded[0].OpenTitleCommand.Execute(null);
+
+        Assert.IsType<TitleViewModel>(shell.CurrentPage);
     }
 
     [AvaloniaFact]
