@@ -401,6 +401,22 @@ public class HomeViewModelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void ContinueCard_ProgressBarStaysInsideThePoster()
+    {
+        var card = PosterCardViewModel.For(FakeLibrary.Resume(1, "Klaus", position: 60, duration: 6000), Posters.None(), _ => { });
+        var view = new PosterCard { DataContext = card };
+        var window = new Window { Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var bar = view.GetVisualDescendants().OfType<ProgressBar>().Single();
+
+        // A bar wider than the poster is centred and spills over both edges, so a small fill lands outside it and is clipped.
+        Assert.Equal(0, bar.Bounds.X);
+        Assert.Equal(view.Width, bar.Bounds.Width);
+    }
+
+    [AvaloniaFact]
     public async Task LeavingThePage_CancelsPosterWork()
     {
         var gate = new TaskCompletionSource<string?>();

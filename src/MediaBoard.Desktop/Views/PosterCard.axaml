@@ -20,7 +20,7 @@
                 <Border CornerRadius="8" ClipToBounds="True">
                     <Panel>
                         <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="{DynamicResource PosterDecodeWidth}" />
-                        <ProgressBar VerticalAlignment="Bottom" Height="4" MinHeight="0" Minimum="0" Maximum="1"
+                        <ProgressBar VerticalAlignment="Bottom" Height="4" MinWidth="0" MinHeight="0" Minimum="0" Maximum="1"
                                      Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
                     </Panel>
                 </Border>
