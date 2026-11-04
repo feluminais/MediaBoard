@@ -47,6 +47,9 @@ public sealed partial class PosterCardViewModel : ObservableObject
     /// <summary>The file a Continue watching card plays; null for a title card.</summary>
     public int? FileId { get; }
 
+    /// <summary>A click starts a file rather than opening the title page.</summary>
+    public bool CanPlay => FileId is not null;
+
     public string Name { get; }
 
     public string? Subtitle { get; }

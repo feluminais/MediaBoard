@@ -289,6 +289,17 @@
         <Style Selector="Button.card:focus-visible Border.frame">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
+        <Style Selector="Button.card Border.playOverlay">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.card:pointerover Border.playOverlay, Button.card:focus-visible Border.playOverlay">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
         <Style Selector="StackPanel.dimmed, DockPanel.dimmed, Grid.dimmed">
             <Setter Property="Opacity" Value="0.5" />
         </Style>

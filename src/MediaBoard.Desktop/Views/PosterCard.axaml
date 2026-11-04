@@ -24,6 +24,12 @@
                                      Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
                     </Panel>
                 </Border>
+                <!-- Shown on hover or keyboard focus of a Continue watching card, to say a click starts the file. -->
+                <Border Classes="playOverlay" Width="52" Height="52" CornerRadius="26" Background="#99404040"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                        IsVisible="{Binding CanPlay}">
+                    <Path Data="M0,0 L16,9 L0,18 Z" Fill="White" Stretch="Uniform" Width="18" Height="18" Margin="4,0,0,0" />
+                </Border>
                 <Border Classes="frame" CornerRadius="8" IsHitTestVisible="False" />
             </Panel>
             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
