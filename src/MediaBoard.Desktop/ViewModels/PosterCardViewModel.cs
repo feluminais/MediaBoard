@@ -96,8 +96,16 @@ public sealed partial class PosterCardViewModel : ObservableObject
     public static PosterCardViewModel For(
         ContinueItem item, PosterLoader loader, Action<PosterCardViewModel> open, Action<PosterCardViewModel>? remove = null) =>
         new(item, $"f{item.FileId}", item.TitleId, item.FileId, item.TitleName, ContinueSubtitle(item), null,
-            item.PosterPath, item.IsNext || item.DurationS <= 0 ? 0 : Math.Clamp(item.PositionS / item.DurationS, 0, 1),
-            item.Missing, loader, open, remove);
+            item.PosterPath, item.IsNext ? 0 : StartedProgress(item), item.Missing, loader, open, remove);
+
+    /// <summary>The least a started file's bar shows, so a file opened for a moment (or with no known length) still looks started.</summary>
+    internal const double MinStartedProgress = 0.08;
+
+    private static double StartedProgress(ContinueItem item)
+    {
+        var ratio = item.DurationS > 0 ? item.PositionS / item.DurationS : 0;
+        return Math.Clamp(ratio, MinStartedProgress, 1);
+    }
 
     /// <summary>
     /// Starts finding the poster unless it is found, being found, or there is none to find. Call when the card is

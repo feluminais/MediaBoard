@@ -387,6 +387,19 @@ public class HomeViewModelTests : IDisposable
         Assert.Equal(0.5, home.ContinueWatching[0].Progress);
     }
 
+    [Theory]
+    [InlineData(1.5, 6000, 0.08)] // opened for a moment: still shows a sliver
+    [InlineData(100, 0, 0.08)]    // length unknown: still shows a sliver
+    [InlineData(3000, 6000, 0.5)] // far enough along: the real fraction
+    public void ContinueCard_ShowsAtLeastTheMinimumBar(double position, double duration, double expected)
+    {
+        var card = PosterCardViewModel.For(
+            FakeLibrary.Resume(1, "Klaus", position: position, duration: duration), new PosterLoader((_, _, _) => Task.FromResult<string?>(null)), _ => { });
+
+        Assert.Equal(expected, card.Progress);
+        Assert.True(card.HasProgress);
+    }
+
     [AvaloniaFact]
     public async Task LeavingThePage_CancelsPosterWork()
     {
