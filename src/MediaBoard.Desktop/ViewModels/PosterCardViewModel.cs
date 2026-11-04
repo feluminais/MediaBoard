@@ -99,7 +99,7 @@ public sealed partial class PosterCardViewModel : ObservableObject
             item.PosterPath, item.IsNext ? 0 : StartedProgress(item), item.Missing, loader, open, remove);
 
     /// <summary>The least a started file's bar shows, so a file opened for a moment (or with no known length) still looks started.</summary>
-    internal const double MinStartedProgress = 0.08;
+    internal const double MinStartedProgress = 0.03;
 
     private static double StartedProgress(ContinueItem item)
     {

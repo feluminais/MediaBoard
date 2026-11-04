@@ -388,8 +388,8 @@ public class HomeViewModelTests : IDisposable
     }
 
     [Theory]
-    [InlineData(1.5, 6000, 0.08)] // opened for a moment: still shows a sliver
-    [InlineData(100, 0, 0.08)]    // length unknown: still shows a sliver
+    [InlineData(1.5, 6000, 0.03)] // opened for a moment: still shows a sliver
+    [InlineData(100, 0, 0.03)]    // length unknown: still shows a sliver
     [InlineData(3000, 6000, 0.5)] // far enough along: the real fraction
     public void ContinueCard_ShowsAtLeastTheMinimumBar(double position, double duration, double expected)
     {
