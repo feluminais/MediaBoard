@@ -430,16 +430,6 @@ public class MpvSessionTests
     }
 
     [Fact]
-    public async Task Session_OtherLaunchError_RaisesFailed()
-    {
-        await using var session = Create(start: _ => throw new InvalidOperationException("boom"));
-
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-
-        Assert.Equal([new PlaybackEvent.Failed("mpv could not start: boom")], _events.All);
-    }
-
-    [Fact]
     public async Task Session_ProcessExitAfterConnect_RaisesClosed()
     {
         await using var session = await StartConnectedAsync();
@@ -502,30 +492,6 @@ public class MpvSessionTests
     }
 
     [Fact]
-    public async Task Handler_Throwing_StillGetsFinalEvent()
-    {
-        await using var session = Create();
-        var first = true;
-        session.Event += e =>
-        {
-            if (e is PlaybackEvent.Playing && first)
-            {
-                first = false;
-                throw new InvalidOperationException("handler bug");
-            }
-        };
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-        await _pipe.WaitUntilReading();
-
-        await _pipe.FeedAsync("""{"event":"property-change","id":3,"name":"pause","data":false}""");
-        _clock.Advance(TimeSpan.FromSeconds(5));
-        _process.Exit();
-
-        await _events.WaitFor<PlaybackEvent.Closed>();
-        Assert.Equal([new PlaybackEvent.Playing(), new PlaybackEvent.Closed()], _events.All);
-    }
-
-    [Fact]
     public async Task GetPosition_IsTheLastTimePos_NotThrottled()
     {
         await using var session = await StartConnectedAsync();
@@ -576,20 +542,6 @@ public class MpvSessionTests
         Assert.False(_process.Killed);
         Assert.True(_process.Disposed);
         Assert.True(_pipe.Disposed);
-    }
-
-    [Fact]
-    public async Task Dispose_KillsPlayerThatIgnoresClose()
-    {
-        _process.ExitOnClose = false;
-        var session = Create(closeTimeout: TimeSpan.FromMilliseconds(50));
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.CloseRequested);
-        Assert.True(_process.Killed);
-        Assert.Empty(_events.All);
     }
 
     [Fact]

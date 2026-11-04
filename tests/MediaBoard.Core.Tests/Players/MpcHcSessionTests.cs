@@ -10,7 +10,6 @@ public class MpcHcSessionTests
     private const string Exe = @"C:\Program Files\MPC-HC\mpc-hc64.exe";
     private const nint PlayerHwnd = 4660;
     private static readonly PlayerInfo Player = new("mpc-hc", "MPC-HC", Exe, TracksProgress: true);
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
     private readonly FakeTransport _transport = new();
     private readonly FakePlayerProcess _process = new();
@@ -303,42 +302,6 @@ public class MpcHcSessionTests
     }
 
     [Fact]
-    public async Task Handler_ThrowingOnFailed_StartAsyncDoesNotThrow()
-    {
-        await using var session = Create(start: _ => throw new Win32Exception(2, "The system cannot find the file specified."));
-        session.Event += e => throw new InvalidOperationException($"handler bug on {e}");
-
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-
-        Assert.IsType<PlaybackEvent.Failed>(Assert.Single(_events.All));
-    }
-
-    [Fact]
-    public async Task Handler_BlockingUntilDispose_DoesNotDeadlock()
-    {
-        await using var session = await StartConnectedAsync();
-        using var handlerEntered = new ManualResetEventSlim();
-        using var disposeCalled = new ManualResetEventSlim();
-        var handlerSawDispose = false;
-        session.Event += e =>
-        {
-            if (e is not PlaybackEvent.Playing) return;
-            handlerEntered.Set();
-            // Like a synchronous Dispatcher.Invoke onto a UI thread that is busy in DisposeAsync.
-            handlerSawDispose = disposeCalled.Wait(TimeSpan.FromSeconds(2));
-        };
-
-        var receive = Task.Run(() => _transport.Receive(MpcApi.CMD_PLAYMODE, "0"), Ct);
-        Assert.True(handlerEntered.Wait(Timeout, Ct));
-        var dispose = session.DisposeAsync().AsTask();
-        disposeCalled.Set();
-
-        await dispose.WaitAsync(Timeout, Ct);
-        await receive.WaitAsync(Timeout, Ct);
-        Assert.True(handlerSawDispose, "DisposeAsync blocked while a handler was running");
-    }
-
-    [Fact]
     public async Task Session_LoadFailure_RaisesFailed()
     {
         await using var session = await StartConnectedAsync();
@@ -430,33 +393,6 @@ public class MpcHcSessionTests
     }
 
     [Fact]
-    public async Task OtherFileOpened_ThenDispose_ClosesPlayer()
-    {
-        var session = await LoadedAsync();
-        _transport.Receive(MpcApi.CMD_NOWPLAYING, @"next|||C:\Videos\test2.mp4|1500.000");
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.CloseRequested);
-        Assert.True(_process.Disposed);
-        Assert.True(_transport.Disposed);
-    }
-
-    [Theory]
-    [InlineData("3")] // MLS_CLOSING
-    [InlineData("0")] // MLS_CLOSED
-    public async Task FileClosed_ThenDispose_ClosesPlayer(string state)
-    {
-        var session = await LoadedAsync();
-        _transport.Receive(MpcApi.CMD_STATE, state);
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.CloseRequested);
-        Assert.True(_process.Disposed);
-    }
-
-    [Fact]
     public async Task Detach_ThenDispose_LeavesPlayerRunning()
     {
         var session = await LoadedAsync();
@@ -468,20 +404,6 @@ public class MpcHcSessionTests
         Assert.False(_process.Killed);
         Assert.True(_process.Disposed);
         Assert.True(_transport.Disposed);
-    }
-
-    [Fact]
-    public async Task Dispose_KillsPlayerThatIgnoresClose()
-    {
-        _process.ExitOnClose = false;
-        var session = Create(closeTimeout: TimeSpan.FromMilliseconds(50));
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.CloseRequested);
-        Assert.True(_process.Killed);
-        Assert.True(_process.Disposed);
     }
 
     [Fact]

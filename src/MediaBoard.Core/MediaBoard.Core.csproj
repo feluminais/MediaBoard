@@ -3,6 +3,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="MediaBoard.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Storage\Schema.sql" LogicalName="Schema.sql" />
   </ItemGroup>
   <ItemGroup>

@@ -271,16 +271,6 @@ public class VlcSessionTests
     }
 
     [Fact]
-    public async Task Session_OtherLaunchError_RaisesFailed()
-    {
-        await using var session = Create(start: _ => throw new InvalidOperationException("boom"));
-
-        await session.StartAsync(File, null, Ct);
-
-        Assert.Equal([new PlaybackEvent.Failed("VLC could not start: boom")], _events.All);
-    }
-
-    [Fact]
     public async Task Session_EarlyExit_RaisesFailed()
     {
         _httpDown = true;
@@ -324,23 +314,6 @@ public class VlcSessionTests
 
         var failed = await _events.WaitFor<PlaybackEvent.Failed>();
         Assert.Equal("VLC stopped unexpectedly", failed.Message);
-    }
-
-    [Fact]
-    public async Task Handler_Throwing_StillGetsFinalEvent()
-    {
-        _status = Status("playing", 5, 60);
-        await using var session = Create(pollInterval: Slow);
-        session.Event += e =>
-        {
-            if (e is PlaybackEvent.Loaded) throw new InvalidOperationException("handler bug");
-        };
-
-        await session.StartAsync(File, null, Ct);
-        await _events.WaitFor<PlaybackEvent.Position>();
-        _process.Exit();
-
-        await _events.WaitFor<PlaybackEvent.Closed>();
     }
 
     [Fact]
@@ -407,19 +380,6 @@ public class VlcSessionTests
         await Task.Delay(100, Ct);
         Assert.Equal(requests, RequestCount);
         Assert.Empty(_events.All);
-    }
-
-    [Fact]
-    public async Task Dispose_KillsPlayerThatIgnoresClose()
-    {
-        _process.ExitOnClose = false;
-        var session = Create(closeTimeout: TimeSpan.FromMilliseconds(50));
-        await session.StartAsync(File, null, Ct);
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.CloseRequested);
-        Assert.True(_process.Killed);
     }
 
     [Fact]

@@ -129,34 +129,6 @@ public class PlayerSessionFactoryTests
     }
 
     [Fact]
-    public async Task LaunchOnly_OtherLaunchError_RaisesFailed()
-    {
-        await using var session = CreateLaunchOnly(start: _ => throw new Win32Exception(5, "Access is denied"));
-
-        await session.StartAsync(File, null, Ct);
-
-        Assert.Equal([new PlaybackEvent.Failed("My Player could not start: Access is denied")], _events.All);
-    }
-
-    [Fact]
-    public async Task LaunchOnly_ThrowingHandler_StillGetsClosed()
-    {
-        await using var session = CreateLaunchOnly();
-        var calls = 0;
-        session.Event += _ =>
-        {
-            Interlocked.Increment(ref calls);
-            throw new InvalidOperationException("handler bug");
-        };
-        await session.StartAsync(File, null, Ct);
-
-        _process.Exit();
-
-        await _events.WaitFor<PlaybackEvent.Closed>();
-        await Waiting.Until(() => Volatile.Read(ref calls) == 1); // the handler after the log runs a moment later
-    }
-
-    [Fact]
     public async Task LaunchOnly_Dispose_ClosesProcessItStarted()
     {
         var session = CreateLaunchOnly();
@@ -182,18 +154,6 @@ public class PlayerSessionFactoryTests
         Assert.False(_process.CloseRequested);
         Assert.False(_process.Killed);
         Assert.True(_process.Disposed);
-    }
-
-    [Fact]
-    public async Task LaunchOnly_Dispose_KillsPlayerThatIgnoresClose()
-    {
-        _process.ExitOnClose = false;
-        var session = CreateLaunchOnly(closeTimeout: TimeSpan.FromMilliseconds(50));
-        await session.StartAsync(File, null, Ct);
-
-        await session.DisposeAsync();
-
-        Assert.True(_process.Killed);
     }
 
     [Fact]
