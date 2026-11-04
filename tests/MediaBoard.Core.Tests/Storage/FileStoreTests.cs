@@ -31,14 +31,10 @@ public sealed class FileStoreTests : IDisposable
         Assert.Equal(id, _store.FindByPath(@"x:\media\SHOW\s01e01.MKV")?.Id);
         Assert.Equal(id, _store.FindByPath(@"X:\Media\Show\.\S01E01.mkv")?.Id);
         Assert.Equal(id, _store.FindByPath("X:/Media/Show/S01E01.mkv")?.Id);
-    }
 
-    [Fact]
-    public void FindByPath_FolderPathWithATrailingSlash_StillMatches()
-    {
-        var id = AddFile(AddFolder(@"X:\Media\"), "a.mkv");
-
-        Assert.Equal(id, _store.FindByPath(@"X:\Media\a.mkv")?.Id);
+        // A folder path stored with a trailing slash still matches.
+        var slashed = AddFile(AddFolder(@"Y:\Shows\"), "a.mkv");
+        Assert.Equal(slashed, _store.FindByPath(@"Y:\Shows\a.mkv")?.Id);
     }
 
     [Fact]

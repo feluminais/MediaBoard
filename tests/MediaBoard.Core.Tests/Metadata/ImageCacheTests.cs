@@ -86,8 +86,10 @@ public sealed class ImageCacheTests : IDisposable
         Assert.Equal(0, handler.Calls);
     }
 
-    [Fact]
-    public async Task Missing_Online_Downloads()
+    [Theory]
+    [InlineData("/abc123.jpg", 342, "w342abc123.jpg", "https://image.tmdb.org/t/p/w342/abc123.jpg")] // a poster
+    [InlineData("/still.jpg", 300, "w300still.jpg", "https://image.tmdb.org/t/p/w300/still.jpg")] // an episode still
+    public async Task Missing_Online_Downloads(string posterPath, int width, string fileName, string url)
     {
         Uri? requested = null;
         var handler = new StubHandler((_, request) =>
@@ -97,16 +99,16 @@ public sealed class ImageCacheTests : IDisposable
         });
         var cache = CacheWith(handler);
 
-        var path = await cache.GetAsync("/abc123.jpg", 342, Ct);
+        var path = await cache.GetAsync(posterPath, width, Ct);
 
-        Assert.Equal(Path.Combine(_dir, "w342abc123.jpg"), path);
+        Assert.Equal(Path.Combine(_dir, fileName), path);
         Assert.Equal(Image, await File.ReadAllBytesAsync(path!, Ct));
-        Assert.Equal(new Uri("https://image.tmdb.org/t/p/w342/abc123.jpg"), requested);
+        Assert.Equal(new Uri(url), requested);
         Assert.Equal(1, handler.Calls);
         Assert.Equal([path!], FilesInCacheDir());
 
         // The second ask comes from disk.
-        Assert.Equal(path, await cache.GetAsync("/abc123.jpg", 342, Ct));
+        Assert.Equal(path, await cache.GetAsync(posterPath, width, Ct));
         Assert.Equal(1, handler.Calls);
     }
 
@@ -176,22 +178,6 @@ public sealed class ImageCacheTests : IDisposable
         Assert.NotNull(paths[0]);
         Assert.Equal(paths[0], paths[1]);
         Assert.Equal(1, handler.Calls);
-    }
-
-    [Fact]
-    public async Task Still_Width300_DownloadsFromW300()
-    {
-        Uri? requested = null;
-        var cache = CacheWith(new StubHandler((_, request) =>
-        {
-            requested = request.RequestUri;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Image) };
-        }));
-
-        var path = await cache.GetAsync("/still.jpg", 300, Ct);
-
-        Assert.Equal(Path.Combine(_dir, "w300still.jpg"), path);
-        Assert.Equal(new Uri("https://image.tmdb.org/t/p/w300/still.jpg"), requested);
     }
 
     [Theory]

@@ -1,4 +1,5 @@
 using MediaBoard.Core.Players;
+using MediaBoard.Core.Players.MpcHc;
 
 namespace MediaBoard.Core.Tests.Players;
 
@@ -94,4 +95,33 @@ internal sealed class ManualClock : TimeProvider
     public override long GetTimestamp() => Interlocked.Read(ref _ticks);
 
     public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
+}
+
+/// <summary>An <see cref="IMpcTransport"/> that records what is sent; a test plays MPC-HC by calling <see cref="Receive"/> or setting <see cref="Reply"/>.</summary>
+internal sealed class FakeTransport : IMpcTransport
+{
+    private readonly List<(nint Target, uint Cmd, string Payload)> _sent = [];
+
+    public nint HostHandle => 4096;
+    public event Action<uint, string>? Received;
+    public Func<uint, string, (uint Cmd, string Payload)?>? Reply { get; set; }
+    public bool Disposed { get; private set; }
+
+    public List<(nint Target, uint Cmd, string Payload)> Sent
+    {
+        get { lock (_sent) return [.. _sent]; }
+    }
+
+    public List<string> SentTo(nint target, uint cmd) =>
+        Sent.Where(s => s.Target == target && s.Cmd == cmd).Select(s => s.Payload).ToList();
+
+    public void Receive(uint cmd, string payload) => Received?.Invoke(cmd, payload);
+
+    public void Send(nint target, uint cmd, string payload)
+    {
+        lock (_sent) _sent.Add((target, cmd, payload));
+        if (Reply?.Invoke(cmd, payload) is { } reply) Receive(reply.Cmd, reply.Payload);
+    }
+
+    public void Dispose() => Disposed = true;
 }

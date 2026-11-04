@@ -31,21 +31,17 @@ public class EpisodeResolverTests
             () => Task.FromResult<IReadOnlyList<int>>([.. byNumber.Keys.Order()]));
     }
 
-    [Fact]
-    public void NumberMatch_NoTitle_ReturnsByNumber()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Second")]
+    public void NumberMatch_ReturnsByNumber_WithNoTitleOrAnAgreeingOne(string? title)
     {
-        var result = EpisodeResolver.Resolve(Parsed(1, [2]), Season(1, "Pilot", "Second", "Third"), null);
+        var parsed = title is null ? Parsed(1, [2]) : Parsed(1, [2], title);
+
+        var result = EpisodeResolver.Resolve(parsed, Season(1, "Pilot", "Second", "Third"), null);
 
         Assert.Equal([2], Numbers(result));
         Assert.Equal("Second", result![0].Name);
-    }
-
-    [Fact]
-    public void NumberAndTitleAgree_Returns()
-    {
-        var result = EpisodeResolver.Resolve(Parsed(1, [2], "Second"), Season(1, "Pilot", "Second", "Third"), null);
-
-        Assert.Equal([2], Numbers(result));
     }
 
     [Fact]

@@ -38,26 +38,13 @@ public sealed class NfoReaderTests : IDisposable
         Assert.Equal((1396, "tt0903747"), NfoReader.ReadIds(path));
     }
 
-    [Fact]
-    public void ReadIds_ReturnsNullsWhenNoIds()
+    [Theory]
+    [InlineData("<movie><title>Nothing</title><uniqueid type=\"tvdb\">81189</uniqueid></movie>")] // no tmdb or imdb id
+    [InlineData("<movie><tmdbid>abc</tmdbid><imdbid>nope</imdbid></movie>")] // non-numeric tmdb, odd imdb
+    [InlineData("<movie><uniqueid type=\"tmdb\">603</uniqueid>")] // malformed xml
+    public void ReadIds_ReturnsNulls_WhenThereIsNoUsableId(string xml)
     {
-        var path = Write("<movie><title>Nothing</title><uniqueid type=\"tvdb\">81189</uniqueid></movie>");
-
-        Assert.Equal((null, null), NfoReader.ReadIds(path));
-    }
-
-    [Fact]
-    public void ReadIds_IgnoresNonNumericTmdbAndOddImdb()
-    {
-        var path = Write("<movie><tmdbid>abc</tmdbid><imdbid>nope</imdbid></movie>");
-
-        Assert.Equal((null, null), NfoReader.ReadIds(path));
-    }
-
-    [Fact]
-    public void ReadIds_ReturnsNullsOnMalformedXml()
-    {
-        var path = Write("<movie><uniqueid type=\"tmdb\">603</uniqueid>");
+        var path = Write(xml);
 
         Assert.Equal((null, null), NfoReader.ReadIds(path));
     }

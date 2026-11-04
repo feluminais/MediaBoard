@@ -44,27 +44,17 @@ public class PosterImageTests : IDisposable
         Assert.Equal(150, image.Image.PixelSize.Height); // aspect ratio kept
     }
 
-    [AvaloniaFact]
-    public async Task PosterImage_UndecodableFile_ShowsPlaceholder()
+    [AvaloniaTheory]
+    [InlineData("broken.jpg", "not an image")] // exists but can't be decoded
+    [InlineData("gone.jpg", null)] // doesn't exist
+    public async Task PosterImage_UnusableFile_ShowsPlaceholder(string name, string? content)
     {
-        var path = Path.Combine(_dir, "broken.jpg");
-        await File.WriteAllTextAsync(path, "not an image");
+        var path = Path.Combine(_dir, name);
+        if (content is not null) await File.WriteAllTextAsync(path, content);
         var image = new PosterImage { Title = "Klaus" };
         Host(image);
 
         image.LocalPath = path;
-        await Ui.WaitUntil(() => !image.IsLoading);
-
-        Assert.True(image.ShowsPlaceholder);
-    }
-
-    [AvaloniaFact]
-    public async Task PosterImage_MissingFile_ShowsPlaceholder()
-    {
-        var image = new PosterImage { Title = "Klaus" };
-        Host(image);
-
-        image.LocalPath = Path.Combine(_dir, "gone.jpg");
         await Ui.WaitUntil(() => !image.IsLoading);
 
         Assert.True(image.ShowsPlaceholder);

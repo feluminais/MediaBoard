@@ -420,21 +420,27 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.Equal(0, Scalar<int>("SELECT COUNT(*) FROM file_episodes WHERE file_id = @id", new { id = file.Id }));
     }
 
-    [Fact]
-    public async Task Rule_StoredNameDisagreesWithTheTitle_RefreshesTheStaleStoredSeason()
+    [Theory]
+    [InlineData("Old Working Name")] // the stored episode has another name
+    [InlineData(null)] // the stored season lacks the episode
+    public async Task Rule_StoredNameDisagreesOrEpisodeIsNew_RefreshesTheStaleStoredSeason(string? storedThirdName)
     {
         _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 4))
             .OnSeason(615, Season(4, "Roswell That Ends Well", "A Tale of Two Santas", "Brand New One"));
         _lib.File(@"Futurama\Season 04\S04E03 Brand New One.mkv");
         await Scan();
         var showId = _titles.Upsert(ShowTitle(615, "Futurama", 1999, 4));
-        _titles.UpsertEpisodes(showId, Season(4, "Roswell That Ends Well", "A Tale of Two Santas", "Old Working Name"));
+        string[] stored = storedThirdName is null
+            ? ["Roswell That Ends Well", "A Tale of Two Santas"]
+            : ["Roswell That Ends Well", "A Tale of Two Santas", storedThirdName];
+        _titles.UpsertEpisodes(showId, Season(4, stored));
         _matches.AddRule(_folder.Id, "Futurama", "Futurama", showId);
 
         await Run();
 
         var file = Row(@"Futurama\Season 04\S04E03 Brand New One.mkv");
         Assert.Equal("matched", file.Status);
+        Assert.Equal("rule", LinkSource(file.Id));
         Assert.Equal("Brand New One", Scalar<string>(
             "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
             new { id = file.Id }));
@@ -466,29 +472,6 @@ public sealed class IdentificationServiceTests : IDisposable
         Assert.Equal("4x1 ; 4x2 ; 5x2", EpisodesOf(@"SpongeBob\Season 05\S05E01 Rise and Shine & Waiting & Fungus Among Us.mkv"));
         Assert.Equal("4x3 ; 5x3", EpisodesOf(@"SpongeBob\Season 05\S05E02 The Krusty Sponge & Sing a Song of Patrick.mkv"));
         Assert.Equal(_tmdb.SeasonFetches.Distinct().Order(), _tmdb.SeasonFetches.Order());
-    }
-
-    [Fact]
-    public async Task Rule_NewEpisodeWithATitle_RefreshesTheStaleStoredSeason()
-    {
-        _tmdb.OnTitle(ShowTitle(615, "Futurama", 1999, 0, 1, 4))
-            .OnSeason(615, Season(0, "Futurama: The Lost Adventure"))
-            .OnSeason(615, Season(1, "Space Pilot 3000"))
-            .OnSeason(615, Season(4, "Roswell That Ends Well", "A Tale of Two Santas", "Brand New One"));
-        _lib.File(@"Futurama\Season 04\S04E03 Brand New One.mkv");
-        await Scan();
-        var showId = _titles.Upsert(ShowTitle(615, "Futurama", 1999, 0, 1, 4));
-        _titles.UpsertEpisodes(showId, Season(4, "Roswell That Ends Well", "A Tale of Two Santas"));
-        _matches.AddRule(_folder.Id, "Futurama", "Futurama", showId);
-
-        await Run();
-
-        var file = Row(@"Futurama\Season 04\S04E03 Brand New One.mkv");
-        Assert.Equal("matched", file.Status);
-        Assert.Equal("rule", LinkSource(file.Id));
-        Assert.Equal("Brand New One", Scalar<string>(
-            "SELECT e.name FROM file_episodes fe JOIN episodes e ON e.id = fe.episode_id WHERE fe.file_id = @id",
-            new { id = file.Id }));
     }
 
     [Fact]

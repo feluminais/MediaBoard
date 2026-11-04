@@ -73,33 +73,28 @@ public class MpvSessionTests
         Assert.Equal(["--force-window=yes", "--start=754.5", file], args.Skip(1));
     }
 
-    [Fact]
-    public async Task Session_NoStartAt_OmitsStart()
-    {
-        await using var session = Create();
-
-        await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
-
-        Assert.NotNull(_startInfo);
-        Assert.DoesNotContain(_startInfo.ArgumentList, a => a.StartsWith("--start", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Session_StartAtIsInvariantCulture()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(90.25, "--start=90.25")] // the decimal point must not follow the machine's culture
+    public async Task Session_StartAt_IsOmittedWhenNull_AndInvariantCultureOtherwise(double? seconds, string? expected)
     {
         var culture = Thread.CurrentThread.CurrentCulture;
         Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("uk-UA");
         try
         {
             await using var session = Create();
-            await session.StartAsync(@"C:\Videos\test.mp4", TimeSpan.FromSeconds(90.25), Ct);
+            await session.StartAsync(@"C:\Videos\test.mp4", seconds is { } s ? TimeSpan.FromSeconds(s) : null, Ct);
         }
         finally
         {
             Thread.CurrentThread.CurrentCulture = culture;
         }
 
-        Assert.Contains("--start=90.25", _startInfo!.ArgumentList);
+        Assert.NotNull(_startInfo);
+        if (expected is null)
+            Assert.DoesNotContain(_startInfo.ArgumentList, a => a.StartsWith("--start", StringComparison.Ordinal));
+        else
+            Assert.Contains(expected, _startInfo.ArgumentList);
     }
 
     [Fact]

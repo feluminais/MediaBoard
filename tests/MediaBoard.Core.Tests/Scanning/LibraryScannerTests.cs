@@ -430,8 +430,8 @@ public sealed class LibraryScannerTests : IDisposable
     public async Task Scan_ReportsProgressToHub()
     {
         for (var i = 1; i <= 60; i++) _lib.File($@"Movies\Movie.{2000 + i}.mkv");
-        var seen = new List<(string? Folder, int Done, int Total)>();
-        _hub.StatusChanged += s => { lock (seen) seen.Add((s.ScanFolder, s.ScanDone, s.ScanTotal)); };
+        var seen = new List<(string? Folder, int Done, int Total, FolderScan? Scan)>();
+        _hub.StatusChanged += s => { lock (seen) seen.Add((s.ScanFolder, s.ScanDone, s.ScanTotal, s.ScanOf(_folder.Id))); };
 
         await Scan();
 
@@ -446,21 +446,13 @@ public sealed class LibraryScannerTests : IDisposable
         Assert.True(dones.Count <= 5, $"too many updates: {dones.Count}");
         Assert.Null(seen[^1].Folder);
         Assert.Equal(0, seen[^1].Done);
-    }
 
-    [Fact]
-    public async Task Scan_ReportsItsStateUnderTheFolderId()
-    {
-        for (var i = 1; i <= 30; i++) _lib.File($@"Movies\Movie.{2000 + i}.mkv");
-        var seen = new List<FolderScan?>();
-        _hub.StatusChanged += s => { lock (seen) seen.Add(s.ScanOf(_folder.Id)); };
-
-        await Scan();
-
-        Assert.Equal(new FolderScan(FolderScanState.Scanning, 0, 0), seen[0]); // listing: the total is not known yet
-        Assert.Contains(new FolderScan(FolderScanState.Scanning, 25, 30), seen);
-        Assert.Contains(new FolderScan(FolderScanState.Scanning, 30, 30), seen);
-        Assert.Null(seen[^1]);
+        // The same updates, as the folder's own state under its id.
+        var scans = seen.Select(s => s.Scan).ToList();
+        Assert.Equal(new FolderScan(FolderScanState.Scanning, 0, 0), scans[0]); // listing: the total is not known yet
+        Assert.Contains(new FolderScan(FolderScanState.Scanning, 25, 60), scans);
+        Assert.Contains(new FolderScan(FolderScanState.Scanning, 60, 60), scans);
+        Assert.Null(scans[^1]);
         Assert.Empty(_hub.Current.FolderScans);
     }
 

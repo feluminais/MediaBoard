@@ -59,15 +59,9 @@ public class TitleViewModelTests
 
         _library.Next[2] = 25;
         Assert.Equal("Play S01E05 in MPC-HC", (await Loaded(2)).PlayText);
-    }
 
-    [AvaloniaFact]
-    public async Task PlayButton_NamesTheResolvedPlayer()
-    {
         _library.Details[1] = FakeLibrary.Movie(1, "Klaus");
-        _library.Next[1] = 10;
-        _t.Player = "mpv";
-
+        _t.Player = "mpv"; // the button names whichever player resolved
         Assert.Equal("Play in mpv", (await Loaded(1)).PlayText);
     }
 
@@ -483,21 +477,6 @@ public class TitleViewModelTests
         Assert.Equal(["Dark", "Dark"], _t.NotMediaAsked);
         Assert.Equal(["notmedia:24", "notmedia:25", "notmedia:26"], _library.Edits);
         Assert.Equal(1, _t.WentBack);
-    }
-
-    [AvaloniaFact]
-    public async Task TitleView_OffersNotAMovieOrShow()
-    {
-        AddShow();
-        var view = new TitleView { DataContext = await Loaded(2) };
-        var window = new Window { Width = 1000, Height = 800, Content = view };
-        window.Show();
-        Ui.Flush();
-
-        var buttons = view.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).Select(b => b.Content as string).ToList();
-
-        Assert.Contains("Not a movie or show", buttons);
-        window.Close();
     }
 
     [AvaloniaFact]
@@ -935,6 +914,7 @@ public class TitleViewModelTests
         Assert.Contains("Fix match", buttons);
         Assert.Contains("Delete from disk", buttons);
         Assert.Contains("Mark watched", buttons);
+        Assert.Contains("Not a movie or show", buttons);
         Assert.DoesNotContain("Not in library", texts);
         window.Close();
     }

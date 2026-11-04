@@ -99,25 +99,7 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task PartialDownloadsHiddenAndNonVideoFiles_DoNotTriggerRescans()
-    {
-        _folders.Add(_lib.Root);
-        _lib.Folder("Movies");
-        _lib.Folder(".sync");
-        _watcher.Start();
-
-        _lib.File(@"Movies\Heat.1995.mkv.!qB", 4096);
-        _lib.File(@"Movies\Alien.1979.mkv.part", 4096);
-        _lib.File(@".sync\Heat.1995.mkv", 4096);
-        _lib.File(@"Movies\readme.txt", 10);
-        _lib.Resize(@"Movies\Heat.1995.mkv.!qB", 8192);
-        await Task.Delay(Debounce * 3, TestContext.Current.CancellationToken);
-
-        Assert.Equal(0, RescanCount());
-    }
-
-    [Fact]
-    public async Task DeletedFilesInHiddenFoldersPartialDownloadsAndTextFiles_DoNotTriggerRescans()
+    public async Task PartialDownloadsHiddenAndNonVideoFiles_DoNotTriggerRescans_WhenCreatedChangedOrDeleted()
     {
         _folders.Add(_lib.Root);
         _lib.File(@"Movies\Heat.1995.mkv.!qB", 4096);
@@ -126,10 +108,18 @@ public sealed class LibraryWatcherTests : IDisposable
         _lib.File(@"Movies\readme.txt", 10);
         _watcher.Start();
 
+        // Deleted.
         _lib.Delete(@"Movies\Heat.1995.mkv.!qB");
         _lib.Delete(@"Movies\Alien.1979.mkv.parts");
         _lib.Delete(@".sync\Heat.1995.mkv");
         _lib.Delete(@"Movies\readme.txt");
+
+        // Created, then changed.
+        _lib.File(@"Movies\Dune.2021.mkv.!qB", 4096);
+        _lib.File(@"Movies\Alien.1979.mkv.part", 4096);
+        _lib.File(@".sync\Dune.2021.mkv", 4096);
+        _lib.File(@"Movies\notes.txt", 10);
+        _lib.Resize(@"Movies\Dune.2021.mkv.!qB", 8192);
         await Task.Delay(Debounce * 3, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, RescanCount());
@@ -366,7 +356,7 @@ public sealed class LibraryWatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task FailingRescannedSubscriber_IsNotAFailedRescan()
+    public async Task FailingSubscriber_IsLogged_IsNotAFailedRescan_AndWatchingContinues()
     {
         _folders.Add(_lib.Root);
         _watcher.Start();
@@ -374,24 +364,11 @@ public sealed class LibraryWatcherTests : IDisposable
         _watcher.RescanFailed += _ => Interlocked.Increment(ref failures);
         _throwOnce = 1;
         var rescan = NextRescan();
-
         _lib.File(@"Movies\Heat.1995.mkv");
         await Within(rescan, Deadline);
         await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error));
 
         Assert.Equal(0, Volatile.Read(ref failures)); // the scan worked; only a subscriber broke
-    }
-
-    [Fact]
-    public async Task FailingSubscriber_IsLogged_AndWatchingContinues()
-    {
-        _folders.Add(_lib.Root);
-        _watcher.Start();
-        _throwOnce = 1;
-        var rescan = NextRescan();
-        _lib.File(@"Movies\Heat.1995.mkv");
-        await Within(rescan, Deadline);
-        await WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error));
 
         var next = NextRescan();
         _lib.File(@"Movies\Alien.1979.mkv");

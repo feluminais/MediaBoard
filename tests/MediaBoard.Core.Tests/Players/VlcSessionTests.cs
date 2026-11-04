@@ -98,33 +98,29 @@ public class VlcSessionTests
         Assert.Equal(["--start-time=754.5", file], args.Skip(8));
     }
 
-    [Fact]
-    public async Task Session_NoStartAt_OmitsStartTime()
-    {
-        await using var session = Create();
-
-        await session.StartAsync(File, null, Ct);
-
-        Assert.DoesNotContain(_startInfo!.ArgumentList, a => a.StartsWith("--start-time", StringComparison.Ordinal));
-        Assert.Equal(File, _startInfo.ArgumentList[^1]);
-    }
-
-    [Fact]
-    public async Task Session_StartAtIsInvariantCulture()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(90.25, "--start-time=90.25")] // the decimal point must not follow the machine's culture
+    public async Task Session_StartAt_IsOmittedWhenNull_AndInvariantCultureOtherwise(double? seconds, string? expected)
     {
         var culture = Thread.CurrentThread.CurrentCulture;
         Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("uk-UA");
         try
         {
             await using var session = Create();
-            await session.StartAsync(File, TimeSpan.FromSeconds(90.25), Ct);
+            await session.StartAsync(File, seconds is { } s ? TimeSpan.FromSeconds(s) : null, Ct);
         }
         finally
         {
             Thread.CurrentThread.CurrentCulture = culture;
         }
 
-        Assert.Contains("--start-time=90.25", _startInfo!.ArgumentList);
+        Assert.NotNull(_startInfo);
+        if (expected is null)
+            Assert.DoesNotContain(_startInfo.ArgumentList, a => a.StartsWith("--start-time", StringComparison.Ordinal));
+        else
+            Assert.Contains(expected, _startInfo.ArgumentList);
+        Assert.Equal(File, _startInfo.ArgumentList[^1]);
     }
 
     [Fact]
@@ -472,27 +468,18 @@ public class VlcSessionTests
         """;
 
     [Theory]
-    [InlineData(4, @"C:\Videos\test.mp4")]
-    [InlineData(5, @"C:\Videos\My Show\S01E02.mkv")]
-    public void Playlist_FindsTheLocalPathOfAnItem(int id, string expected)
+    [InlineData(Playlist, 4, @"C:\Videos\test.mp4")]
+    [InlineData(Playlist, 5, @"C:\Videos\My Show\S01E02.mkv")]
+    [InlineData(Playlist, 6, null)] // not a local file
+    [InlineData(Playlist, 9, null)] // not in the playlist
+    [InlineData("not json", 4, null)]
+    [InlineData("", 4, null)]
+    public void Playlist_TryFindPath(string json, int id, string? expected)
     {
-        Assert.True(VlcPlaylist.TryFindPath(Playlist, id, out var path));
-        Assert.Equal(expected, path);
-    }
+        var found = VlcPlaylist.TryFindPath(json, id, out var path);
 
-    [Theory]
-    [InlineData(6)] // not a local file
-    [InlineData(9)] // not in the playlist
-    public void Playlist_ItemWithoutALocalPath_IsNotFound(int id)
-    {
-        Assert.False(VlcPlaylist.TryFindPath(Playlist, id, out _));
-    }
-
-    [Fact]
-    public void Playlist_Garbage_IsNotFound()
-    {
-        Assert.False(VlcPlaylist.TryFindPath("not json", 4, out _));
-        Assert.False(VlcPlaylist.TryFindPath("", 4, out _));
+        Assert.Equal(expected is not null, found);
+        if (expected is not null) Assert.Equal(expected, path);
     }
 
     [Fact]

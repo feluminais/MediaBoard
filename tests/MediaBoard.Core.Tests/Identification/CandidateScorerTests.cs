@@ -44,19 +44,13 @@ public class CandidateScorerTests
     }
 
     [Fact]
-    public void Scorer_YearOffByOne_StillAccepts()
-    {
-        var score = CandidateScorer.Score(Parsed("The Gentlemen", 2019), Candidate("The Gentlemen", 2020), null, null);
-        Assert.True(score >= ScoringWeights.AcceptThreshold, $"score was {score}");
-    }
-
-    [Fact]
-    public void Scorer_ExactMatch_BeatsYearOffByOne()
+    public void Scorer_YearOffByOne_StillAccepts_ButExactMatchBeatsIt()
     {
         var parsed = Parsed("The Gentlemen", 2019);
-        Assert.True(
-            CandidateScorer.Score(parsed, Candidate("The Gentlemen", 2019), null, null)
-            > CandidateScorer.Score(parsed, Candidate("The Gentlemen", 2020), null, null));
+        var offByOne = CandidateScorer.Score(parsed, Candidate("The Gentlemen", 2020), null, null);
+
+        Assert.True(offByOne >= ScoringWeights.AcceptThreshold, $"score was {offByOne}");
+        Assert.True(CandidateScorer.Score(parsed, Candidate("The Gentlemen", 2019), null, null) > offByOne);
     }
 
     [Fact]
@@ -87,7 +81,7 @@ public class CandidateScorerTests
     }
 
     [Fact]
-    public void Scorer_DurationMismatch_Penalised()
+    public void Scorer_DurationMismatch_Penalised_AndWithinToleranceIsNot()
     {
         var parsed = Parsed("Planes", 2013, MediaKind.Episode);
         var candidate = Candidate("Planes", 2013, TitleKind.Show);
@@ -96,21 +90,17 @@ public class CandidateScorerTests
         var match = CandidateScorer.Score(parsed, candidate, 22 * 60 + 30, 22);
         Assert.Equal(without - ScoringWeights.DurationPenalty, mismatch, 9);
         Assert.Equal(without, match, 9);
-    }
 
-    [Fact]
-    public void Scorer_DurationWithinTolerance_NotPenalised()
-    {
         // 100 min runtime: tolerance is max(15, 35) = 35 min.
-        var parsed = Parsed("Heat", 1995);
-        var candidate = Candidate("Heat", 1995);
+        var heat = Parsed("Heat", 1995);
+        var film = Candidate("Heat", 1995);
         Assert.Equal(
-            CandidateScorer.Score(parsed, candidate, null, 100),
-            CandidateScorer.Score(parsed, candidate, 130 * 60, 100),
+            CandidateScorer.Score(heat, film, null, 100),
+            CandidateScorer.Score(heat, film, 130 * 60, 100),
             9);
         Assert.True(
-            CandidateScorer.Score(parsed, candidate, 140 * 60, 100)
-            < CandidateScorer.Score(parsed, candidate, null, 100));
+            CandidateScorer.Score(heat, film, 140 * 60, 100)
+            < CandidateScorer.Score(heat, film, null, 100));
     }
 
     [Fact]

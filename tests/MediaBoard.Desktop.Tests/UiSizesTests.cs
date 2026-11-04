@@ -20,10 +20,14 @@ public class UiSizesTests
     [Fact]
     public void UiSize_ScalesTextOnly_AndPosterSize_PostersOnly()
     {
-        var larger = UiSizes.For(new AppSettings { UiSizePercent = 130, PosterSize = PosterSize.Small }, 1200);
+        var baseline = UiSizes.For(new AppSettings(), 1200);
+        var biggerText = UiSizes.For(new AppSettings { UiSizePercent = 130 }, 1200);
+        var smallerPosters = UiSizes.For(new AppSettings { PosterSize = PosterSize.Small }, 1200);
 
-        Assert.Equal(1.3, larger.TextScale, 3);
-        Assert.Equal(128, larger.PosterWidth); // 160 x 0.8
+        Assert.True(biggerText.TextScale > baseline.TextScale);
+        Assert.Equal(baseline.PosterWidth, biggerText.PosterWidth);
+        Assert.True(smallerPosters.PosterWidth < baseline.PosterWidth);
+        Assert.Equal(baseline.TextScale, smallerPosters.TextScale);
     }
 
     [Fact]

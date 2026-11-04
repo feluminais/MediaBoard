@@ -13,8 +13,8 @@ public class MpcHcSessionTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
     private readonly FakeTransport _transport = new();
-    private readonly FakeProcess _process = new();
-    private readonly EventLog _events = new();
+    private readonly FakePlayerProcess _process = new();
+    private readonly PlaybackLog _events = new();
     private ProcessStartInfo? _startInfo;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -107,7 +107,7 @@ public class MpcHcSessionTests
         _transport.Receive(MpcApi.CMD_STATE, "2");
         _transport.Receive(MpcApi.CMD_NOWPLAYING, @"test|||C:\Videos\test.mp4|1500.000");
 
-        await WaitUntil(() => _transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION).Count == 2);
+        await Waiting.Until(() => _transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION).Count == 2);
         Assert.Equal(["600", "600"], _transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION));
     }
 
@@ -120,7 +120,7 @@ public class MpcHcSessionTests
         _transport.Receive(MpcApi.CMD_STATE, "2");
         _transport.Receive(MpcApi.CMD_NOWPLAYING, @"test|||C:\Videos\test.mp4|1500.000");
 
-        await WaitUntil(() => _transport.SentTo(PlayerHwnd, MpcApi.CMD_GETCURRENTPOSITION).Count == 1);
+        await Waiting.Until(() => _transport.SentTo(PlayerHwnd, MpcApi.CMD_GETCURRENTPOSITION).Count == 1);
         await Task.Delay(100, Ct);
         Assert.Single(_transport.SentTo(PlayerHwnd, MpcApi.CMD_SETPOSITION));
     }
@@ -133,7 +133,7 @@ public class MpcHcSessionTests
         await session.StartAsync(@"C:\Videos\test.mp4", null, Ct);
         _process.Exit();
 
-        var failed = await _events.WaitFor<PlaybackEvent.Failed>(Timeout);
+        var failed = await _events.WaitFor<PlaybackEvent.Failed>();
         Assert.Equal("MPC-HC closed right after starting", failed.Message);
 
         _transport.Receive(MpcApi.CMD_CURRENTPOSITION, "12.000");
@@ -159,7 +159,7 @@ public class MpcHcSessionTests
 
         _process.Exit(exitCode: 0);
 
-        await _events.WaitFor<PlaybackEvent.Closed>(Timeout);
+        await _events.WaitFor<PlaybackEvent.Closed>();
         Assert.Empty(_events.OfType<PlaybackEvent.Failed>());
     }
 
@@ -170,7 +170,7 @@ public class MpcHcSessionTests
 
         _process.Exit(exitCode: unchecked((int)0xC0000005));
 
-        var failed = await _events.WaitFor<PlaybackEvent.Failed>(Timeout);
+        var failed = await _events.WaitFor<PlaybackEvent.Failed>();
         Assert.Equal("MPC-HC stopped unexpectedly", failed.Message);
         Assert.Equal([failed], _events.All);
     }
@@ -298,7 +298,7 @@ public class MpcHcSessionTests
             // Before the fix the handler's exception escaped here; either way the final event must arrive.
         }
 
-        await _events.WaitFor<PlaybackEvent.Closed>(Timeout);
+        await _events.WaitFor<PlaybackEvent.Closed>();
         Assert.Equal([new PlaybackEvent.Position(TimeSpan.FromSeconds(12)), new PlaybackEvent.Closed()], _events.All);
     }
 
@@ -373,7 +373,7 @@ public class MpcHcSessionTests
         Assert.Empty(_transport.SentTo(PlayerHwnd, MpcApi.CMD_GETCURRENTPOSITION));
 
         _transport.Receive(MpcApi.CMD_PLAYMODE, "0");
-        await WaitUntil(() => _events.OfType<PlaybackEvent.Position>().Count >= 2);
+        await Waiting.Until(() => _events.OfType<PlaybackEvent.Position>().Count >= 2);
         Assert.All(_events.OfType<PlaybackEvent.Position>(), p => Assert.Equal(TimeSpan.FromSeconds(12.5), p.At));
 
         _transport.Receive(MpcApi.CMD_PLAYMODE, "1");
@@ -489,113 +489,12 @@ public class MpcHcSessionTests
     {
         var session = await StartConnectedAsync();
         _process.Exit();
-        await _events.WaitFor<PlaybackEvent.Closed>(Timeout);
+        await _events.WaitFor<PlaybackEvent.Closed>();
 
         await session.DisposeAsync();
 
         Assert.False(_process.CloseRequested);
         Assert.False(_process.Killed);
         Assert.True(_transport.Disposed);
-    }
-
-    private static async Task WaitUntil(Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow + Timeout;
-        while (!condition())
-        {
-            if (DateTime.UtcNow > deadline) Assert.Fail("Condition not met in time");
-            await Task.Delay(10, Ct);
-        }
-    }
-
-    private sealed class FakeTransport : IMpcTransport
-    {
-        private readonly List<(nint Target, uint Cmd, string Payload)> _sent = [];
-
-        public nint HostHandle => 4096;
-        public event Action<uint, string>? Received;
-        public Func<uint, string, (uint Cmd, string Payload)?>? Reply { get; set; }
-        public bool Disposed { get; private set; }
-
-        public List<(nint Target, uint Cmd, string Payload)> Sent
-        {
-            get { lock (_sent) return [.. _sent]; }
-        }
-
-        public List<string> SentTo(nint target, uint cmd) =>
-            Sent.Where(s => s.Target == target && s.Cmd == cmd).Select(s => s.Payload).ToList();
-
-        public void Receive(uint cmd, string payload) => Received?.Invoke(cmd, payload);
-
-        public void Send(nint target, uint cmd, string payload)
-        {
-            lock (_sent) _sent.Add((target, cmd, payload));
-            if (Reply?.Invoke(cmd, payload) is { } reply) Receive(reply.Cmd, reply.Payload);
-        }
-
-        public void Dispose() => Disposed = true;
-    }
-
-    private sealed class FakeProcess : IPlayerProcess
-    {
-        private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public bool ExitOnClose { get; set; } = true;
-        public bool CloseRequested { get; private set; }
-        public bool Killed { get; private set; }
-        public bool Disposed { get; private set; }
-        public Task Exited => _exited.Task;
-        public bool HasExited => _exited.Task.IsCompleted;
-        public int ExitCode { get; private set; }
-
-        public void Exit(int exitCode = 0)
-        {
-            if (HasExited) return;
-            ExitCode = exitCode;
-            _exited.TrySetResult();
-        }
-
-        public void CloseMainWindow()
-        {
-            CloseRequested = true;
-            if (ExitOnClose) Exit();
-        }
-
-        public void Kill()
-        {
-            Killed = true;
-            Exit();
-        }
-
-        public void Dispose() => Disposed = true;
-    }
-
-    private sealed class EventLog
-    {
-        private readonly List<PlaybackEvent> _events = [];
-
-        public List<PlaybackEvent> All
-        {
-            get { lock (_events) return [.. _events]; }
-        }
-
-        public void Add(PlaybackEvent e)
-        {
-            lock (_events) _events.Add(e);
-        }
-
-        public List<T> OfType<T>() => All.OfType<T>().ToList();
-
-        public async Task<T> WaitFor<T>(TimeSpan timeout) where T : PlaybackEvent
-        {
-            var deadline = DateTime.UtcNow + timeout;
-            while (true)
-            {
-                var found = OfType<T>().FirstOrDefault();
-                if (found is not null) return found;
-                if (DateTime.UtcNow > deadline) Assert.Fail($"No {typeof(T).Name} event in time; got: {string.Join(", ", All)}");
-                await Task.Delay(10, TestContext.Current.CancellationToken);
-            }
-        }
     }
 }

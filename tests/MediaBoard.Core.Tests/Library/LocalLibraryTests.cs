@@ -191,26 +191,20 @@ public sealed class LocalLibraryTests : IDisposable
         var both = await Linked(@"SpongeBob\SpongeBob.S01E01-E02.mkv", show, (1, 1), (1, 2));
         var e3 = await Linked(@"SpongeBob\SpongeBob.S01E03.mkv", show, (1, 3));
         await Linked(@"SpongeBob\SpongeBob.S01E04.mkv", show, (1, 4));
-        Played(both, 0, 1320, true, 10);
 
+        // In progress: the row labels the whole range.
+        Played(both, 400, 1320, false, 10);
+        var inProgress = Assert.Single(_library.ContinueWatching(10));
+        Assert.Equal("S01E01-E02", inProgress.EpisodeLabel);
+        Assert.False(inProgress.IsNext);
+
+        // Finished: the next episode is the one after the last segment.
+        Played(both, 0, 1320, true, 10);
         var item = Assert.Single(_library.ContinueWatching(10));
 
         Assert.Equal(e3, item.FileId);
         Assert.Equal("S01E03", item.EpisodeLabel);
         Assert.True(item.IsNext);
-    }
-
-    [Fact]
-    public async Task ContinueWatching_MultiEpisodeFileInProgress_LabelsTheRange()
-    {
-        var show = ShowTitle("SpongeBob SquarePants", 387, 5);
-        var both = await Linked(@"SpongeBob\SpongeBob.S01E01-E02.mkv", show, (1, 1), (1, 2));
-        Played(both, 400, 1320, false, 10);
-
-        var item = Assert.Single(_library.ContinueWatching(10));
-
-        Assert.Equal("S01E01-E02", item.EpisodeLabel);
-        Assert.False(item.IsNext);
     }
 
     [Fact]
@@ -369,20 +363,17 @@ public sealed class LocalLibraryTests : IDisposable
         Assert.True(view.Seasons[1].Episodes[0].Watched);
         Assert.Equal("Lost.Unknown", Assert.Single(view.Files).Name);
         Assert.Null(_library.Title(987654));
-    }
 
-    [Fact]
-    public async Task Title_MovieListsItsFile()
-    {
+        // A movie has no seasons and lists its file.
         var movie = MovieTitle("Heat", 949, 1995);
-        var file = await Linked(@"Heat (1995).mkv", movie);
-        Played(file, 100, 7000, false, 10);
+        var movieFile = await Linked(@"Heat (1995).mkv", movie);
+        Played(movieFile, 100, 7000, false, 12);
 
-        var view = _library.Title(movie)!;
+        var movieView = _library.Title(movie)!;
 
-        Assert.Empty(view.Seasons);
-        var shown = Assert.Single(view.Files);
-        Assert.Equal(file, shown.FileId);
+        Assert.Empty(movieView.Seasons);
+        var shown = Assert.Single(movieView.Files);
+        Assert.Equal(movieFile, shown.FileId);
         Assert.Equal(100, shown.PositionS);
     }
 

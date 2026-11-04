@@ -29,20 +29,15 @@ public class CorpusPipelineTests
         Assert.Contains("5x5", problem);
         Assert.Contains("Kif Gets Knocked Up a Notch", problem);
         Assert.Contains("The Beast with a Billion Backs. Part 1", problem);
-    }
 
-    [Fact]
-    public void SharedEpisodes_PartsOfOneTitle_AreReportedToo()
-    {
-        var futurama = Title(615, TitleKind.Show, "Futurama", 1999);
-
-        var problems = CorpusPipeline.SharedEpisodes(
+        // Parts of one title on one episode are reported too.
+        var parts = CorpusPipeline.SharedEpisodes(
         [
             Linked(@"Futurama\S05E01 Bender's Big Score. Part 1.mkv", futurama, "Bender's Big Score. Part 1", (0, 1)),
             Linked(@"Futurama\S05E02 Bender's Big Score. Part 2.mkv", futurama, "Bender's Big Score. Part 2", (0, 1)),
         ]);
 
-        Assert.Single(problems);
+        Assert.Single(parts);
     }
 
     [Fact]

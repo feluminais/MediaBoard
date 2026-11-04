@@ -365,35 +365,14 @@ public sealed class AppHostTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task FailedScan_IsPublishedWithItsFolderId()
-    {
-        var library = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
-        await File.WriteAllBytesAsync(Path.Combine(library, "Movie.2020.mkv"), new byte[4096]);
-        var services = Build(Path.Combine(_dir, "library.db"));
-        var folder = services.GetRequiredService<FolderStore>().Add(library);
-        using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "CREATE TRIGGER fail_scan BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;";
-            command.ExecuteNonQuery();
-        }
-
-        await RunAsync(services, _ =>
-        {
-            Assert.Equal([folder.Id], services.GetRequiredService<ActivityHub>().Current.FailedScanIds);
-            return Task.CompletedTask;
-        });
-    }
-
-    [AvaloniaFact]
-    public async Task FailedScan_ShowsOnStatusBar()
+    public async Task FailedScan_IsPublishedWithItsFolderId_AndShowsOnStatusBar()
     {
         var database = Path.Combine(_dir, "library.db");
         var library = Directory.CreateDirectory(Path.Combine(_dir, "Movies")).FullName;
         await File.WriteAllBytesAsync(Path.Combine(library, "Movie.2020.mkv"), new byte[4096]);
         var services = Build(database);
 
-        services.GetRequiredService<FolderStore>().Add(library);
+        var folder = services.GetRequiredService<FolderStore>().Add(library);
         // Every insert into files fails, as a full disk would make it.
         using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
         using (var command = connection.CreateCommand())
@@ -404,6 +383,7 @@ public sealed class AppHostTests : IDisposable
 
         await RunAsync(services, vm =>
         {
+            Assert.Equal([folder.Id], services.GetRequiredService<ActivityHub>().Current.FailedScanIds);
             Assert.Equal("Scan failed: Movies", vm.StatusBar.FailedScans);
             Assert.Null(vm.StatusBar.Progress);
             Assert.Null(vm.StatusBar.LibraryProblem);

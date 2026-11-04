@@ -26,14 +26,9 @@ public class TitleSimilarityTests
     }
 
     [Fact]
-    public void Score_MissingColon_IsNearPerfect()
+    public void Score_MissingColon_IsNearPerfect_AndHyphensAndColonsAreEquivalent()
     {
         Assert.True(TitleSimilarity.Score("Narcos Mexico", "Narcos: Mexico") >= 0.95);
-    }
-
-    [Fact]
-    public void Score_HyphensAndColons_AreEquivalent()
-    {
         Assert.Equal(1.0, TitleSimilarity.Score("Spider-Man: Across the Spider-Verse", "Spider-Man Across the Spider-Verse"));
     }
 

@@ -400,27 +400,16 @@ public class IdentifierTests : IDisposable
         Assert.Equal(1396, result.Title!.TmdbId);
     }
 
-    [Fact]
-    public async Task ShowFolderYear_StillPicksTheRebootOverTheOriginal()
-    {
-        _tmdb.OnSearch("Frasier", 2023, TitleKind.Show, Show(194764, "Frasier", 2023, 40, votes: 150))
-            .OnSearch("Frasier", null, TitleKind.Show, Show(3452, "Frasier", 1993, 60, votes: 1900), Show(194764, "Frasier", 2023, 40, votes: 150))
-            .OnTitle(ShowTitle(194764, "Frasier", 2023, 2)).OnSeason(194764, Season(2, "Episode 1"));
-        var parsed = PathParser.Parse(@"Frasier (2023)\Season 2\Frasier.S02E01.mkv", []);
-
-        var result = await Identify(parsed);
-
-        Assert.Equal(194764, result.Title!.TmdbId);
-    }
-
-    [Fact]
-    public async Task Reboot_YearBeforeTheMarker_IsTheShowYear()
+    [Theory]
+    [InlineData(@"Frasier (2023)\Season 2\Frasier.S02E01.mkv")] // the year in the show folder
+    [InlineData("Frasier.2023.S02E01.1080p.WEB.h264-ETHEL.mkv")] // the year before the episode marker
+    public async Task ShowYear_InTheFolderOrBeforeTheMarker_PicksTheRebootOverTheOriginal(string path)
     {
         _tmdb.OnSearch("Frasier", 2023, TitleKind.Show, Show(194764, "Frasier", 2023, 40, votes: 150))
             .OnSearch("Frasier", null, TitleKind.Show, Show(3452, "Frasier", 1993, 60, votes: 1900), Show(194764, "Frasier", 2023, 40, votes: 150))
             .OnTitle(ShowTitle(3452, "Frasier", 1993, 2)).OnSeason(3452, Season(2, "Episode 1"))
             .OnTitle(ShowTitle(194764, "Frasier", 2023, 2)).OnSeason(194764, Season(2, "Episode 1"));
-        var parsed = PathParser.Parse("Frasier.2023.S02E01.1080p.WEB.h264-ETHEL.mkv", []);
+        var parsed = PathParser.Parse(path, []);
 
         var result = await Identify(parsed);
 
@@ -760,29 +749,20 @@ public class IdentifierTests : IDisposable
     }
 
     [Theory]
-    [InlineData(UnavailableReason.Offline, IdentificationStatus.Offline)]
-    [InlineData(UnavailableReason.ServerError, IdentificationStatus.Offline)]
-    [InlineData(UnavailableReason.NoKey, IdentificationStatus.NoKey)]
-    [InlineData(UnavailableReason.KeyRejected, IdentificationStatus.KeyRejected)]
-    public async Task ProviderUnavailable_MapsToStatus(UnavailableReason reason, IdentificationStatus expected)
+    [InlineData(UnavailableReason.Offline, IdentificationStatus.Offline, null)]
+    [InlineData(UnavailableReason.ServerError, IdentificationStatus.Offline, null)]
+    [InlineData(UnavailableReason.NoKey, IdentificationStatus.NoKey, null)]
+    [InlineData(UnavailableReason.NoKey, IdentificationStatus.NoKey, 949)] // with a TMDB id tag in the name
+    [InlineData(UnavailableReason.KeyRejected, IdentificationStatus.KeyRejected, null)]
+    public async Task ProviderUnavailable_MapsToStatus(UnavailableReason reason, IdentificationStatus expected, int? tmdbId)
     {
         _tmdb.Unavailable = reason;
 
-        var result = await Identify(Movie("Heat", 1995));
+        var result = await Identify(Movie("Heat", 1995) with { TmdbId = tmdbId });
 
         Assert.Equal(expected, result.Status);
         Assert.Null(result.Title);
         Assert.Empty(result.Candidates);
-    }
-
-    [Fact]
-    public async Task NoKey_ReturnsNoKey()
-    {
-        _tmdb.Unavailable = UnavailableReason.NoKey;
-
-        var result = await Identify(Movie("Heat", 1995) with { TmdbId = 949 });
-
-        Assert.Equal(IdentificationStatus.NoKey, result.Status);
     }
 
     [Fact]

@@ -109,10 +109,15 @@ public class GridViewModelTests
         Assert.Equal("No shows yet", shows.EmptyTitle);
     }
 
-    [AvaloniaFact]
-    public async Task Grid_Empty_WhileAScanRuns_SaysScanning()
+    [AvaloniaTheory]
+    [InlineData(false)] // a scan is running
+    [InlineData(true)] // a folder waits its turn to scan
+    public async Task Grid_Empty_WhileAScanRunsOrWaits_SaysScanning(bool waiting)
     {
-        _hub.BeginScan(1, "Torrent Downloads");
+        IDisposable? queued = null;
+        if (waiting) queued = _hub.QueueScan(1);
+        else _hub.BeginScan(1, "Torrent Downloads");
+        using var _ = queued;
 
         var movies = await Loaded();
         var shows = await Loaded(TitleKind.Show);
@@ -122,16 +127,6 @@ public class GridViewModelTests
         Assert.Equal("Titles appear as they're found.", movies.EmptyHint);
         Assert.True(movies.HasEmptyHint);
         Assert.Equal("Scanning folders…", shows.EmptyTitle);
-    }
-
-    [AvaloniaFact]
-    public async Task Grid_Empty_WhileAFolderWaitsToScan_SaysScanning()
-    {
-        using var queued = _hub.QueueScan(1);
-
-        var movies = await Loaded();
-
-        Assert.Equal("Scanning folders…", movies.EmptyTitle);
     }
 
     [AvaloniaFact]
@@ -166,15 +161,19 @@ public class GridViewModelTests
         Assert.Equal("Add a folder that has movies.", movies.EmptyHint);
     }
 
-    [AvaloniaFact]
-    public async Task Grid_FilterWithNoMatch_SaysNothingMatches_EvenWhileScanning()
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)] // a scan runs meanwhile
+    public async Task Grid_FilterWithNoMatch_SaysNothingMatches_EvenWhileScanning(bool scanning)
     {
         _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
-        _hub.BeginScan(1, "Torrent Downloads");
+        if (scanning) _hub.BeginScan(1, "Torrent Downloads");
         var grid = await Loaded();
+        Assert.False(grid.ShowEmpty);
 
         grid.FilterText = "zzz";
 
+        Assert.True(grid.ShowEmpty);
         Assert.Equal("Nothing matches", grid.EmptyTitle);
     }
 
@@ -203,19 +202,6 @@ public class GridViewModelTests
         await list.RefreshAsync();
 
         Assert.Equal("Nothing in progress", list.EmptyText); // a scan never adds anything to this list
-    }
-
-    [AvaloniaFact]
-    public async Task Grid_FilterWithNoMatch_SaysSo()
-    {
-        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
-        var grid = await Loaded();
-        Assert.False(grid.ShowEmpty);
-
-        grid.FilterText = "zzz";
-
-        Assert.True(grid.ShowEmpty);
-        Assert.Equal("Nothing matches", grid.EmptyTitle);
     }
 
     [AvaloniaFact]

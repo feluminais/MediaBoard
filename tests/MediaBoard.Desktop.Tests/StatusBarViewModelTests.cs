@@ -28,6 +28,13 @@ public class StatusBarViewModelTests
         Assert.False(vm.IsBusy);
         Assert.False(vm.IsBusyIndeterminate); // a hidden bar must not keep animating
         Assert.Equal("Up to date", vm.Progress);
+
+        Scan(1, "Supernatural", 12, 44);
+        Flush();
+        _hub.EndScan(1);
+        Flush();
+
+        Assert.Equal("Up to date", vm.Progress); // and again once a scan is over
     }
 
     [AvaloniaFact]
@@ -127,19 +134,6 @@ public class StatusBarViewModelTests
         _hub.Log(ActivityLevel.Error, "Couldn't save progress");
         Flush();
         Assert.Equal("Couldn't save progress", vm.Problem);
-    }
-
-    [AvaloniaFact]
-    public void StatusBar_ShowsUpToDate_WhenNothingRuns()
-    {
-        var vm = Create();
-        Scan(1, "Supernatural", 12, 44);
-        Flush();
-
-        _hub.EndScan(1);
-        Flush();
-
-        Assert.Equal("Up to date", vm.Progress);
     }
 
     [AvaloniaFact]

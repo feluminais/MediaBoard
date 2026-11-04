@@ -92,28 +92,20 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Display_EachChoiceIsSaved()
+    public void EachDisplayChoiceAndToggle_IsSaved()
     {
         var vm = Create();
 
         vm.SelectedUiSize = vm.UiSizeOptions.Single(o => o.Percent == 115);
         vm.SelectedPosterSize = vm.PosterSizeOptions.Single(o => o.Size == PosterSize.Small);
         vm.GrowWithWindow = false;
+        vm.FollowOtherPlayers = false;
 
         var saved = Store.Load();
         Assert.Equal(115, saved.UiSizePercent);
         Assert.Equal(PosterSize.Small, saved.PosterSize);
         Assert.False(saved.GrowWithWindow);
-    }
-
-    [Fact]
-    public void FollowOtherPlayers_ToggleIsSaved()
-    {
-        var vm = Create();
-
-        vm.FollowOtherPlayers = false;
-
-        Assert.False(Store.Load().FollowOtherPlayers);
+        Assert.False(saved.FollowOtherPlayers);
     }
 
     [Fact]
@@ -150,21 +142,6 @@ public sealed class SettingsViewModelTests : IDisposable
         Assert.Equal("Saved", vm.FollowStatus);
     }
 
-    [Theory]
-    [InlineData("abc")]
-    [InlineData("0")]
-    [InlineData("70000")]
-    public void SaveMpc_BadPort_SavesNothingAndSaysSo(string port)
-    {
-        var vm = Create();
-        vm.MpcPort = port;
-
-        vm.SaveMpcCommand.Execute(null);
-
-        Assert.Equal(13579, Store.Load().MpcWebPort);
-        Assert.Equal("The port is a number from 1 to 65535.", vm.FollowStatus);
-    }
-
     [Fact]
     public void SaveVlc_EmptyPassword_ClearsIt()
     {
@@ -179,20 +156,32 @@ public sealed class SettingsViewModelTests : IDisposable
     }
 
     [Theory]
-    [InlineData("abc")]
-    [InlineData("0")]
-    [InlineData("70000")]
-    [InlineData("-5")]
-    public void SaveVlc_BadPort_SavesNothingAndSaysSo(string port)
+    [InlineData(false, "abc")]
+    [InlineData(false, "0")]
+    [InlineData(false, "70000")]
+    [InlineData(true, "abc")]
+    [InlineData(true, "0")]
+    [InlineData(true, "70000")]
+    [InlineData(true, "-5")]
+    public void SaveFollowPort_BadPort_SavesNothingAndSaysSo(bool vlc, string port)
     {
         var vm = Create();
-        vm.VlcPort = port;
-        vm.VlcPassword = "secret";
+        if (vlc)
+        {
+            vm.VlcPort = port;
+            vm.VlcPassword = "secret";
+            vm.SaveVlcCommand.Execute(null);
+        }
+        else
+        {
+            vm.MpcPort = port;
+            vm.SaveMpcCommand.Execute(null);
+        }
 
-        vm.SaveVlcCommand.Execute(null);
-
-        Assert.Equal(8080, Store.Load().VlcWebPort);
-        Assert.Null(Store.Load().VlcWebPassword);
+        var saved = Store.Load();
+        Assert.Equal(13579, saved.MpcWebPort);
+        Assert.Equal(8080, saved.VlcWebPort);
+        Assert.Null(saved.VlcWebPassword);
         Assert.Equal("The port is a number from 1 to 65535.", vm.FollowStatus);
     }
 

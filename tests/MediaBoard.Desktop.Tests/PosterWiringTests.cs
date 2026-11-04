@@ -120,12 +120,14 @@ public class PosterWiringTests
         }
     }
 
-    [AvaloniaFact]
-    public void PosterHost_AsksWhenAttached_AndCancelsWhenDetached()
+    [AvaloniaTheory]
+    [InlineData(false)] // PosterCard
+    [InlineData(true)] // PosterRow
+    public async Task PosterHost_AsksWhenAttached_AndCancelsWhenDetached(bool row)
     {
         var source = new HungSource();
         var card = PosterCardViewModel.For(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"), source.Loader(), _ => { });
-        var view = new PosterCard { DataContext = card };
+        Control view = row ? new PosterRow { DataContext = card } : new PosterCard { DataContext = card };
         Assert.False(card.IsLookingForPoster); // nothing before it is shown
 
         var window = new Window { Content = view };
@@ -134,6 +136,7 @@ public class PosterWiringTests
 
         window.Content = null; // taken out of the tree
         Ui.Flush();
+        await Task.Delay(20);
         Assert.False(card.IsLookingForPoster);
     }
 
@@ -152,22 +155,6 @@ public class PosterWiringTests
 
         Assert.False(first.IsLookingForPoster);
         Assert.True(second.IsLookingForPoster);
-    }
-
-    [AvaloniaFact]
-    public async Task PosterRow_AsksAndCancelsLikeACard()
-    {
-        var source = new HungSource();
-        var card = PosterCardViewModel.For(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"), source.Loader(), _ => { });
-        var window = new Window { Content = new PosterRow { DataContext = card } };
-        window.Show();
-        Assert.True(card.IsLookingForPoster);
-
-        window.Content = null;
-        Ui.Flush();
-        await Task.Delay(20);
-
-        Assert.False(card.IsLookingForPoster);
     }
 
     [AvaloniaFact]

@@ -188,16 +188,12 @@ public class HomeViewModelTests : IDisposable
         Ui.Flush();
         Assert.True(home.ShowNothingAdded);
         Assert.False(home.ShowBusy);
-    }
 
-    [AvaloniaFact]
-    public async Task Home_WithTitles_DoesNotSayScanning()
-    {
+        // Once there are titles, a scan has nothing to say on the empty row.
         _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        await home.RefreshAsync();
         _hub.BeginScan(1, "Torrent Downloads");
-
-        var (_, home) = await LoadedHome();
-
+        Ui.Flush();
         Assert.False(home.ShowBusy);
         Assert.False(home.ShowNothingAdded);
     }

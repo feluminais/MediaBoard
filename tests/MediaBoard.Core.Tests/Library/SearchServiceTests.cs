@@ -60,19 +60,6 @@ public sealed class SearchServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LibraryResults_Survive_AnOnlineFailure()
-    {
-        _library.Add(Card(1, "Dune"));
-        _tmdb.Unavailable = UnavailableReason.ServerError;
-
-        var results = await _service.SearchAsync("dune", Ct);
-
-        Assert.Equal([1], results.Library.Select(c => c.TitleId));
-        Assert.Empty(results.Online);
-        Assert.Equal(OnlineState.Offline, results.State);
-    }
-
-    [Fact]
     public async Task Offline_StateOffline_NoThrow()
     {
         _tmdb.Unavailable = UnavailableReason.Offline;
@@ -90,11 +77,14 @@ public sealed class SearchServiceTests : IDisposable
     [InlineData(UnavailableReason.ServerError, OnlineState.Offline)]
     public async Task ProviderFailure_MapsToState(UnavailableReason reason, OnlineState expected)
     {
+        _library.Add(Card(1, "Dune"));
         _tmdb.Unavailable = reason;
 
         var results = await _service.SearchAsync("dune", Ct);
 
         Assert.Equal(expected, results.State);
+        Assert.Equal([1], results.Library.Select(c => c.TitleId));
+        Assert.Empty(results.Online);
     }
 
     [Fact]
@@ -212,15 +202,10 @@ public sealed class SearchServiceTests : IDisposable
     [InlineData("hid", new[] { "hidden" })]
     [InlineData("items", new[] { "hidden" })]
     [InlineData("scan", new string[0])] // not a prefix of any word
+    [InlineData("   ", new[] { "rescan", "settings", "hidden" })] // a blank filter lists every command
     public void Commands_FilterByPrefix(string filter, string[] expectedIds)
     {
         Assert.Equal(expectedIds, _service.Commands(filter).Select(c => c.Id));
-    }
-
-    [Fact]
-    public void Commands_BlankFilter_ReturnsAll()
-    {
-        Assert.Equal(3, _service.Commands("   ").Count);
     }
 
     private sealed class FakeLibrary : ILibrary

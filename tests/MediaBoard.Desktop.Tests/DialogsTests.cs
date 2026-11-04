@@ -9,11 +9,12 @@ namespace MediaBoard.Desktop.Tests;
 public class DialogsTests
 {
     [AvaloniaFact]
-    public async Task Confirm_WithoutAWindow_SaysNo()
+    public async Task WithoutAWindow_EveryPromptSaysNo()
     {
         Assert.False(await new Dialogs().ConfirmAsync("Remove it?", "Remove"));
         Assert.Null(await new Dialogs().PickFolderAsync());
         Assert.Null(await new Dialogs().PickProgramAsync());
+        Assert.False(await new Dialogs().AskClosePlayerAsync("MPC-HC")); // leaves the player playing
     }
 
     [AvaloniaTheory]
@@ -36,12 +37,6 @@ public class DialogsTests
 
         Assert.Equal(expected, await answer);
         owner.Close();
-    }
-
-    [AvaloniaFact]
-    public async Task AskClosePlayer_WithoutAWindow_LeavesItPlaying()
-    {
-        Assert.False(await new Dialogs().AskClosePlayerAsync("MPC-HC"));
     }
 
     [AvaloniaTheory]

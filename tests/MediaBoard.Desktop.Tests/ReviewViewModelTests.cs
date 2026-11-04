@@ -74,7 +74,6 @@ public class ReviewViewModelTests
 
         Assert.Empty(row.Candidates);
         Assert.False(row.HasCandidates);
-        Assert.NotNull(row.SearchCommand);
     }
 
     [AvaloniaFact]

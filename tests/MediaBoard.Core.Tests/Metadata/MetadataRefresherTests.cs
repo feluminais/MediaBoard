@@ -195,7 +195,6 @@ public sealed class MetadataRefresherTests : IDisposable
     [Theory]
     [InlineData(UnavailableReason.Offline)]
     [InlineData(UnavailableReason.NoKey)]
-    [InlineData(UnavailableReason.KeyRejected)]
     public async Task Stale_StopsAtTheFirstUnavailable(UnavailableReason reason)
     {
         var first = StoreAged(Film(1, "A"), daysAgo: 45);

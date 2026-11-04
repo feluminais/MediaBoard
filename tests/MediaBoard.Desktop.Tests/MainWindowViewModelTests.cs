@@ -62,21 +62,6 @@ public partial class MainWindowViewModelTests
         Flush();
         await WaitUntil(() => vm.CurrentPage is HomeViewModel { IsLoaded: true });
         Assert.Equal(0, vm.ReviewCount);
-
-        _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
-        _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
-        await Task.Run(_library.RaiseChanged); // a scan or identification run raises it off the UI thread
-        Flush();
-
-        await WaitUntil(() => vm.ReviewCount == 2);
-        Assert.True(vm.HasReview);
-        Assert.Equal("2 need review", vm.ReviewItem.Label);
-    }
-
-    [AvaloniaFact]
-    public async Task ReviewItem_ShowsOnlyWhileSomethingNeedsReview_WithTheCountInItsLabel()
-    {
-        var vm = Create();
         Assert.False(vm.HasReview);
 
         _library.Review.Add(FakeLibrary.ReviewFile(1, "a.mkv"));
@@ -86,9 +71,11 @@ public partial class MainWindowViewModelTests
         Assert.Equal("1 needs review", vm.ReviewItem.Label);
 
         _library.Review.Add(FakeLibrary.ReviewFile(2, "b.mkv"));
-        _library.RaiseChanged();
+        await Task.Run(_library.RaiseChanged); // a scan or identification run raises it off the UI thread
         Flush();
+
         await WaitUntil(() => vm.ReviewCount == 2);
+        Assert.True(vm.HasReview);
         Assert.Equal("2 need review", vm.ReviewItem.Label);
 
         _library.Review.Clear();
@@ -429,9 +416,12 @@ public partial class MainWindowViewModelTests
         Assert.Equal([MainWindowViewModel.MoviesPage], vm.NavItems.Where(i => i.IsSelected).Select(i => i.Key));
     }
 
-    [AvaloniaFact]
-    public async Task Home_PromptsForFolder_WhenThereAreNone()
+    [AvaloniaTheory]
+    [InlineData(false)] // no folders: the prompt
+    [InlineData(true)] // a folder: the rows
+    public async Task Home_ShowsRowsOrThePrompt_ByWhetherAFolderExists(bool hasFolder)
     {
+        if (hasFolder) _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
         var vm = Create();
         var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
         Assert.False(home.ShowNoFolders); // nothing until the first load
@@ -440,25 +430,8 @@ public partial class MainWindowViewModelTests
         Flush();
         await WaitUntil(() => home.IsLoaded);
 
-        Assert.True(home.ShowNoFolders);
-        Assert.False(home.ShowRows);
-        home.AddFolderCommand.Execute(null);
-        Assert.Equal("Folders", Assert.IsAssignableFrom<PageViewModel>(vm.CurrentPage).Title);
-    }
-
-    [AvaloniaFact]
-    public async Task Home_ShowsRows_WhenAFolderExists()
-    {
-        _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
-        var vm = Create();
-        var home = Assert.IsType<HomeViewModel>(vm.CurrentPage);
-
-        _library.RaiseChanged();
-        Flush();
-        await WaitUntil(() => home.IsLoaded);
-
-        Assert.True(home.ShowRows);
-        Assert.False(home.ShowNoFolders);
+        Assert.Equal(!hasFolder, home.ShowNoFolders);
+        Assert.Equal(hasFolder, home.ShowRows);
     }
 
     [AvaloniaFact]
@@ -510,6 +483,7 @@ public partial class MainWindowViewModelTests
         await WaitUntil(() => asked == 1);
 
         Assert.Same(folders, vm.CurrentPage);
+        Assert.Equal("Folders", Assert.IsAssignableFrom<PageViewModel>(vm.CurrentPage).Title);
     }
 
     private static List<string?> TextsOf(Avalonia.Controls.Window window) =>

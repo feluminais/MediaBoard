@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Players.MpcHc;
+using MediaBoard.Core.Tests.Support;
 
 namespace MediaBoard.Core.Tests.Players;
 
@@ -126,13 +127,19 @@ public class MpcHcWebSessionTests
     public async Task Client_AsksTheVariablesPageOnLoopback_AndReadsItAsUtf8()
     {
         const string body = "<p id=\"state\">2</p><p id=\"filepath\">C:\\Відео\\a.mkv</p>";
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body)) });
+        string? requested = null;
+        var handler = new StubHandler((_, request) =>
+        {
+            requested = request.RequestUri!.ToString();
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body)) };
+        });
         var client = new MpcWebClient(handler);
 
         var text = await client.FetchAsync(13579, Ct);
 
         Assert.Equal(body, text);
-        Assert.Equal("http://127.0.0.1:13579/variables.html", handler.Requests.Single());
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("http://127.0.0.1:13579/variables.html", requested);
     }
 
     // ---- The session ----
@@ -373,16 +380,5 @@ public class MpcHcWebSessionTests
         await session.AttachAsync(Ct);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.AttachAsync(Ct));
-    }
-
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
-    {
-        public List<string> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request.RequestUri!.ToString());
-            return Task.FromResult(respond(request));
-        }
     }
 }

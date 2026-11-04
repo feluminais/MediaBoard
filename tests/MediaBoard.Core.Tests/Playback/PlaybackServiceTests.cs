@@ -70,35 +70,17 @@ public sealed class PlaybackServiceTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(600), start.StartAt);
     }
 
-    [Fact]
-    public async Task Watched_StartsFromZero()
+    [Theory]
+    [InlineData(true, true, false)] // watched: the saved position no longer counts
+    [InlineData(true, false, true)] // asked to start over
+    [InlineData(false, false, false)] // nothing saved
+    public async Task Play_StartsFromZero(bool saved, bool watched, bool fromStart)
     {
         var id = AddFile("Movie (2020).mkv");
-        _progress.Save(id, 600, Hour);
-        _progress.SetWatched(id, true);
+        if (saved) _progress.Save(id, 600, Hour);
+        if (watched) _progress.SetWatched(id, true);
 
-        await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
-
-        Assert.Null(Assert.Single(Session.Starts).StartAt);
-    }
-
-    [Fact]
-    public async Task FromStart_IgnoresSavedPosition()
-    {
-        var id = AddFile("Movie (2020).mkv");
-        _progress.Save(id, 600, Hour);
-
-        await _service.PlayAsync(id, fromStart: true, CancellationToken.None);
-
-        Assert.Null(Assert.Single(Session.Starts).StartAt);
-    }
-
-    [Fact]
-    public async Task NothingSaved_StartsFromZero()
-    {
-        var id = AddFile("Movie (2020).mkv");
-
-        await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
+        await _service.PlayAsync(id, fromStart, CancellationToken.None);
 
         Assert.Null(Assert.Single(Session.Starts).StartAt);
     }
@@ -260,21 +242,13 @@ public sealed class PlaybackServiceTests : IDisposable
         Assert.Null(_hub.Current.PlayerName);
     }
 
-    [Fact]
-    public async Task MissingFile_LogsFileMissing_DoesNotStartPlayer()
+    [Theory]
+    [InlineData(false)] // flagged missing by the last scan
+    [InlineData(true)] // deleted since the last scan
+    public async Task MissingFile_LogsFileMissing_DoesNotStartPlayer(bool goneFromDisk)
     {
-        var id = AddFile("Movie (2020).mkv", missing: true);
-
-        await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
-
-        AssertFileMissing("Movie (2020).mkv");
-    }
-
-    [Fact]
-    public async Task FileGoneFromDisk_LogsFileMissing_DoesNotStartPlayer()
-    {
-        var id = AddFile("Movie (2020).mkv");
-        _library.Delete("Movie (2020).mkv");
+        var id = AddFile("Movie (2020).mkv", missing: !goneFromDisk);
+        if (goneFromDisk) _library.Delete("Movie (2020).mkv");
 
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
 
@@ -424,7 +398,7 @@ public sealed class PlaybackServiceTests : IDisposable
     [Fact]
     public async Task MpcHcMovesToAnotherFile_FollowsIt_AndKeepsTheFirstOnesProgress()
     {
-        var transport = new LoopTransport();
+        var transport = new FakeTransport();
         var process = new FakePlayerProcess();
         var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
             player => new MpcHcSession(player, () => transport, _ => process));
@@ -604,27 +578,20 @@ public sealed class PlaybackServiceTests : IDisposable
         AssertProgress(id, 120, Hour);
     }
 
-    [Fact]
-    public async Task Attach_NoPlayerAnswers_ReturnsFalse_AndDisposesTheSession()
+    [Theory]
+    [InlineData(false)] // no player there to attach to
+    [InlineData(true)] // the attach itself throws
+    public async Task Attach_Fails_ReturnsFalse_AndDisposesTheSession(bool attachThrows)
     {
-        var session = new FakeAttachableSession(answers: false);
+        var session = attachThrows
+            ? new FakeAttachableSession { AttachFailure = new InvalidOperationException("boom") }
+            : new FakeAttachableSession(answers: false);
 
         Assert.False(await _service.AttachAsync(session, CancellationToken.None));
 
         Assert.True(session.Disposed);
         Assert.Null(_service.CurrentPlayer);
         Assert.Null(_hub.Current.PlayerName);
-    }
-
-    [Fact]
-    public async Task Attach_AttachFails_ReturnsFalse_AndDisposesTheSession()
-    {
-        var session = new FakeAttachableSession { AttachFailure = new InvalidOperationException("boom") };
-
-        Assert.False(await _service.AttachAsync(session, CancellationToken.None));
-
-        Assert.True(session.Disposed);
-        Assert.Null(_service.CurrentPlayer);
     }
 
     [Fact]
@@ -675,36 +642,23 @@ public sealed class PlaybackServiceTests : IDisposable
         AssertProgress(second, 900, Hour);
     }
 
-    [Fact]
-    public async Task Stop_ClosingThePlayer_SavesAndClosesIt()
+    [Theory]
+    [InlineData(true)] // closes the player
+    [InlineData(false)] // leaves it open
+    public async Task Stop_SavesThePosition_ThenClosesOrDetachesThePlayer(bool closePlayer)
     {
         var id = await Play("Movie (2020).mkv");
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
         Session.Position = TimeSpan.FromMinutes(12);
         Assert.Equal("mpv", _service.CurrentPlayer);
 
-        await _service.StopAsync(closePlayer: true, CancellationToken.None);
+        await _service.StopAsync(closePlayer, CancellationToken.None);
 
         AssertProgress(id, 720, Hour);
         Assert.True(Session.Disposed);
-        Assert.False(Session.Detached);
+        Assert.Equal(!closePlayer, Session.Detached);
         Assert.Null(_service.CurrentPlayer);
         Assert.Null(_hub.Current.PlayerName);
-    }
-
-    [Fact]
-    public async Task Stop_LeavingThePlayerOpen_SavesAndDetaches()
-    {
-        var id = await Play("Movie (2020).mkv");
-        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
-        Session.Position = TimeSpan.FromMinutes(12);
-
-        await _service.StopAsync(closePlayer: false, CancellationToken.None);
-
-        AssertProgress(id, 720, Hour);
-        Assert.True(Session.Detached);
-        Assert.True(Session.Disposed);
-        Assert.Null(_service.CurrentPlayer);
     }
 
     [Fact]
@@ -802,24 +756,6 @@ public sealed class PlaybackServiceTests : IDisposable
         _service.AnswerFinished(id, finished: true);
 
         Assert.Equal(1, changes);
-    }
-
-    /// <summary>An MPC-HC message window that only records what is sent; the test plays MPC-HC's part.</summary>
-    private sealed class LoopTransport : IMpcTransport
-    {
-        public nint HostHandle => 4096;
-
-        public event Action<uint, string>? Received;
-
-        public void Receive(uint cmd, string payload) => Received?.Invoke(cmd, payload);
-
-        public void Send(nint target, uint cmd, string payload)
-        {
-        }
-
-        public void Dispose()
-        {
-        }
     }
 
     private async Task<int> Play(string relPath)

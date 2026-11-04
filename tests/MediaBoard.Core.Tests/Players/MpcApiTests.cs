@@ -28,18 +28,11 @@ public class MpcApiTests
     }
 
     [Fact]
-    public void ParseNowPlaying_KeepsUnicodePath()
+    public void ParseNowPlaying_KeepsNonAsciiAndBackslashesAsTheyAre()
     {
         const string path = @"G:\Torrent Downloads\Brassic - S01E01 (2019) [Цікава Ідея].mkv";
+        Assert.Equal(path, MpcApi.ParseNowPlaying($"Brassic|||{path}|2735.104").FileName);
 
-        var nowPlaying = MpcApi.ParseNowPlaying($"Brassic|||{path}|2735.104");
-
-        Assert.Equal(path, nowPlaying.FileName);
-    }
-
-    [Fact]
-    public void ParseNowPlaying_CurlyApostropheAndBackslashInTitle()
-    {
         var nowPlaying = MpcApi.ParseNowPlaying(@"Bob’s \ Burgers\x|||C:\Відео\Bob’s.mkv|1.500");
 
         Assert.Equal(@"Bob’s \ Burgers\x", nowPlaying.Title);
