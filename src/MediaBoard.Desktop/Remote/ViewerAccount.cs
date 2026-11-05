@@ -90,7 +90,8 @@ public sealed class ViewerAccount
         await CloseThePlayerAsync();
         if (mayHear)
         {
-            await SendWhatsWaitingAsync();
+            // Nothing would get through, and the wait is one the viewer sits out.
+            if (_monitor.State != ConnectionState.Unreachable) await SendWhatsWaitingAsync();
             await TellTheServerAsync(ct);
         }
 

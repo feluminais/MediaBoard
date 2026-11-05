@@ -139,11 +139,11 @@ public sealed partial class AccountViewModel : ObservableObject
     {
         if (!await _confirm($"Sign out of {ServerName}? You'll need your password to come back.{PlayerClosing}", "Sign out")) return;
 
-        LeaveMessage = null;
+        LeaveMessage = "Signing out…";
         IsBusy = true;
         try
         {
-            if (!await _account.SignOutAsync(CancellationToken.None)) LeaveMessage = "You're signed out. Restart MediaBoard to sign in again.";
+            LeaveMessage = await _account.SignOutAsync(CancellationToken.None) ? null : "You're signed out. Restart MediaBoard to sign in again.";
         }
         finally
         {

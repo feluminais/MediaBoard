@@ -53,9 +53,9 @@ public sealed class ProgressOutboxTests
             return world;
         }
 
-        public ProgressOutbox NewOutbox()
+        public ProgressOutbox NewOutbox(Func<bool>? canSend = null)
         {
-            var outbox = new ProgressOutbox(Client, PathOnDisk, Clock);
+            var outbox = new ProgressOutbox(Client, PathOnDisk, Clock, canSend);
             _outboxes.Add(outbox);
             return outbox;
         }
@@ -194,6 +194,47 @@ public sealed class ProgressOutboxTests
         var entry = Assert.Single(world.Received).Entry!;
         Assert.Equal(10, entry.PositionS);
         Assert.True(entry.Watched);
+    }
+
+    [Fact]
+    public async Task Save_WritesTheFileEvery5s_AndAPauseWritesAtOnce()
+    {
+        await using var world = await World.StartAsync();
+        world.Outbox.Save(FileId, 10, 100);
+        var first = File.ReadAllText(world.PathOnDisk);
+
+        world.Outbox.Save(FileId, 20, 100);
+        Assert.Equal(first, File.ReadAllText(world.PathOnDisk));
+
+        world.Clock.Advance(TimeSpan.FromSeconds(5));
+        world.Outbox.Save(FileId, 30, 100);
+        var second = File.ReadAllText(world.PathOnDisk);
+        Assert.NotEqual(first, second);
+
+        world.Outbox.Save(FileId, 40, 100);
+        Assert.Equal(second, File.ReadAllText(world.PathOnDisk));
+
+        world.Outbox.Paused(FileId);
+        Assert.NotEqual(second, File.ReadAllText(world.PathOnDisk));
+    }
+
+    [Fact]
+    public async Task WhenItCantSend_NothingGoesOut_AndTheEntriesWait()
+    {
+        await using var world = await World.StartAsync();
+        var canSend = false;
+        var outbox = world.NewOutbox(() => canSend);
+        outbox.Save(FileId, 10, 100);
+
+        await outbox.FlushAsync(Ct);
+
+        Assert.Empty(world.Received);
+        Assert.NotNull(outbox.Waiting(FileId));
+
+        canSend = true;
+        await outbox.FlushAsync(Ct);
+
+        Assert.Single(world.Received);
     }
 
     [Fact]

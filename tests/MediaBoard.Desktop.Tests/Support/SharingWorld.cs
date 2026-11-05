@@ -48,7 +48,11 @@ internal sealed class SharingWorld : IAsyncDisposable
                     Interlocked.Increment(ref _serversBuilt);
                     return ServerFailure is { } failure ? throw failure : sp.GetRequiredService<SharingServer>();
                 },
-                () => NetworkFailure is { } failure ? throw failure : OnPublicNetwork,
+                () =>
+                {
+                    NetworkHangs?.Wait();
+                    return NetworkFailure is { } failure ? throw failure : OnPublicNetwork;
+                },
                 loopbackOnly: true));
         });
         Settings.Update(s => s with { Sharing = s.Sharing with { Port = Port } });
@@ -61,6 +65,9 @@ internal sealed class SharingWorld : IAsyncDisposable
     public int Port { get; } = FreePort();
 
     public bool OnPublicNetwork { get; set; }
+
+    /// <summary>Holds the network check until set.</summary>
+    public ManualResetEventSlim? NetworkHangs { get; set; }
 
     /// <summary>What the network check throws, when set.</summary>
     public Exception? NetworkFailure { get; set; }

@@ -44,7 +44,8 @@ public static class RemoteComposition
         services.AddSingleton(sp => new ProgressOutbox(
             sp.GetRequiredService<ApiClient>(),
             paths.Outbox(connection.Endpoint.Fingerprint, connection.AccountName),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            () => !ConnectionMonitor.IsFinal(sp.GetRequiredService<ConnectionMonitor>().State)));
         services.AddSingleton(sp => new RemotePlaybackSource(
             sp.GetRequiredService<ApiClient>(), sp.GetRequiredService<StreamProxy>(), sp.GetRequiredService<ProgressOutbox>()));
         services.AddSingleton(sp => new PlaybackService(

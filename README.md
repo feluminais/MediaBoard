@@ -110,6 +110,7 @@ the app must stay running, in the tray at least, for people to connect. It works
 
 They browse, search and play from your library, and their progress is their own. The files stay on your PC and are never
 copied. Windows SmartScreen warns once on the unsigned app. Replacing your certificate means everyone needs a new invite.
+If this PC connects to someone else's server for a while, sharing comes back on when you switch back to your own library.
 
 ## How it identifies titles
 

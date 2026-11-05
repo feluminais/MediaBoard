@@ -45,6 +45,7 @@ public sealed class SharingController(
     private const string CertificateProblem = "Can't open the sharing certificate. It may belong to another Windows account. If you replace it, everyone needs a new invite.";
 
     private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan NetworkProfileLimit = TimeSpan.FromSeconds(2);
 
     private readonly Func<bool> _isPublicNetwork = isPublicNetwork ?? NetworkProfile.IsPublic;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -252,7 +253,7 @@ public sealed class SharingController(
     {
         var sharing = settings.Load().Sharing;
         Set(new State(SharingStatus.Starting));
-        var warning = OnPublicNetwork() ? PublicNetworkWarning : null;
+        var warning = await OnPublicNetworkAsync() ? PublicNetworkWarning : null;
 
         X509Certificate2 certificate;
         try
@@ -312,11 +313,12 @@ public sealed class SharingController(
     }
 
     // Only a warning hangs on this, so nothing it does may get in the way of starting.
-    private bool OnPublicNetwork()
+    // A warning is worth a moment, not a sharing that hangs on Starting because Windows didn't answer.
+    private async Task<bool> OnPublicNetworkAsync()
     {
         try
         {
-            return _isPublicNetwork();
+            return await Task.Run(_isPublicNetwork).WaitAsync(NetworkProfileLimit).ConfigureAwait(false);
         }
         catch (Exception e)
         {

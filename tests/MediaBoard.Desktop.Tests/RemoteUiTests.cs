@@ -335,6 +335,23 @@ public sealed class RemoteUiTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task SignOut_SaysSo_WhileItRuns()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        var account = viewer.Services.GetRequiredService<SettingsViewModel>().Account!;
+        var said = new List<string?>();
+        account.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(account.LeaveMessage)) said.Add(account.LeaveMessage);
+        };
+
+        await account.SignOutCommand.ExecuteAsync(null);
+
+        Assert.Equal(["Signing out…", null], said);
+    }
+
+    [AvaloniaFact]
     public async Task SignOut_MidPlay_TheServerHasThePosition()
     {
         await using var world = new SharingWorld();

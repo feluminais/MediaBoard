@@ -22,9 +22,13 @@ public sealed record PendingProgress(int FileId, double? PositionS, double Durat
 /// <param name="api">Where progress goes.</param>
 /// <param name="path">The outbox file.</param>
 /// <param name="time">The clock.</param>
-public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time) : IProgressSink, IAsyncDisposable
+/// <param name="canSend">False while sending can't work, such as after a sign-out. Entries wait on disk. Null always sends.</param>
+public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time, Func<bool>? canSend = null) : IProgressSink, IAsyncDisposable
 {
     private static readonly TimeSpan Every = TimeSpan.FromSeconds(10);
+
+    // A player reports about once a second. A crash can lose this much of a position, and a pause or an end writes at once.
+    private static readonly TimeSpan WriteEvery = TimeSpan.FromSeconds(5);
 
     // Leaving the app shouldn't wait on a server that's gone. What doesn't get out is still on disk.
     private static readonly TimeSpan LastSendLimit = TimeSpan.FromSeconds(3);
@@ -45,6 +49,9 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     private bool _read;
     private bool _readFailed;
     private bool _writeFailed;
+    private bool _unwritten;
+    private long _lastWrite;
+    private bool _everWritten;
     private int _disposed;
 
     /// <summary>Starts the background sends. The first is one interval away.</summary>
@@ -63,7 +70,9 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             _waiting.TryGetValue(fileId, out var earlier);
             _last = new PendingProgress(fileId, positionS, durationS, earlier?.Watched, time.GetUtcNow());
             _waiting[fileId] = _last;
-            Write();
+
+            if (_everWritten && time.GetElapsedTime(_lastWrite) < WriteEvery) _unwritten = true;
+            else Write();
         }
     }
 
@@ -84,7 +93,12 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
 
     public void Paused(int fileId)
     {
-        lock (_gate) _paused = fileId;
+        lock (_gate)
+        {
+            _paused = fileId;
+            WriteIfBehind();
+        }
+
         _rounds.Writer.TryWrite(false);
     }
 
@@ -93,6 +107,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
         lock (_gate)
         {
             if (_paused == fileId) _paused = null;
+            WriteIfBehind();
         }
 
         _rounds.Writer.TryWrite(false);
@@ -131,6 +146,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             // On disk for the next start.
         }
 
+        lock (_gate) WriteIfBehind();
         _rounds.Writer.TryComplete();
         _stop.Dispose();
         _sending.Dispose();
@@ -213,6 +229,9 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             lock (_gate)
             {
                 ReadFile();
+                WriteIfBehind();
+                if (canSend?.Invoke() == false) return;
+
                 batch = [.. _waiting.Values];
 
                 // A paused stream sends no bytes, and the server ends one after 30 s without a report. It counts any report
@@ -268,12 +287,20 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
         }
     }
 
+    private void WriteIfBehind()
+    {
+        if (_unwritten) Write();
+    }
+
     // Called with _gate held. Writes beside the target and swaps, so a crash never leaves a half-written file. A disk that
     // refuses costs only the protection against a restart: the entry is still in memory, on its way to the server.
     private void Write()
     {
         if (!_read) return;
 
+        _unwritten = false;
+        _everWritten = true;
+        _lastWrite = time.GetTimestamp();
         try
         {
             var directory = Path.GetDirectoryName(Path.GetFullPath(path));

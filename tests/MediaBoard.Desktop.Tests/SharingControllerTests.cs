@@ -59,6 +59,20 @@ public sealed class SharingControllerTests
         await world.PingAsync();
     }
 
+    [Fact]
+    public async Task PublicNetworkCheck_ThatHangs_DoesNotHoldSharingAtStarting()
+    {
+        using var stuck = new ManualResetEventSlim();
+        await using var world = new SharingWorld { NetworkHangs = stuck, OnPublicNetwork = true };
+        world.OpenDatabase();
+
+        await world.Sharing.SetOnAsync(true).WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        stuck.Set();
+
+        Assert.Equal(SharingStatus.On, world.Sharing.Status);
+        Assert.Null(world.Sharing.Warning);
+    }
+
     [Theory]
     [InlineData("The den", "The den")]
     [InlineData(null, null)]
