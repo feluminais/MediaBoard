@@ -112,8 +112,10 @@ public sealed class LibraryDatabase
     }
 
     /// <summary>
-    /// v3 to v4 moves every progress row to another table, so the file is copied first, once, and the copy is never
-    /// replaced. The WAL is folded in so the copy is the whole database.
+    /// v3 to v4 moves every progress row to another table, so the database is backed up first, once, and the backup
+    /// is never replaced. The SQLite backup API reads through the connection, so commits that are still only in the
+    /// WAL are included. It writes to a .tmp name and moves it into place, so an interrupted backup is never mistaken
+    /// for a finished one. A failure here stops the migration, which then retries on the next launch.
     /// </summary>
     private void BackUpV3(SqliteConnection connection)
     {
@@ -123,8 +125,16 @@ public sealed class LibraryDatabase
         var backup = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(FilePath))!, "library.v3.bak");
         if (File.Exists(backup)) return;
 
-        Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE)");
-        File.Copy(FilePath, backup, overwrite: false);
+        var temp = backup + ".tmp";
+        File.Delete(temp);
+        using (var destination = new SqliteConnection(
+                   new SqliteConnectionStringBuilder { DataSource = temp, Pooling = false }.ToString()))
+        {
+            destination.Open();
+            connection.BackupDatabase(destination);
+        }
+
+        File.Move(temp, backup);
     }
 
     private static void MigrateToV4(SqliteConnection connection)

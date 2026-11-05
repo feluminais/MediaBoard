@@ -115,17 +115,57 @@ public sealed class SchemaV4Tests : IDisposable
     public void V3Database_LeavesBackup()
     {
         MakeV3File();
-        var original = File.ReadAllBytes(DbPath);
 
         new LibraryDatabase(DbPath).Open().Dispose();
 
         Assert.True(File.Exists(BackupPath));
-        Assert.Equal(original, File.ReadAllBytes(BackupPath));
+        Assert.False(File.Exists(BackupPath + ".tmp"));
+        using (var backup = new SqliteConnection($"Data Source={BackupPath};Pooling=False"))
+        {
+            backup.Open();
+            Assert.Equal(3, backup.ExecuteScalar<int>("PRAGMA user_version"));
+            Assert.Equal(3, backup.ExecuteScalar<int>("SELECT COUNT(*) FROM progress"));
+        }
 
         // A later open must keep the first backup, not copy the migrated file over it.
+        var first = File.ReadAllBytes(BackupPath);
         SqliteConnection.ClearAllPools();
         new LibraryDatabase(DbPath).Open().Dispose();
-        Assert.Equal(original, File.ReadAllBytes(BackupPath));
+        Assert.Equal(first, File.ReadAllBytes(BackupPath));
+    }
+
+    [Fact]
+    public void V3Database_BackupHoldsWalOnlyCommit()
+    {
+        MakeV3File();
+        // Pooling off, so closing it does not leave the WAL folded in; this connection stays open through the migration.
+        using var writer = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        writer.Open();
+        writer.Execute("PRAGMA journal_mode = WAL");
+        writer.Execute("UPDATE progress SET position_s = 99 WHERE file_id = 3");
+        Assert.True(new FileInfo(DbPath + "-wal").Length > 0, "the commit should still be in the WAL");
+
+        new LibraryDatabase(DbPath).Open().Dispose();
+
+        using var backup = new SqliteConnection($"Data Source={BackupPath};Pooling=False");
+        backup.Open();
+        Assert.Equal(3, backup.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(99.0, backup.ExecuteScalar<double>("SELECT position_s FROM progress WHERE file_id = 3"));
+    }
+
+    [Fact]
+    public void V3Database_LeftoverTmp_StillBacksUp()
+    {
+        MakeV3File();
+        File.WriteAllText(BackupPath + ".tmp", "half a copy");
+
+        new LibraryDatabase(DbPath).Open().Dispose();
+
+        Assert.False(File.Exists(BackupPath + ".tmp"));
+        using var backup = new SqliteConnection($"Data Source={BackupPath};Pooling=False");
+        backup.Open();
+        Assert.Equal(3, backup.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(3, backup.ExecuteScalar<int>("SELECT COUNT(*) FROM progress"));
     }
 
     [Fact]
