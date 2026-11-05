@@ -4,6 +4,9 @@ using System.Net.Http.Json;
 using System.Text;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
+using MediaBoard.Server.Endpoints;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
 
 namespace MediaBoard.Server.Tests;
 
@@ -24,6 +27,21 @@ public sealed class PublicEndpointTests
         var reply = await fixture.Client.GetFromJsonAsync<PingReply>(Ping, ApiJson.Options, Ct);
 
         Assert.Equal(new PingReply(ApiVersion.Current, ServerFixture.ServerName), reply);
+    }
+
+    // The owner can remove the account between the device being issued and the answer, which no request can line up.
+    [Fact]
+    public async Task Answer_AccountRemovedOnceIssued_IsUnauthorized()
+    {
+        await using var fixture = await ServerFixture.StartTestHostAsync();
+        var person = fixture.NewPerson();
+        var issued = fixture.Join(person);
+        fixture.Service.Remove(person.Id);
+
+        var answer = Assert.IsAssignableFrom<IStatusCodeHttpResult>(Public.Answer(issued, null, fixture.Accounts));
+
+        Assert.Equal(StatusCodes.Status401Unauthorized, answer.StatusCode);
+        Assert.Equal(ApiErrorCode.Unauthorized, Assert.IsAssignableFrom<IValueHttpResult<ApiErrorBody>>(answer).Value?.Code);
     }
 
     [Fact]

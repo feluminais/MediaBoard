@@ -101,7 +101,7 @@ public sealed class RemoteHost(
         }
     }
 
-    // Only the first loss arms it. Each try that fails says Unreachable again, and those must not push the end back.
+    // Only the first loss arms it. A Retry that fails reports Unreachable again, and that must not push the end back.
     private void StartGrace()
     {
         lock (_graceGate)

@@ -402,7 +402,9 @@ public sealed class RemoteCompositionTests
         viewer.Player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1000)));
         viewer.Player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(115)));
         await viewer.World.Sharing.SetOnAsync(false);
-        await WaitUntilAsync(() => viewer.Monitor.State == ConnectionState.Unreachable);
+
+        // The monitor sets its state before it raises Changed, so the state alone can show before the timer is armed.
+        await WaitUntilAsync(() => viewer.Grace.PendingTimers == 1);
         return file;
     }
 
@@ -446,7 +448,7 @@ public sealed class RemoteCompositionTests
         Assert.NotNull(viewer.Playback.CurrentPlayer);
     }
 
-    // Each try that fails says Unreachable again, and a wait that restarted on those would never end.
+    // A Retry that fails reports Unreachable again, and a wait that restarted on that could be put off for good.
     [Fact]
     public async Task RetryThatFails_DoesNotExtendTheGrace()
     {
@@ -455,8 +457,14 @@ public sealed class RemoteCompositionTests
         await PlayThenLoseTheServerAsync(viewer);
         viewer.Grace.Advance(TimeSpan.FromSeconds(30));
 
+        // Added after the host's handler, so hearing it here means the host has heard it too.
+        var failedAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewer.Monitor.Changed += () =>
+        {
+            if (viewer.Monitor.State == ConnectionState.Unreachable) failedAgain.TrySetResult();
+        };
         viewer.Monitor.Retry();
-        await WaitUntilAsync(() => viewer.Monitor.State == ConnectionState.Unreachable);
+        await failedAgain.Task.WaitAsync(Within, Ct);
         viewer.Grace.Advance(TimeSpan.FromSeconds(30));
 
         await viewer.Player.Closed.Task.WaitAsync(Within, Ct);

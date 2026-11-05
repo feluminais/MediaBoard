@@ -50,7 +50,7 @@ internal static class Public
 
     private static bool IsDeviceName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= MaxDeviceName;
 
-    private static IResult Answer(IssuedDevice? issued, RedeemFailure? failure, AccountStore store)
+    internal static IResult Answer(IssuedDevice? issued, RedeemFailure? failure, AccountStore store)
     {
         if (issued is null) return ApiResults.Error(CodeOf(failure!.Value));
 
