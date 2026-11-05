@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Activity;
@@ -766,14 +767,16 @@ public sealed class RemoteUiTests : IDisposable
     public async Task Panel_HearsAChangeFromAnotherThread_OnTheUiThread()
     {
         var (shell, panel, monitor) = RemoteShell();
+        var heardOnTheUiThread = new List<bool>();
+        panel.PropertyChanged += (_, _) => heardOnTheUiThread.Add(Dispatcher.UIThread.CheckAccess());
 
         await Task.Run(() => monitor.Report(ConnectionEvent.Unreachable), Ct);
-        Assert.NotEqual(FailureText.For(ConnectionState.Unreachable, Server, null), panel.Message); // waits for the dispatcher
-
         Ui.Flush();
 
         Assert.Equal(FailureText.For(ConnectionState.Unreachable, Server, null), panel.Message);
         Assert.Equal("Can't reach the server", shell.StatusBar.Connection);
+        Assert.NotEmpty(heardOnTheUiThread);
+        Assert.All(heardOnTheUiThread, Assert.True);
     }
 
     [AvaloniaFact]
