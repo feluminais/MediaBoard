@@ -115,7 +115,7 @@ public sealed class SharingServer(
     {
         app.Use(AnswerBadBodies);
 
-        Public.Map(app.MapGroup(Api), this, service);
+        Public.Map(app.MapGroup(Api), this, service, accounts);
 
         var auth = new DeviceAuth(devices, accounts, _time);
         var authenticated = app.MapGroup("").AddEndpointFilter(auth).WithMetadata(auth);

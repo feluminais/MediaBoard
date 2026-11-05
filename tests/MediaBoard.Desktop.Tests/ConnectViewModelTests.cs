@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using MediaBoard.Core.Accounts;
@@ -15,6 +16,27 @@ public sealed class ConnectViewModelTests
     private const string Password = "correct horse battery";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>Holds whatever a task posts back, so a test can act between the answer arriving and the code resuming.</summary>
+    private sealed class HeldContext : SynchronizationContext
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _posted = [];
+
+        public override void Post(SendOrPostCallback d, object? state) => _posted.Add((d, state));
+
+        public void WaitForPost()
+        {
+            Assert.True(SpinWait.SpinUntil(() => _posted.Count > 0, TimeSpan.FromSeconds(30)));
+        }
+
+        public void RunUntil(Task task)
+        {
+            while (!task.IsCompleted)
+            {
+                if (_posted.TryTake(out var next, 100)) next.Callback(next.State);
+            }
+        }
+    }
 
     private sealed class Room : IAsyncDisposable
     {
@@ -348,6 +370,88 @@ public sealed class ConnectViewModelTests
         Assert.Contains("Restart MediaBoard", connect.Message, StringComparison.Ordinal);
         Assert.False(connect.CanRetry);
         Assert.Equal(AppMode.Server, room.Viewer.Load().Mode);
+    }
+
+    // By normal clicks, and the screen names the first server all the while.
+    [Fact]
+    public async Task SignIn_AfterOpeningAnotherServersInvite_GoesToTheSavedServer()
+    {
+        await using var saved = await Room.OpenAsync();
+        await using var other = await Room.OpenAsync();
+        saved.KnownPerson();
+        var otherGuard = other.World.Services.GetRequiredService<SignInGuard>();
+        for (var attempt = 0; attempt < 4; attempt++) otherGuard.RecordFailure("Sam", null);
+        var connection = saved.SignedOut();
+        var connect = saved.Connect(connection);
+
+        connect.UseInviteCommand.Execute(null);
+        await Paste(connect, other.Invite(other.Person("Anna")));
+        Assert.Equal(ConnectStep.NewPassword, connect.Step);
+        connect.BackCommand.Execute(null);
+        connect.BackCommand.Execute(null);
+        Assert.Equal(ConnectStep.SignIn, connect.Step);
+
+        await SubmitPassword(connect, Password);
+
+        // One more failure would have locked the name there.
+        Assert.False(otherGuard.IsLocked("Sam", null));
+        Assert.Equal(1, saved.Restarts);
+        Assert.Equal(connection.Endpoint.Fingerprint, saved.Viewer.Load().Connection!.Endpoint.Fingerprint);
+    }
+
+    // The invite is spent, and another one pasted now would be ignored while the app restarted into this server.
+    [Fact]
+    public async Task HeldToken_LeavesOnlyRetry()
+    {
+        await using var room = await Room.OpenAsync();
+        room.Viewer.Save(new AppSettings());
+        var connect = room.Connect();
+        var invite = room.Invite(room.Person());
+        await Paste(connect, invite);
+        Assert.True(connect.BackCommand.CanExecute(null));
+
+        using (new FileStream(room.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Delete))
+        {
+            await SubmitPassword(connect, Password);
+
+            Assert.True(connect.CanRetry);
+            Assert.False(connect.BackCommand.CanExecute(null));
+            Assert.False(connect.UseInviteCommand.CanExecute(null));
+            Assert.True(connect.ContinueCommand.CanExecute(null));
+        }
+    }
+
+    [Fact]
+    public async Task ClosingAsTheAnswerArrives_KeepsTheToken_AndStaysClosed()
+    {
+        await using var room = await Room.OpenAsync();
+        var connect = room.Connect();
+        await Paste(connect, room.Invite(room.Person()));
+        connect.Password = Password;
+        connect.Repeat = Password;
+        var outer = SynchronizationContext.Current;
+        var held = new HeldContext();
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            var running = connect.ContinueCommand.ExecuteAsync(null);
+            held.WaitForPost();
+
+            connect.Dispose();
+
+            held.RunUntil(running);
+            await running;
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(outer);
+        }
+
+        Assert.Equal(0, room.Restarts);
+        var saved = room.Viewer.Load();
+        Assert.Equal(AppMode.Server, saved.Mode);
+        Assert.Equal("Sam", saved.Connection?.AccountName);
+        Assert.NotNull(saved.Connection?.ProtectedToken);
     }
 
     [Fact]

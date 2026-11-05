@@ -605,6 +605,7 @@ public sealed class ApiClientTests
         var reply = await client.SendAsync<SessionReply>(HttpMethod.Post, "sign-in", body, Ct);
 
         Assert.Equal("Tablet", live.Fixture.Devices.ByToken(reply.Token)!.Name);
+        Assert.Equal("Sam", reply.Name);
     }
 
     [Fact]

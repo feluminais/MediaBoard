@@ -27,8 +27,10 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     private readonly CancellationTokenSource _closing = new();
     private ServerEndpoint? _endpoint;
     private ApiClient? _client;
+    private ServerEndpoint? _clientEndpoint;
     private string? _code;
     private string? _token;
+    private string? _accountName;
     private bool _finished;
 
     /// <param name="settings">Where the connection goes.</param>
@@ -130,12 +132,16 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
 
     private bool CanAct => !IsBusy && !_finished;
 
+    // A held token is a spent invite, so it can only be saved or left behind with the window.
+    private bool CanLeave => CanAct && _token is null;
+
     public void Dispose()
     {
         _closing.Cancel();
         Forget();
         _client?.Dispose();
         _client = null;
+        _clientEndpoint = null;
     }
 
     private static string RefusalText(ApiErrorCode code, ConnectStep step) => code switch
@@ -158,7 +164,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         {
             // With a token in hand the server has finished with the invite and the password, and neither can be sent twice.
             if (_token is null) await AskServerAsync();
-            if (_token is not null) await FinishAsync();
+            if (_token is not null) Finish();
         }
         catch (ApiException e)
         {
@@ -184,7 +190,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanAct))]
+    [RelayCommand(CanExecute = nameof(CanLeave))]
     private void Back()
     {
         Say(null);
@@ -204,7 +210,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanAct))]
+    [RelayCommand(CanExecute = nameof(CanLeave))]
     private void UseInvite()
     {
         Say(null);
@@ -289,36 +295,27 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     private void Issued(SessionReply reply)
     {
         _token = reply.Token;
+        _accountName = reply.Name;
         ClearPasswords();
     }
 
-    private async Task FinishAsync()
+    // Saved even when the window has just closed: the invite is spent, and this is all that's left of it.
+    private void Finish()
     {
-        MeReply me;
-        try
-        {
-            me = await _client!.GetAsync<MeReply>("me", _closing.Token);
-        }
-        catch (ApiException)
-        {
-            // The server won't have this token, so holding on to it would only ask the same thing for good.
-            _token = null;
-            throw;
-        }
-
-        if (!Save(me.Name)) return;
+        if (!Save()) return;
 
         _finished = true;
         Forget();
+        if (_closing.IsCancellationRequested) return;
+
         if (!_restart()) Say("You're connected. Restart MediaBoard to open the library.");
-        ContinueCommand.NotifyCanExecuteChanged();
     }
 
-    private bool Save(string accountName)
+    private bool Save()
     {
         try
         {
-            var connection = new StoredConnection(_endpoint!, accountName, _deviceName, RemoteSession.Protect(_token!));
+            var connection = new StoredConnection(_endpoint!, _accountName!, _deviceName, RemoteSession.Protect(_token!));
             _settings.Update(s => s with { Mode = AppMode.Server, Connection = connection });
             return true;
         }
@@ -329,15 +326,18 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         }
     }
 
+    // Compares with what the client was made for: the screen's endpoint moves with Back while the client stays.
     private void Use(ServerEndpoint endpoint)
     {
-        if (_client is not null && ReferenceEquals(_endpoint, endpoint)) return;
+        _endpoint = endpoint;
+        if (_client is not null && ReferenceEquals(_clientEndpoint, endpoint)) return;
 
         _client?.Dispose();
-        _endpoint = endpoint;
+        _clientEndpoint = endpoint;
 
-        // Nothing here listens to the connection: a failure comes back from the request that met it.
-        _client = new ApiClient(endpoint, () => _token, _ => { });
+        // Nothing here listens to the connection: a failure comes back from the request that met it. Requests here are
+        // sign-ins, so none carries a token.
+        _client = new ApiClient(endpoint, () => null, _ => { });
     }
 
     private void Say(string? message, bool canRetry = false)
@@ -358,6 +358,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         InviteText = "";
         _code = null;
         _token = null;
+        _accountName = null;
     }
 
     partial void OnStepChanged(ConnectStep value) => ClearPasswords();

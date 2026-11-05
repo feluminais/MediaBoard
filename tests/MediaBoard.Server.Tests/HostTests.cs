@@ -207,6 +207,7 @@ public sealed class HostTests
 
         var reply = await response.Content.ReadFromJsonAsync<SessionReply>(ApiJson.Options, Ct);
         Assert.Equal("127.0.0.1", fixture.Devices.ByToken(reply!.Token)!.LastAddress);
+        Assert.Equal("Anna", reply.Name);
     }
 
     [Fact]

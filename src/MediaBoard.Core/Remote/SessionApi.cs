@@ -38,6 +38,9 @@ public sealed class ChangePasswordRequest
 public sealed class SessionReply
 {
     public required string Token { get; init; }
+
+    /// <summary>The account's name, as the owner set it. A viewer keeps it with the token.</summary>
+    public required string Name { get; init; }
 }
 
 /// <param name="Name">This account's name.</param>

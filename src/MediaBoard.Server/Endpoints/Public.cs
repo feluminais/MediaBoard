@@ -11,7 +11,7 @@ internal static class Public
 {
     private const int MaxDeviceName = 64;
 
-    public static void Map(IEndpointRouteBuilder api, SharingServer server, AccountService accounts)
+    public static void Map(IEndpointRouteBuilder api, SharingServer server, AccountService accounts, AccountStore store)
     {
         api.MapGet("ping", () => ApiResults.Ok(new PingReply(ApiVersion.Current, server.ServerName)));
 
@@ -24,7 +24,7 @@ internal static class Public
             var address = ClientAddress.Of(context);
             // A check waits in a gate and then hashes for a while, which mustn't hold a request thread.
             var result = await Task.Run(() => accounts.Redeem(code, body.Password, deviceName, address));
-            return Answer(result.Issued, result.Failure);
+            return Answer(result.Issued, result.Failure, store);
         });
 
         api.MapPost("sign-in", async (HttpContext context) =>
@@ -35,7 +35,7 @@ internal static class Public
 
             var address = ClientAddress.Of(context);
             var result = await Task.Run(() => accounts.SignIn(name, password, deviceName, address));
-            return Answer(result.Issued, result.Failure);
+            return Answer(result.Issued, result.Failure, store);
         });
     }
 
@@ -50,6 +50,13 @@ internal static class Public
 
     private static bool IsDeviceName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= MaxDeviceName;
 
-    private static IResult Answer(IssuedDevice? issued, RedeemFailure? failure) =>
-        issued is not null ? ApiResults.Ok(new SessionReply { Token = issued.Token }) : ApiResults.Error(CodeOf(failure!.Value));
+    private static IResult Answer(IssuedDevice? issued, RedeemFailure? failure, AccountStore store)
+    {
+        if (issued is null) return ApiResults.Error(CodeOf(failure!.Value));
+
+        // The owner can remove the account in the moment since it was issued, and a device token is then no use to anyone.
+        return store.Get(issued.Device.UserId) is { } account
+            ? ApiResults.Ok(new SessionReply { Token = issued.Token, Name = account.Name })
+            : ApiResults.Error(ApiErrorCode.Unauthorized);
+    }
 }
