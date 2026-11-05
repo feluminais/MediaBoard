@@ -86,6 +86,17 @@ public sealed class RemoteCompositionTests
                     sp.GetRequiredService<ApiClient>(),
                     Paths.Outbox(connection.Endpoint.Fingerprint, connection.AccountName),
                     new ManualClock()));
+
+                // The monitor keeps real time against a real server. Only the host's grace waits for the test.
+                services.AddSingleton(sp => new RemoteHost(
+                    sp.GetRequiredService<ActivityHub>(),
+                    sp.GetRequiredService<ConnectionMonitor>(),
+                    sp.GetRequiredService<RemoteLibrary>(),
+                    sp.GetRequiredService<RemotePlaybackSource>(),
+                    sp.GetRequiredService<PlaybackService>(),
+                    sp.GetRequiredService<StreamProxy>(),
+                    sp.GetRequiredService<ProgressOutbox>(),
+                    Grace));
             });
         }
 
@@ -97,6 +108,8 @@ public sealed class RemoteCompositionTests
         public string Token { get; }
 
         public Player Player { get; }
+
+        public ManualClock Grace { get; } = new();
 
         public DataPaths Paths => new(Path.Combine(_dir, "library.db"), Path.Combine(_dir, "settings.json"), Path.Combine(_dir, "images"));
 
@@ -301,16 +314,17 @@ public sealed class RemoteCompositionTests
     }
 
     [Fact]
-    public async Task Posters_ComeThroughRemoteImages()
+    public async Task Posters_ComeFromTheServerThroughRemoteImages()
     {
         await using var world = new SharingWorld();
         await using var viewer = await Viewer.JoinAsync(world);
-        var kept = Directory.CreateDirectory(Path.Combine(viewer.Paths.Images, "remote")).FullName;
-        await File.WriteAllBytesAsync(Path.Combine(kept, "w342abc.jpg"), [1], Ct);
+        Directory.CreateDirectory(world.Paths.Images);
+        await File.WriteAllBytesAsync(Path.Combine(world.Paths.Images, "w342abc.jpg"), [1, 2, 3], Ct);
 
         var loaded = await viewer.Services.GetRequiredService<PosterLoader>().LoadAsync("/abc.jpg", Ct);
 
-        Assert.Equal(Path.Combine(kept, "w342abc.jpg"), loaded);
+        Assert.Equal(Path.Combine(viewer.Paths.Images, "remote", "w342abc.jpg"), loaded);
+        Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(loaded!, Ct));
     }
 
     [Fact]
@@ -378,23 +392,35 @@ public sealed class RemoteCompositionTests
         Assert.Null(viewer.Playback.CurrentPlayer);
     }
 
-    // The monitor saying so is the real thing; only then may a viewer lose the player.
-    [Fact]
-    public async Task Playing_ThenTheServerGoesSilent_AbandonsAtOnce()
+    /// <summary>A viewer with a file open at 115 s, unsent because nothing has asked for a send, whose server has just gone.</summary>
+    private static async Task<int> PlayThenLoseTheServerAsync(Viewer viewer)
     {
-        await using var world = new SharingWorld();
-        await using var viewer = await Viewer.JoinAsync(world);
-        var file = await world.AddLongMovieAsync();
+        var file = await viewer.World.AddLongMovieAsync();
         viewer.Host.Start();
         await viewer.ConnectedAsync();
         await viewer.Playback.PlayAsync(file, fromStart: true, Ct);
         viewer.Player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(1000)));
         viewer.Player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(115)));
-        viewer.Player.Raise(new PlaybackEvent.Paused());
+        await viewer.World.Sharing.SetOnAsync(false);
+        await WaitUntilAsync(() => viewer.Monitor.State == ConnectionState.Unreachable);
+        return file;
+    }
 
-        viewer.Monitor.Report(ConnectionEvent.Unreachable);
+    [Fact]
+    public async Task ServerGone_ThePlayerLastsTheGrace_ThenCloses()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        var file = await PlayThenLoseTheServerAsync(viewer);
 
-        // Synchronous, as the guarantee needs: by the time the report returns, the player's claim counts for nothing.
+        viewer.Grace.Advance(TimeSpan.FromSeconds(59));
+
+        Assert.False(viewer.Player.Closed.Task.IsCompleted);
+        Assert.NotNull(viewer.Playback.CurrentPlayer);
+
+        viewer.Grace.Advance(TimeSpan.FromSeconds(1));
+
+        // By the time the timer returns, the player's claim counts for nothing.
         viewer.Player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(1000)));
         viewer.Player.Raise(new PlaybackEvent.Ended());
         await viewer.Player.Closed.Task.WaitAsync(Within, Ct);
@@ -402,6 +428,51 @@ public sealed class RemoteCompositionTests
         Assert.Equal(115, outbox.Waiting(file)?.PositionS);
         Assert.NotEqual(true, outbox.Waiting(file)?.Watched);
         Assert.Contains(viewer.Hub.Recent, entry => entry.Message == "Can't reach the server");
+    }
+
+    [Fact]
+    public async Task ServerBackInsideTheGrace_ThePlayerStays()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        await PlayThenLoseTheServerAsync(viewer);
+        viewer.Grace.Advance(TimeSpan.FromSeconds(30));
+
+        await world.Sharing.SetOnAsync(true);
+        await viewer.ConnectedAsync();
+        viewer.Grace.Advance(TimeSpan.FromSeconds(120));
+
+        Assert.False(viewer.Player.Closed.Task.IsCompleted);
+        Assert.NotNull(viewer.Playback.CurrentPlayer);
+    }
+
+    // Each try that fails says Unreachable again, and a wait that restarted on those would never end.
+    [Fact]
+    public async Task RetryThatFails_DoesNotExtendTheGrace()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        await PlayThenLoseTheServerAsync(viewer);
+        viewer.Grace.Advance(TimeSpan.FromSeconds(30));
+
+        viewer.Monitor.Retry();
+        await WaitUntilAsync(() => viewer.Monitor.State == ConnectionState.Unreachable);
+        viewer.Grace.Advance(TimeSpan.FromSeconds(30));
+
+        await viewer.Player.Closed.Task.WaitAsync(Within, Ct);
+    }
+
+    [Fact]
+    public async Task Stopping_DuringTheGrace_LeavesNoTimer()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        await PlayThenLoseTheServerAsync(viewer);
+        Assert.Equal(1, viewer.Grace.PendingTimers);
+
+        await viewer.StopAsync();
+
+        Assert.Equal(0, viewer.Grace.PendingTimers);
     }
 
     [Fact]

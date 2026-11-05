@@ -10,6 +10,7 @@ namespace MediaBoard.Desktop.Remote;
 /// monitor connects on the thread pool, and the first connection loads the pages. Everything that can end a stream ends
 /// the player here, because a player left without its stream goes on to report the file as finished.
 /// </summary>
+/// <param name="time">Times the grace after losing the server.</param>
 public sealed class RemoteHost(
     ActivityHub hub,
     ConnectionMonitor monitor,
@@ -17,11 +18,19 @@ public sealed class RemoteHost(
     RemotePlaybackSource source,
     PlaybackService playback,
     StreamProxy proxy,
-    ProgressOutbox outbox)
+    ProgressOutbox outbox,
+    TimeProvider time)
 {
     private const string StreamStoppedEvent = "stream-stopped";
 
+    // A player can go on from its buffer through a short dropout, and the outbox catches up after, so a blip costs nothing.
+    // A stream that breaks in that time is heard at once through StreamLost.
+    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(60);
+
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Lock _graceGate = new();
+    private ITimer? _grace;
+    private bool _noGrace;
     private Task _watching = Task.CompletedTask;
 
     /// <summary>Call once, from the UI thread, after the window was created.</summary>
@@ -46,6 +55,13 @@ public sealed class RemoteHost(
     /// </summary>
     public async Task StopAsync()
     {
+        lock (_graceGate)
+        {
+            _noGrace = true;
+            _grace?.Dispose();
+            _grace = null;
+        }
+
         playback.ProgressChanged -= OnProgressChanged;
         await playback.DisposeAsync().ConfigureAwait(false);
         await proxy.DisposeAsync().ConfigureAwait(false);
@@ -74,8 +90,40 @@ public sealed class RemoteHost(
     {
         var state = monitor.State;
         hub.SetOnline(state == ConnectionState.Connected);
-        if (state == ConnectionState.Unreachable) _ = playback.AbandonCurrentAsync(source.ReasonFor(ApiErrorCode.Unreachable));
-        else if (state == ConnectionState.Connected) _ = Task.Run(SendProgressAsync);
+        if (state == ConnectionState.Unreachable)
+        {
+            StartGrace();
+        }
+        else if (state == ConnectionState.Connected)
+        {
+            EndGrace();
+            _ = Task.Run(SendProgressAsync);
+        }
+    }
+
+    // Only the first loss arms it. Each try that fails says Unreachable again, and those must not push the end back.
+    private void StartGrace()
+    {
+        lock (_graceGate)
+        {
+            if (!_noGrace) _grace ??= time.CreateTimer(_ => OnGraceOver(), null, Grace, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void EndGrace()
+    {
+        lock (_graceGate)
+        {
+            _grace?.Dispose();
+            _grace = null;
+        }
+    }
+
+    // The server can return in the moment before this runs.
+    private void OnGraceOver()
+    {
+        EndGrace();
+        if (monitor.State != ConnectionState.Connected) _ = playback.AbandonCurrentAsync(source.ReasonFor(ApiErrorCode.Unreachable));
     }
 
     private void OnProgressChanged() => _ = Task.Run(SendProgressAsync);
