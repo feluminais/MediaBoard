@@ -140,7 +140,9 @@ public sealed class AppHostTests : IDisposable
 
             await Ui.WaitUntil(() => hub.Current.UnavailableFolders.Count == 0 && files.ByFolder(folderId).Count == 1);
 
-            // The watcher picked the folder up too.
+            // The watcher picked the folder up too. The recheck refreshes the watcher after its scan and only then
+            // re-arms its timer, so a file written before that would never be seen.
+            await Ui.WaitUntil(() => clock.PendingTimers == 1);
             await File.WriteAllBytesAsync(Path.Combine(movies, "Alien.1979.mkv"), new byte[4096]);
             await Ui.WaitUntil(() => files.ByFolder(folderId).Count == 2);
         });
@@ -289,7 +291,7 @@ public sealed class AppHostTests : IDisposable
         {
             vm.NavigateCommand.Execute(MainWindowViewModel.FoldersPage);
             var page = Assert.IsType<FoldersViewModel>(vm.CurrentPage);
-            await Ui.WaitUntil(() => page.Folders.Count == 1 && page.Folders[0].Summary == "1 file");
+            await Ui.WaitUntil(() => page.Folders.Count == 1 && page.Folders[0].Summary == "1 movie");
             // Every insert into files fails from now on, as a full disk would make it.
             using (var connection = services.GetRequiredService<LibraryDatabase>().Open())
             using (var command = connection.CreateCommand())

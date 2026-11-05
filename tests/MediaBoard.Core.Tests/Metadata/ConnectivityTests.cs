@@ -15,7 +15,17 @@ public sealed class ConnectivityTests
     public async Task ReportOffline_ProbesEveryMinute_UntilTheProbeSucceeds()
     {
         var answers = new Queue<bool>([false, false, true]);
-        using var connectivity = new Connectivity(_ => Task.FromResult(answers.Dequeue()), _clock, _hub);
+        // The instant clock lets the retry loop run to the end on its own thread; hold its first probe until the
+        // offline state has been checked.
+        var checkedOffline = new TaskCompletionSource();
+        using var connectivity = new Connectivity(
+            async ct =>
+            {
+                await checkedOffline.Task.WaitAsync(ct);
+                return answers.Dequeue();
+            },
+            _clock,
+            _hub);
         var changes = new List<bool>();
         var restored = new TaskCompletionSource();
         connectivity.Changed += online =>
@@ -27,6 +37,7 @@ public sealed class ConnectivityTests
         connectivity.ReportOffline();
         Assert.False(connectivity.IsOnline);
         Assert.False(_hub.Current.Online);
+        checkedOffline.SetResult();
         await restored.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
         Assert.True(connectivity.IsOnline);
