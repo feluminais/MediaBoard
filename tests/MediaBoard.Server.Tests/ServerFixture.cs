@@ -5,7 +5,11 @@ using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using Dapper;
 using MediaBoard.Core.Accounts;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
+using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Remote;
+using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -34,7 +38,26 @@ public sealed class ServerFixture : IAsyncDisposable
         Invites = new InviteStore(Db);
         Guard = new SignInGuard(TimeProvider.System);
         Service = new AccountService(Db, Accounts, Devices, Invites, Guard, new SharingLog(Db));
-        Server = new SharingServer(Service, Accounts, Devices, logs) { ServerName = ServerName };
+
+        Folders = new FolderStore(Db);
+        Titles = new TitleStore(Db);
+        Matches = new MatchStore(Db);
+        Progress = new ProgressStore(Db);
+        Provider = new FakeMetadataProvider();
+        // Never probes: a test flips it with ReportOffline.
+        Connectivity = new Connectivity(_ => Task.FromResult(false), TimeProvider.System, new ActivityHub());
+        _disposables.Add(Connectivity);
+        var http = new HttpClient(new NotFoundHandler());
+        _disposables.Add(http);
+        ImagesDir = Path.Combine(_dir, "images");
+        Owner = new LocalLibrary(Db, Provider);
+        Access = new ViewerAccess(Db);
+        var shared = new SharedLibrary(
+            Owner,
+            Access,
+            viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
+            new ImageCache(http, Connectivity, ImagesDir));
+        Server = new SharingServer(Service, Accounts, Devices, shared, logs) { ServerName = ServerName };
     }
 
     public LibraryDatabase Db { get; }
@@ -50,6 +73,24 @@ public sealed class ServerFixture : IAsyncDisposable
     public AccountService Service { get; }
 
     public SharingServer Server { get; }
+
+    public FolderStore Folders { get; }
+
+    public TitleStore Titles { get; }
+
+    public MatchStore Matches { get; }
+
+    public ProgressStore Progress { get; }
+
+    public FakeMetadataProvider Provider { get; }
+
+    public Connectivity Connectivity { get; }
+
+    public LocalLibrary Owner { get; }
+
+    public ViewerAccess Access { get; }
+
+    public string ImagesDir { get; }
 
     /// <summary>TestHost has no socket, so each request takes its remote address from here.</summary>
     public IPAddress RemoteAddress { get; set; } = IPAddress.Parse("203.0.113.5");
@@ -104,7 +145,38 @@ public sealed class ServerFixture : IAsyncDisposable
         return port;
     }
 
-    public Account NewPerson(string name = "Anna") => Service.AddPerson(name, null);
+    /// <summary>A library folder on disk, registered.</summary>
+    public LibraryFolder AddFolder(string name)
+    {
+        var path = Path.Combine(_dir, "library", name);
+        Directory.CreateDirectory(path);
+        return Folders.Add(path);
+    }
+
+    public int Movie(string name, int tmdbId) => Titles.Upsert(new TitleDetails(
+        tmdbId, TitleKind.Movie, name, 2020, null, $"About {name}.", 7.0, "/poster.jpg", 100, []));
+
+    public int Show(string name, int tmdbId, int episodes)
+    {
+        var id = Titles.Upsert(new TitleDetails(tmdbId, TitleKind.Show, name, 2015, null, "About.", 8.0, "/poster.jpg", 45, [1]));
+        Titles.UpsertEpisodes(id, new SeasonDetails(
+            1, Enumerable.Range(1, episodes).Select(n => new EpisodeDetails(1, n, $"{name} 1x{n}", 45, null)).ToList()));
+        return id;
+    }
+
+    /// <summary>Puts a file on disk in the folder, scans it and matches it to the title.</summary>
+    public async Task<int> AddFileAsync(LibraryFolder folder, string relPath, int titleId, params (int Season, int Number)[] episodes)
+    {
+        var path = Path.Combine(folder.Path, relPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, new byte[4096], TestContext.Current.CancellationToken);
+        await new LibraryScanner(Db, new ActivityHub()).ScanAsync(folder, TestContext.Current.CancellationToken);
+        var file = new FileStore(Db).ByFolder(folder.Id).Single(r => r.RelPath == relPath);
+        Assert.True(Matches.SetMatch(file.Id, titleId, Titles.EpisodeIds(titleId, episodes), 1.0, "auto"));
+        return file.Id;
+    }
+
+    public Account NewPerson(string name = "Anna", IReadOnlyCollection<int>? folderIds = null) => Service.AddPerson(name, folderIds);
 
     /// <summary>Puts a password on an account the way a person does, through an invite.</summary>
     public IssuedDevice Join(Account account, string password = Password) =>
@@ -131,6 +203,12 @@ public sealed class ServerFixture : IAsyncDisposable
     {
         var body = await response.Content.ReadFromJsonAsync<ApiErrorBody>(ApiJson.Options, TestContext.Current.CancellationToken);
         return body!.Code;
+    }
+
+    private sealed class NotFoundHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
     }
 
     public async ValueTask DisposeAsync()

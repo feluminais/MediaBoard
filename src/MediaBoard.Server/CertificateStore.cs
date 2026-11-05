@@ -16,6 +16,14 @@ public sealed class CertificateStore(string path, TimeProvider? time = null)
     private static readonly TimeSpan ClockSkew = TimeSpan.FromDays(1);
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Func<byte[], X509Certificate2> _open = Open;
+
+    /// <summary>For tests: what <see cref="Replace"/> opens the new certificate with.</summary>
+    internal CertificateStore(string path, Func<byte[], X509Certificate2> open)
+        : this(path)
+    {
+        _open = open;
+    }
 
     /// <exception cref="CryptographicException">
     /// The file can't be read, for example under another Windows user. A new certificate would cut off every device,
@@ -28,8 +36,18 @@ public sealed class CertificateStore(string path, TimeProvider? time = null)
         var pfx = NewPfx();
         try
         {
-            Save(ProtectedData.Protect(pfx, null, DataProtectionScope.CurrentUser));
-            return Open(pfx);
+            // Opened first: if the key store refuses it, the saved certificate is still the one devices pin.
+            var certificate = _open(pfx);
+            try
+            {
+                Save(ProtectedData.Protect(pfx, null, DataProtectionScope.CurrentUser));
+                return certificate;
+            }
+            catch
+            {
+                certificate.Dispose();
+                throw;
+            }
         }
         finally
         {

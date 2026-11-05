@@ -74,6 +74,42 @@ public sealed class CertificateStoreTests : IDisposable
     }
 
     [Fact]
+    public void CertificateStore_Replace_OpeningFails_KeepsTheOldCertificate()
+    {
+        using var first = new CertificateStore(CertificatePath).LoadOrCreate();
+        var onDisk = File.ReadAllBytes(CertificatePath);
+        var store = new CertificateStore(CertificatePath, _ => throw new CryptographicException("no key store"));
+
+        // The new certificate is opened before it is saved, so a failure there must not touch the file.
+        Assert.Throws<CryptographicException>(store.Replace);
+
+        Assert.Equal(onDisk, File.ReadAllBytes(CertificatePath));
+        using var reloaded = new CertificateStore(CertificatePath).LoadOrCreate();
+        Assert.Equal(CertificateStore.Fingerprint(first), CertificateStore.Fingerprint(reloaded));
+    }
+
+    [Fact]
+    public void CertificateStore_Replace_SavingFails_DisposesTheOpenedCertificate()
+    {
+        using var first = new CertificateStore(CertificatePath).LoadOrCreate();
+        var onDisk = File.ReadAllBytes(CertificatePath);
+        // A directory where the temporary file goes makes the save fail.
+        Directory.CreateDirectory(CertificatePath + ".tmp");
+        X509Certificate2? opened = null;
+        var store = new CertificateStore(CertificatePath, pfx =>
+        {
+            opened = X509CertificateLoader.LoadPkcs12(pfx, null, X509KeyStorageFlags.EphemeralKeySet);
+            return opened;
+        });
+
+        Assert.Throws<UnauthorizedAccessException>(store.Replace);
+
+        Assert.NotNull(opened);
+        Assert.Equal(IntPtr.Zero, opened.Handle);
+        Assert.Equal(onDisk, File.ReadAllBytes(CertificatePath));
+    }
+
+    [Fact]
     public void CertificateStore_UnreadableFile_ThrowsAndIsKept()
     {
         Directory.CreateDirectory(_dir);

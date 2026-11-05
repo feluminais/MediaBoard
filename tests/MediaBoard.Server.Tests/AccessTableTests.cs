@@ -23,6 +23,17 @@ public sealed class AccessTableTests
     public static TheoryData<string, string> Protected => new()
     {
         { "GET", "/api/v1/me" },
+        { "GET", "/api/v1/continue" },
+        { "POST", "/api/v1/continue/{f}/dismiss" },
+        { "GET", "/api/v1/recent" },
+        { "GET", "/api/v1/titles" },
+        { "GET", "/api/v1/titles/{f}" },
+        { "GET", "/api/v1/titles/{f}/next" },
+        { "GET", "/api/v1/search/local" },
+        { "GET", "/api/v1/search" },
+        { "GET", "/api/v1/online/movie/{f}" },
+        { "GET", "/api/v1/online/tv/{f}/seasons/1" },
+        { "GET", "/api/v1/images/342/{f}.jpg" },
     };
 
     [Theory, MemberData(nameof(Protected))]

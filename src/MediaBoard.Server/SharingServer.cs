@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using HttpProtocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols;
 
 namespace MediaBoard.Server;
 
@@ -25,9 +26,10 @@ public sealed class PortInUseException(int port, Exception innerException) : Exc
 /// The HTTPS server inside the desktop app. It listens only between <see cref="StartAsync"/> and <see cref="StopAsync"/>.
 /// </summary>
 /// <param name="logs">Where the host's warnings and errors go, or null for nowhere.</param>
-public sealed class SharingServer(AccountService service, AccountStore accounts, DeviceStore devices, ILoggerProvider? logs = null)
+public sealed class SharingServer(AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, ILoggerProvider? logs = null)
 {
     private const int MaxBodyBytes = 64 * 1024;
+    private const int MaxConnections = 256;
     private const string Api = "/api/v1";
 
     // Kestrel cuts whatever is still open after this, so a stuck client can't hold up closing the app.
@@ -107,7 +109,10 @@ public sealed class SharingServer(AccountService service, AccountStore accounts,
 
         var auth = new DeviceAuth(devices, accounts);
         var authenticated = app.MapGroup("").AddEndpointFilter(auth).WithMetadata(auth);
-        Session.Map(authenticated.MapGroup(Api));
+        var api = authenticated.MapGroup(Api);
+        Session.Map(api);
+        Library.Map(api, library);
+        Search.Map(api, library);
         authenticated.MapFallback("{*path}", () => ApiResults.Error(ApiErrorCode.NotFound));
     }
 
@@ -145,11 +150,17 @@ public sealed class SharingServer(AccountService service, AccountStore accounts,
         {
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = MaxBodyBytes;
-            kestrel.ListenAnyIP(options.Port, listen => listen.UseHttps(new HttpsConnectionAdapterOptions
+            kestrel.Limits.MaxConcurrentConnections = MaxConnections;
+            kestrel.ListenAnyIP(options.Port, listen =>
             {
-                ServerCertificate = options.Certificate,
-                SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-            }));
+                // The client speaks HTTP/1.1 only, so nothing else is offered.
+                listen.Protocols = HttpProtocols.Http1;
+                listen.UseHttps(new HttpsConnectionAdapterOptions
+                {
+                    ServerCertificate = options.Certificate,
+                    SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                });
+            });
         });
 
         var app = builder.Build();

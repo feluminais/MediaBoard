@@ -28,6 +28,22 @@ public sealed class HostTests
     }
 
     [Fact]
+    public async Task Ping_AnswersHttp11_EvenToAClientThatPrefersHttp2()
+    {
+        await using var fixture = new ServerFixture();
+        var port = await StartAsync(fixture);
+        using var request = new HttpRequestMessage(HttpMethod.Get, Url(port, "/api/v1/ping"))
+        {
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
+
+        var response = await fixture.TlsClient().SendAsync(request, Ct);
+
+        Assert.Equal(HttpVersion.Version11, response.Version);
+    }
+
+    [Fact]
     public async Task Stop_EndsOnTime_WhenARequestHangs_AndFreesThePort()
     {
         await using var fixture = new ServerFixture();
