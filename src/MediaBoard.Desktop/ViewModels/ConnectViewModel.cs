@@ -180,9 +180,9 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         {
             Say("This server's identity changed. Ask for a new invite.", canRetry: true);
         }
-        catch (OperationCanceledException) when (_closing.IsCancellationRequested)
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException && _closing.IsCancellationRequested)
         {
-            // The window closed.
+            // The window closed, and a try that was waiting to move on to the next address met the disposed client.
         }
         finally
         {

@@ -454,6 +454,35 @@ public sealed class ConnectViewModelTests
         Assert.NotNull(saved.Connection?.ProtectedToken);
     }
 
+    // The first address has failed, the failure is waiting to resume, and the next address would go to a disposed client.
+    [Fact]
+    public async Task ClosingBetweenAddresses_EndsQuietly()
+    {
+        await using var room = await Room.OpenAsync();
+        var connect = room.Connect();
+        var invite = room.Invite(room.Person()) with { Addresses = [$"127.0.0.1:{SharingWorld.FreePort()}", $"127.0.0.1:{SharingWorld.FreePort()}"] };
+        connect.InviteText = InviteString.Encode(invite);
+        var outer = SynchronizationContext.Current;
+        var held = new HeldContext();
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            var running = connect.ContinueCommand.ExecuteAsync(null);
+            held.WaitForPost();
+
+            connect.Dispose();
+
+            held.RunUntil(running);
+            await running;
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(outer);
+        }
+
+        Assert.Equal(0, room.Restarts);
+    }
+
     [Fact]
     public async Task CantReach_ShowsRetry()
     {
