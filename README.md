@@ -1,11 +1,13 @@
 <h1 align="center">MediaBoard</h1>
 
-<p align="center">A Windows app for your own films and series. No server, your player, and it never touches the files.</p>
+<p align="center">A Windows app for your own films and series. Your player, and it never touches the files.</p>
 
 <p align="center">
   <a href="#quick-start"><strong>Quick start</strong></a>
   &nbsp; · &nbsp;
   <a href="#players">Players</a>
+  &nbsp; · &nbsp;
+  <a href="#sharing">Sharing</a>
   &nbsp; · &nbsp;
   <a href="#how-it-identifies-titles">Identification</a>
   &nbsp; · &nbsp;
@@ -16,7 +18,7 @@ MediaBoard finds the movies and series in your folders, fetches descriptions, po
 where you stopped. You play in the player you already use (MPC-HC, MPC-BE, mpv, VLC or any program), and it keeps your
 progress from that player, even when you opened the player yourself.
 
-Everything runs in one desktop app. There is no server to start and no background service. Renames, hidden titles and fixed
+Everything runs in one desktop app, with no background service. Renames, hidden titles and fixed
 matches live in MediaBoard's own database, so the files on disk keep their names and your torrent client keeps seeding them.
 
 ## Features
@@ -91,6 +93,21 @@ can only find a player that was set up to listen:
 
 Only files that belong to your library are recorded.
 
+## Sharing
+
+You can let family watch your library from their own PC. It's off until you turn it on in **Settings**, and it works
+through the same MediaBoard app on both sides.
+
+1. Turn sharing on. It listens on port `47880` over HTTPS. The first time, Windows asks about the firewall: allow
+   Private networks. To reach you from outside your home, forward that port on your router.
+2. Choose **Add person**, pick the folders they may see, and create an invite. Send them the invite and, if they aren't on
+   your network, your address.
+3. They unzip MediaBoard (built with `scripts/Publish.ps1`; it needs no .NET installed), choose **Connect to a server**,
+   paste the invite and pick a password.
+
+They browse, search and play from your library, and their progress is their own. The files stay on your PC and are never
+copied. Windows SmartScreen warns once on the unsigned app. Replacing your certificate means everyone needs a new invite.
+
 ## How it identifies titles
 
 1. A `[tmdbid-123]` or `[imdbid-tt123]` tag in a file or folder name, or an `.nfo` file with an ID, is a certain match.
@@ -122,8 +139,7 @@ into your media folders. Your TMDB key is stored in the settings file on your PC
 ## Development
 
 The solution has the app (`src/MediaBoard.Desktop`, Avalonia) and a UI-free core (`src/MediaBoard.Core`: scanning, parsing,
-identification, TMDB, storage, player adapters). The app reaches the library through an interface, so a remote library could
-replace the local one later.
+identification, TMDB, storage, player adapters). The app reaches the library through an interface, so a shared library on another PC can stand in for the local one.
 
 ```bash
 dotnet build
@@ -139,10 +155,10 @@ secrets with [gitleaks](https://github.com/gitleaks/gitleaks) when it's installe
 
 ## Not yet
 
-- No installer or release yet.
+- No installer or release yet. `scripts/Publish.ps1` builds a zip.
 - English only, for metadata and for the interface.
 - Windows 11 only.
-- No server or remote mode, and no Android client. The code leaves room for both.
+- No Android client. The code leaves room for one.
 
 ## Credits
 
