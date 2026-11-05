@@ -7,6 +7,8 @@ namespace MediaBoard.Core.Tests.Storage;
 
 public sealed class ProgressStoreTests : IDisposable
 {
+    private const int Owner = LibraryDatabase.OwnerId;
+
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-test-" + Guid.NewGuid().ToString("N"));
     private readonly LibraryDatabase _db;
     private readonly FakeClock _clock = new();
@@ -34,21 +36,21 @@ public sealed class ProgressStoreTests : IDisposable
     [Fact]
     public void Save_StoresPositionDurationAndTime()
     {
-        _store.Save(_fileId, 120.5, 3000);
+        _store.Save(Owner, _fileId, 120.5, 3000);
 
-        var saved = _store.Get(_fileId)!;
+        var saved = _store.Get(Owner, _fileId)!;
         Assert.Equal(new Progress(_fileId, 120.5, 3000, false, _clock.GetUtcNow().UtcDateTime), saved);
     }
 
     [Fact]
     public void Save_KeepsWatchedAndKnownDuration()
     {
-        _store.Save(_fileId, 120, 3000);
-        _store.SetWatched(_fileId, true);
+        _store.Save(Owner, _fileId, 120, 3000);
+        _store.SetWatched(Owner, _fileId, true);
 
-        _store.Save(_fileId, 30, 0);
+        _store.Save(Owner, _fileId, 30, 0);
 
-        var saved = _store.Get(_fileId)!;
+        var saved = _store.Get(Owner, _fileId)!;
         Assert.True(saved.Watched);
         Assert.Equal(30, saved.PositionS);
         Assert.Equal(3000, saved.DurationS);
@@ -57,9 +59,9 @@ public sealed class ProgressStoreTests : IDisposable
     [Fact]
     public void SetWatched_WithoutARow_CreatesOne()
     {
-        _store.SetWatched(_fileId, true);
+        _store.SetWatched(Owner, _fileId, true);
 
-        var saved = _store.Get(_fileId)!;
+        var saved = _store.Get(Owner, _fileId)!;
         Assert.True(saved.Watched);
         Assert.Equal(0, saved.PositionS);
     }
@@ -67,21 +69,21 @@ public sealed class ProgressStoreTests : IDisposable
     [Fact]
     public void SetWatched_True_KeepsThePosition()
     {
-        _store.Save(_fileId, 120, 3000);
-        _store.SetWatched(_fileId, true);
+        _store.Save(Owner, _fileId, 120, 3000);
+        _store.SetWatched(Owner, _fileId, true);
 
-        Assert.Equal(120, _store.Get(_fileId)!.PositionS);
+        Assert.Equal(120, _store.Get(Owner, _fileId)!.PositionS);
     }
 
     [Fact]
     public void SetWatched_False_ForgetsThePosition()
     {
-        _store.Save(_fileId, 2900, 3000);
-        _store.SetWatched(_fileId, true);
+        _store.Save(Owner, _fileId, 2900, 3000);
+        _store.SetWatched(Owner, _fileId, true);
 
-        _store.SetWatched(_fileId, false);
+        _store.SetWatched(Owner, _fileId, false);
 
-        var saved = _store.Get(_fileId)!;
+        var saved = _store.Get(Owner, _fileId)!;
         Assert.False(saved.Watched);
         Assert.Equal(0, saved.PositionS);
     }
@@ -89,9 +91,9 @@ public sealed class ProgressStoreTests : IDisposable
     [Fact]
     public void SetWatched_False_WithoutARow_CreatesNothing()
     {
-        _store.SetWatched(_fileId, false);
+        _store.SetWatched(Owner, _fileId, false);
 
-        Assert.Null(_store.Get(_fileId));
+        Assert.Null(_store.Get(Owner, _fileId));
     }
 
     [Fact]
@@ -104,10 +106,10 @@ public sealed class ProgressStoreTests : IDisposable
             connection.Execute("INSERT INTO file_episodes(file_id, episode_id) VALUES (@f, 1), (@f, 2)", new { f = _fileId });
         }
 
-        _store.Save(_fileId, 100, 3000);
-        Assert.Empty(_store.WatchedEpisodeIds());
+        _store.Save(Owner, _fileId, 100, 3000);
+        Assert.Empty(_store.WatchedEpisodeIds(Owner));
 
-        _store.SetWatched(_fileId, true);
-        Assert.Equal([1, 2], _store.WatchedEpisodeIds());
+        _store.SetWatched(Owner, _fileId, true);
+        Assert.Equal([1, 2], _store.WatchedEpisodeIds(Owner));
     }
 }

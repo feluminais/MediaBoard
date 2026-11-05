@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Library;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
@@ -53,6 +54,9 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     // A position at or below this is the player still sitting at the start, not the viewer's progress.
     private const double RealPositionS = 1;
     private static readonly TimeSpan PositionTimeout = TimeSpan.FromSeconds(2);
+
+    // Playback happens at this PC, so it is the owner who watches.
+    private static readonly int OwnerId = Viewer.Owner.UserId;
 
     private readonly FileStore _files;
     private readonly ProgressStore _progress;
@@ -169,7 +173,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     public void AnswerFinished(int fileId, bool finished)
     {
-        _progress.SetWatched(fileId, finished);
+        _progress.SetWatched(OwnerId, fileId, finished);
         ProgressChanged?.Invoke();
     }
 
@@ -240,7 +244,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         // The old session is closed only now: a file or player that cannot start leaves it playing.
         await StopCurrentAsync(ct).ConfigureAwait(false);
 
-        var saved = _progress.Get(fileId);
+        var saved = _progress.Get(OwnerId, fileId);
         var startAt = !fromStart && saved is { Watched: false, PositionS: > 0 }
             ? TimeSpan.FromSeconds(saved.PositionS)
             : (TimeSpan?)null;
@@ -376,7 +380,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     // Called with playing.Gate held.
     private void Rebind(Playing playing, MediaFileRow? file)
     {
-        var saved = file is null ? null : _progress.Get(file.Id);
+        var saved = file is null ? null : _progress.Get(OwnerId, file.Id);
         playing.FileId = file?.Id;
         playing.Title = file is null ? "" : TitleOf(file);
         playing.Duration = file?.DurationS ?? saved?.DurationS ?? 0;
@@ -429,7 +433,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     {
         if (playing.FileId is not { } fileId || playing.LastPosition is not { } position || !playing.CanSave) return;
 
-        _progress.Save(fileId, position, playing.Duration);
+        _progress.Save(OwnerId, fileId, position, playing.Duration);
         if (!playing.Marked && WatchRules.IsWatched(position, playing.Duration)) MarkWatched(playing);
     }
 
@@ -437,7 +441,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     {
         if (playing.FileId is not { } fileId) return;
 
-        _progress.SetWatched(fileId, true);
+        _progress.SetWatched(OwnerId, fileId, true);
         playing.Marked = true;
     }
 

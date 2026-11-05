@@ -14,6 +14,7 @@ namespace MediaBoard.Core.Tests.Playback;
 public sealed class PlaybackServiceTests : IDisposable
 {
     private const double Hour = 6000; // a 100-minute film, in seconds
+    private const int Owner = LibraryDatabase.OwnerId;
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-test-" + Guid.NewGuid().ToString("N"));
     private readonly TempLibrary _library = new();
@@ -61,7 +62,7 @@ public sealed class PlaybackServiceTests : IDisposable
     public async Task Resume_PassesSavedPosition()
     {
         var id = AddFile("Movie (2020).mkv");
-        _progress.Save(id, 600, Hour);
+        _progress.Save(Owner, id, 600, Hour);
 
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
 
@@ -77,8 +78,8 @@ public sealed class PlaybackServiceTests : IDisposable
     public async Task Play_StartsFromZero(bool saved, bool watched, bool fromStart)
     {
         var id = AddFile("Movie (2020).mkv");
-        if (saved) _progress.Save(id, 600, Hour);
-        if (watched) _progress.SetWatched(id, true);
+        if (saved) _progress.Save(Owner, id, 600, Hour);
+        if (watched) _progress.SetWatched(Owner, id, true);
 
         await _service.PlayAsync(id, fromStart, CancellationToken.None);
 
@@ -101,7 +102,7 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(8)));
         Session.Raise(new PlaybackEvent.Closed());
         AssertProgress(id, 480, Hour);
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -125,11 +126,11 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
         // Short of 90%, but inside the last 10% + 15 s that the end of a film is allowed to skip (credits).
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(5390)));
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
 
         Session.Raise(new PlaybackEvent.Ended());
 
-        Assert.True(_progress.Get(id)!.Watched);
+        Assert.True(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -139,7 +140,7 @@ public sealed class PlaybackServiceTests : IDisposable
 
         Session.Raise(new PlaybackEvent.Ended());
 
-        Assert.True(_progress.Get(id)!.Watched);
+        Assert.True(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -153,7 +154,7 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Ended());
 
         AssertProgress(id, 600, Hour);
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -164,7 +165,7 @@ public sealed class PlaybackServiceTests : IDisposable
 
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(0.9 * Hour)));
 
-        Assert.True(_progress.Get(id)!.Watched);
+        Assert.True(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -176,14 +177,14 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(0.89 * Hour)));
         Session.Raise(new PlaybackEvent.Closed());
 
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
     public async Task Failed_DoesNotOverwriteProgress()
     {
         var id = AddFile("Movie (2020).mkv");
-        _progress.Save(id, 500, Hour);
+        _progress.Save(Owner, id, 500, Hour);
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
 
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
@@ -202,7 +203,7 @@ public sealed class PlaybackServiceTests : IDisposable
     public async Task ResumeSeekNotLandedYet_DoesNotOverwriteSavedPosition()
     {
         var id = AddFile("Movie (2020).mkv");
-        _progress.Save(id, 500, Hour);
+        _progress.Save(Owner, id, 500, Hour);
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
 
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
@@ -228,7 +229,7 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Ended());
 
         AssertProgress(id, 300, 0);
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -293,13 +294,13 @@ public sealed class PlaybackServiceTests : IDisposable
 
         Assert.Equal([(id, "Movie")], asked);
         Assert.Null(_hub.Current.PlayerName);
-        Assert.Null(_progress.Get(id));
+        Assert.Null(_progress.Get(Owner, id));
 
         _service.AnswerFinished(id, finished: true);
-        Assert.True(_progress.Get(id)!.Watched);
+        Assert.True(_progress.Get(Owner, id)!.Watched);
 
         _service.AnswerFinished(id, finished: false);
-        Assert.False(_progress.Get(id)!.Watched);
+        Assert.False(_progress.Get(Owner, id)!.Watched);
     }
 
     [Fact]
@@ -336,12 +337,12 @@ public sealed class PlaybackServiceTests : IDisposable
     {
         var id = AddFile("Show S01E01-E02.mkv");
         var episodes = LinkEpisodes(id, 2);
-        Assert.Empty(_progress.WatchedEpisodeIds());
+        Assert.Empty(_progress.WatchedEpisodeIds(Owner));
         await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
 
         Session.Raise(new PlaybackEvent.Ended());
 
-        Assert.Equal(episodes, _progress.WatchedEpisodeIds());
+        Assert.Equal(episodes, _progress.WatchedEpisodeIds(Owner));
     }
 
     [Fact]
@@ -413,7 +414,7 @@ public sealed class PlaybackServiceTests : IDisposable
         transport.Receive(MpcApi.CMD_NOWPLAYING, $"Next|||{_library.PathOf("Next (2021).mkv")}|{Hour}.000"); // Next in MPC-HC
         transport.Receive(MpcApi.CMD_NOTIFYSEEK, "120.000");
 
-        await Waiting.Until(() => _progress.Get(next) is not null);
+        await Waiting.Until(() => _progress.Get(Owner, next) is not null);
         Assert.False(process.CloseRequested);
         Assert.Equal("mpv", _hub.Current.PlayerName);
         AssertProgress(id, 300, Hour);
@@ -435,7 +436,7 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(2)));
 
         AssertProgress(first, Hour * 0.6, Hour);
-        Assert.False(_progress.Get(first)!.Watched);
+        Assert.False(_progress.Get(Owner, first)!.Watched);
         AssertProgress(second, 120, Hour / 2);
         Assert.Equal(1, changes);
 
@@ -458,8 +459,8 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
         Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(1)));
 
-        Assert.True(_progress.Get(first)!.Watched);
-        Assert.False(_progress.Get(second)!.Watched);
+        Assert.True(_progress.Get(Owner, first)!.Watched);
+        Assert.False(_progress.Get(Owner, second)!.Watched);
     }
 
     [Fact]
@@ -494,7 +495,7 @@ public sealed class PlaybackServiceTests : IDisposable
         Session.Raise(new PlaybackEvent.Ended());
 
         AssertProgress(first, 1200, Hour);
-        Assert.Null(_progress.Get(second));
+        Assert.Null(_progress.Get(Owner, second));
         Assert.Equal("mpv", _service.CurrentPlayer);
 
         Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
@@ -509,7 +510,7 @@ public sealed class PlaybackServiceTests : IDisposable
     {
         await Play("First.mkv");
         var second = AddFile("Second.mkv");
-        _progress.Save(second, 1800, Hour);
+        _progress.Save(Owner, second, 1800, Hour);
 
         Session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("Second.mkv")));
         Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
@@ -569,7 +570,7 @@ public sealed class PlaybackServiceTests : IDisposable
         await _service.AttachAsync(session, CancellationToken.None);
         session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
         session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(10)));
-        Assert.Null(_progress.Get(id));
+        Assert.Null(_progress.Get(Owner, id));
 
         session.Raise(new PlaybackEvent.FileChanged(_library.PathOf("First.mkv")));
         session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
@@ -799,7 +800,7 @@ public sealed class PlaybackServiceTests : IDisposable
 
     private void AssertProgress(int fileId, double position, double duration)
     {
-        var saved = _progress.Get(fileId);
+        var saved = _progress.Get(Owner, fileId);
         Assert.NotNull(saved);
         Assert.Equal(position, saved.PositionS, 3);
         Assert.Equal(duration, saved.DurationS, 3);

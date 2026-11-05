@@ -33,7 +33,9 @@ public sealed partial class LocalLibrary : ILibrary
     private readonly MatchStore _matches;
     private readonly ProgressStore _progress;
     private readonly OverrideStore _overrides;
-    private readonly ConcurrentDictionary<int, ScanInfo> _scans = new();
+    private readonly ConcurrentDictionary<int, ScanInfo> _scans;
+    private readonly Shared _shared;
+    private readonly Viewer _viewer;
 
     public LocalLibrary(
         LibraryDatabase db,
@@ -52,9 +54,43 @@ public sealed partial class LocalLibrary : ILibrary
         _matches = new MatchStore(db);
         _progress = new ProgressStore(db, timeProvider);
         _overrides = new OverrideStore(db);
+        _scans = new ConcurrentDictionary<int, ScanInfo>();
+        _shared = new Shared();
+        _viewer = Viewer.Owner;
     }
 
-    public event Action? Changed;
+    private LocalLibrary(LocalLibrary source, Viewer viewer)
+    {
+        _db = source._db;
+        _provider = source._provider;
+        _sendToRecycleBin = source._sendToRecycleBin;
+        _driveTypeOf = source._driveTypeOf;
+        _files = source._files;
+        _folders = source._folders;
+        _titles = source._titles;
+        _matches = source._matches;
+        _progress = source._progress;
+        _overrides = source._overrides;
+        _scans = source._scans;
+        _shared = source._shared;
+        _viewer = viewer;
+    }
+
+    /// <summary>
+    /// The same library seen by another viewer: their progress and their folders. It shares the stores, the scan
+    /// info and <see cref="Changed"/> with this one, so an edit through either reaches everyone listening.
+    /// </summary>
+    public LocalLibrary ForViewer(Viewer viewer)
+    {
+        ArgumentNullException.ThrowIfNull(viewer);
+        return new LocalLibrary(this, viewer);
+    }
+
+    public event Action? Changed
+    {
+        add => _shared.Changed += value;
+        remove => _shared.Changed -= value;
+    }
 
     /// <summary>Tells the library its data changed underneath it (after a scan or an identification run).</summary>
     public void NotifyChanged() => RaiseChanged();
@@ -92,7 +128,7 @@ public sealed partial class LocalLibrary : ILibrary
     public void SetWatched(int fileId, bool watched)
     {
         RequireFile(fileId);
-        _progress.SetWatched(fileId, watched);
+        _progress.SetWatched(_viewer.UserId, fileId, watched);
         RaiseChanged();
     }
 
@@ -181,7 +217,7 @@ public sealed partial class LocalLibrary : ILibrary
 
     public DeletePreview PreviewDelete(int titleId)
     {
-        var snapshot = LibrarySnapshot.Load(_db);
+        var snapshot = LibrarySnapshot.Load(_db, _viewer);
         if (!snapshot.Titles.TryGetValue(titleId, out var title)) return new DeletePreview(titleId, "", []);
 
         var folders = snapshot.Folders.ToDictionary(f => f.Id, f => f.Path);
@@ -290,13 +326,28 @@ public sealed partial class LocalLibrary : ILibrary
         }
     }
 
+    // A file the viewer can't reach is as good as unknown to them.
     private MediaFileRow RequireFile(int fileId) =>
-        _files.Get(fileId) ?? throw new ArgumentException($"There is no file with id {fileId}.", nameof(fileId));
+        _files.Get(fileId) is { } file && _viewer.CanReach(file.FolderId)
+            ? file
+            : throw new ArgumentException($"There is no file with id {fileId}.", nameof(fileId));
 
-    private void RaiseChanged()
+    private void RaiseChanged() => _shared.Raise();
+
+    /// <summary>What every viewer's copy of the library shares: the listeners and the count of changes that outdates a search index.</summary>
+    private sealed class Shared
     {
-        InvalidateSearchIndex();
-        Changed?.Invoke();
+        private int _version;
+
+        public event Action? Changed;
+
+        public int Version => Volatile.Read(ref _version);
+
+        public void Raise()
+        {
+            Interlocked.Increment(ref _version);
+            Changed?.Invoke();
+        }
     }
 
     private sealed record ScanInfo(IReadOnlyList<string> IgnoredFolders, bool Unavailable);

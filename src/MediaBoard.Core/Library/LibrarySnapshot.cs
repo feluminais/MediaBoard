@@ -90,7 +90,7 @@ internal sealed class LibrarySnapshot
 
     /// <summary>
     /// Every file that is media (not marked "not a movie or show"), linked to a title or not, in the folders that are
-    /// switched on. A disabled folder's files are not here, so none of the queries see them; progress and edits stay
+    /// switched on and the viewer may reach. A disabled folder's files are not here, so none of the queries see them; progress and edits stay
     /// in the database and everything is back when the folder is enabled.
     /// </summary>
     public List<FileEntry> Files { get; }
@@ -123,11 +123,13 @@ internal sealed class LibrarySnapshot
     public bool IsTitleHidden(int titleId) =>
         IsHidden(TargetKind.Title, titleId) || FilesByTitle[titleId].All(f => f.Hidden);
 
-    public static LibrarySnapshot Load(LibraryDatabase db)
+    public static LibrarySnapshot Load(LibraryDatabase db, Viewer viewer)
     {
         using var connection = db.Open();
-        var folders = connection.Query<FolderRowDto>("SELECT id, path, enabled FROM folders ORDER BY id")
+        var allFolders = connection.Query<FolderRowDto>("SELECT id, path, enabled FROM folders ORDER BY id")
             .Select(r => new LibraryFolder((int)r.Id, r.Path, r.Enabled != 0)).ToList();
+        // Only the owner sees every folder, switched off ones included; a viewer's list holds what they can play.
+        var folders = viewer.IsOwner ? allFolders : allFolders.Where(f => f.Enabled && viewer.CanReach(f.Id)).ToList();
         var overrides = new OverrideStore(db).All().ToDictionary(o => (o.Kind, o.TargetId));
 
         var files = connection.Query<FileDto>(
@@ -148,6 +150,7 @@ internal sealed class LibrarySnapshot
                 Missing = r.Missing != 0,
                 TitleId = (int?)r.TitleId,
             })
+            .Where(f => viewer.CanReach(f.FolderId))
             .ToList();
         var titles = connection.Query<TitleDto>(
                 """
@@ -167,13 +170,13 @@ internal sealed class LibrarySnapshot
             titleCountByFolder[group.Key] = (kinds.Count(k => k == TitleKind.Show), kinds.Count(k => k == TitleKind.Movie));
         }
 
-        var disabled = folders.Where(f => !f.Enabled).Select(f => f.Id).ToHashSet();
+        var disabled = allFolders.Where(f => !f.Enabled).Select(f => f.Id).ToHashSet();
         if (disabled.Count > 0) files = files.Where(f => !disabled.Contains(f.FolderId)).ToList();
         var byId = files.ToDictionary(f => f.Id);
 
         foreach (var row in connection.Query<ProgressDto>(
                      "SELECT file_id AS FileId, position_s AS PositionS, duration_s AS DurationS, watched, last_played AS LastPlayed " +
-                     $"FROM progress WHERE user_id = {LibraryDatabase.OwnerId}"))
+                     "FROM progress WHERE user_id = @UserId", new { viewer.UserId }))
         {
             if (!byId.TryGetValue((int)row.FileId, out var file)) continue;
             file.Progress = new Progress(
@@ -200,7 +203,7 @@ internal sealed class LibrarySnapshot
         }
 
         var dismissed = connection.Query<DismissedDto>("SELECT title_id AS TitleId, played_at AS PlayedAt " +
-                                                         $"FROM continue_dismissed WHERE user_id = {LibraryDatabase.OwnerId}")
+                                                         "FROM continue_dismissed WHERE user_id = @UserId", new { viewer.UserId })
             .ToDictionary(r => (int)r.TitleId, r => ParseTime(r.PlayedAt));
 
         return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides, dismissed);
