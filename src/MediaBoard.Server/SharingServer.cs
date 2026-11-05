@@ -26,7 +26,8 @@ public sealed class PortInUseException(int port, Exception innerException) : Exc
 /// The HTTPS server inside the desktop app. It listens only between <see cref="StartAsync"/> and <see cref="StopAsync"/>.
 /// </summary>
 /// <param name="logs">Where the host's warnings and errors go, or null for nowhere.</param>
-public sealed class SharingServer(AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, ILoggerProvider? logs = null)
+public sealed class SharingServer(
+    AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, StreamRegistry streams, ILoggerProvider? logs = null)
 {
     private const int MaxBodyBytes = 64 * 1024;
     private const int MaxConnections = 256;
@@ -113,6 +114,18 @@ public sealed class SharingServer(AccountService service, AccountStore accounts,
         Session.Map(api);
         Library.Map(api, library);
         Search.Map(api, library);
+
+        var watch = new StreamWatch(streams, service, accounts, library);
+        Playback.Map(api, library, streams, watch);
+        // Not started by hand here: a start that fails on the port would leave this listening to the events for good.
+        app.Lifetime.ApplicationStarted.Register(watch.Start);
+        // Kestrel waits for open requests while it stops, and a stream would use up the whole timeout.
+        app.Lifetime.ApplicationStopping.Register(() =>
+        {
+            watch.Dispose();
+            streams.CloseAll();
+        });
+
         authenticated.MapFallback("{*path}", () => ApiResults.Error(ApiErrorCode.NotFound));
     }
 

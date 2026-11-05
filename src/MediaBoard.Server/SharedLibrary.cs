@@ -1,5 +1,6 @@
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Server;
 
@@ -9,4 +10,5 @@ namespace MediaBoard.Server;
 /// A search service for this viewer. It must be built on the viewer's own library and take the same viewer, or a
 /// search shows titles the viewer can't reach.
 /// </param>
-public sealed record SharedLibrary(LocalLibrary Owner, ViewerAccess Access, Func<Viewer, ISearchService> SearchFor, ImageCache Images);
+public sealed record SharedLibrary(
+    LocalLibrary Owner, ViewerAccess Access, FileStore Files, ProgressStore Progress, Func<Viewer, ISearchService> SearchFor, ImageCache Images);

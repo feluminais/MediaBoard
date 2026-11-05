@@ -34,6 +34,8 @@ public sealed class AccessTableTests
         { "GET", "/api/v1/online/movie/{f}" },
         { "GET", "/api/v1/online/tv/{f}/seasons/1" },
         { "GET", "/api/v1/images/342/{f}.jpg" },
+        { "GET", "/api/v1/files/{f}" },
+        { "GET", "/api/v1/files/{f}/stream" },
     };
 
     [Theory, MemberData(nameof(Protected))]

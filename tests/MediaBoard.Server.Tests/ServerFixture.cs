@@ -43,6 +43,7 @@ public sealed class ServerFixture : IAsyncDisposable
         Titles = new TitleStore(Db);
         Matches = new MatchStore(Db);
         Progress = new ProgressStore(Db);
+        Files = new FileStore(Db);
         Provider = new FakeMetadataProvider();
         // Never probes: a test flips it with ReportOffline.
         Connectivity = new Connectivity(_ => Task.FromResult(false), TimeProvider.System, new ActivityHub());
@@ -55,9 +56,12 @@ public sealed class ServerFixture : IAsyncDisposable
         var shared = new SharedLibrary(
             Owner,
             Access,
+            Files,
+            Progress,
             viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
             new ImageCache(http, Connectivity, ImagesDir));
-        Server = new SharingServer(Service, Accounts, Devices, shared, logs) { ServerName = ServerName };
+        Streams = new StreamRegistry(TimeProvider.System, new SleepRecorder());
+        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, logs) { ServerName = ServerName };
     }
 
     public LibraryDatabase Db { get; }
@@ -81,6 +85,10 @@ public sealed class ServerFixture : IAsyncDisposable
     public MatchStore Matches { get; }
 
     public ProgressStore Progress { get; }
+
+    public FileStore Files { get; }
+
+    public StreamRegistry Streams { get; }
 
     public FakeMetadataProvider Provider { get; }
 

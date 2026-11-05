@@ -276,7 +276,7 @@ public sealed class HostTests
     }
 
     /// <summary>Keeps every line the host's filters let through.</summary>
-    private sealed class LogCapture : ILoggerProvider
+    internal sealed class LogCapture : ILoggerProvider
     {
         public ConcurrentQueue<string> Lines { get; } = new();
 

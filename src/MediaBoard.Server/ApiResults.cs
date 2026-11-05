@@ -28,11 +28,12 @@ internal static class ApiResults
     // 401 means only "this token is no good", which a client takes as being signed out. A wrong password isn't that.
     private static int StatusOf(ApiErrorCode code) => code switch
     {
-        ApiErrorCode.NotFound => StatusCodes.Status404NotFound,
+        ApiErrorCode.NotFound or ApiErrorCode.FileMissing => StatusCodes.Status404NotFound,
         ApiErrorCode.Unauthorized => StatusCodes.Status401Unauthorized,
         ApiErrorCode.InviteDead => StatusCodes.Status410Gone,
-        ApiErrorCode.WrongPassword or ApiErrorCode.Disabled => StatusCodes.Status403Forbidden,
-        ApiErrorCode.Locked => StatusCodes.Status429TooManyRequests,
+        ApiErrorCode.WrongPassword or ApiErrorCode.Disabled or ApiErrorCode.StreamStopped => StatusCodes.Status403Forbidden,
+        ApiErrorCode.Locked or ApiErrorCode.TooManyStreams => StatusCodes.Status429TooManyRequests,
+        ApiErrorCode.DriveUnavailable => StatusCodes.Status503ServiceUnavailable,
         ApiErrorCode.TooLarge => StatusCodes.Status413PayloadTooLarge,
         _ => StatusCodes.Status400BadRequest,
     };
