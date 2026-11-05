@@ -18,11 +18,19 @@ public sealed class StreamRefusedException(ApiErrorCode code) : Exception($"The 
 }
 
 /// <summary>One request's place in a session. Disposing it ends the request's hold, not the session.</summary>
-public sealed class StreamLease(Guid session, CancellationTokenSource stop) : IDisposable
+public sealed class StreamLease(Guid session, CancellationTokenSource stop, Action release) : IDisposable
 {
+    private int _disposed;
+
     public Guid Session { get; } = session;
 
-    public void Dispose() => stop.Dispose();
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        stop.Dispose();
+        release();
+    }
 }
 
 /// <summary>
@@ -37,6 +45,11 @@ public sealed class StreamLease(Guid session, CancellationTokenSource stop) : ID
 public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker sleep, ILogger? log = null)
 {
     private const int MaxPerAccount = 8;
+
+    // A session counts as one playback however many requests it holds, so these bound the requests themselves. A player
+    // holds 3 or 4 at a seek's peak, and an account that used all 32 could still seek in each of 8 playbacks.
+    private const int MaxRequestsPerSession = 16;
+    private const int MaxRequestsPerAccount = 32;
 
     private static readonly TimeSpan Quiet = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan BlockFor = TimeSpan.FromMinutes(1);
@@ -91,20 +104,29 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
             if (IsBlocked(who.Device.Id, file.FileId)) throw new StreamRefusedException(ApiErrorCode.StreamStopped);
 
             var live = Find(who.Device.Id, file.FileId);
+            var account = _live.Values.Where(other => other.UserId == who.Account.Id).ToList();
+            if (account.Sum(other => other.OpenRequests) >= MaxRequestsPerAccount
+                || (live is null ? account.Count >= MaxPerAccount : live.OpenRequests >= MaxRequestsPerSession))
+            {
+                throw new StreamRefusedException(ApiErrorCode.TooManyStreams);
+            }
+
             if (live is null)
             {
-                if (_live.Values.Count(other => other.UserId == who.Account.Id) >= MaxPerAccount)
-                    throw new StreamRefusedException(ApiErrorCode.TooManyStreams);
-
                 live = new Live(who, file, time.GetUtcNow().UtcDateTime, now);
                 Add(live);
                 started = live.ToSession(time, now);
             }
 
             live.LastActivity = now;
+            live.OpenRequests++;
             var linked = CancellationTokenSource.CreateLinkedTokenSource(live.Stop.Token, requestAborted);
             stop = linked.Token;
-            lease = new StreamLease(live.Id, linked);
+            var held = live;
+            lease = new StreamLease(live.Id, linked, () =>
+            {
+                lock (_gate) held.OpenRequests--;
+            });
         }
 
         if (started is not null)
@@ -346,6 +368,8 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
         public CancellationTokenSource Stop { get; } = new();
 
         public long LastActivity { get; set; }
+
+        public int OpenRequests { get; set; }
 
         public double PositionS { get; set; }
 

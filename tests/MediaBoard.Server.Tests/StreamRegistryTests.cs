@@ -181,6 +181,40 @@ public sealed class StreamRegistryTests
     }
 
     [Fact]
+    public void Limit_16RequestsPerSession_ARequestThatEndsFreesItsPlace()
+    {
+        var first = Open(Who(), File());
+        for (var request = 2; request <= 16; request++) Open(Who(), File());
+
+        var refused = Assert.Throws<StreamRefusedException>(() => Open(Who(), File()));
+
+        Assert.Equal(ApiErrorCode.TooManyStreams, refused.Code);
+        Assert.Single(_streams.Current);
+
+        first.Dispose();
+        first.Dispose(); // the request path can reach this twice, and one place must not count as two
+        Open(Who(), File());
+        Assert.Throws<StreamRefusedException>(() => Open(Who(), File()));
+    }
+
+    [Fact]
+    public void Limit_32RequestsPerAccount_HoweverTheSessionsAreSplit()
+    {
+        for (var file = 1; file <= 2; file++)
+        {
+            for (var request = 1; request <= 16; request++) Open(Who(), File(file));
+        }
+
+        var refused = Assert.Throws<StreamRefusedException>(() => Open(Who(), File(3)));
+
+        Assert.Equal(ApiErrorCode.TooManyStreams, refused.Code);
+        Assert.Equal(2, _streams.Current.Count);
+
+        // Another account's requests are its own.
+        Open(Who(userId: 3, deviceId: 11), File(3));
+    }
+
+    [Fact]
     public void Limit_8PerAccount_CountsPlaybacks()
     {
         for (var file = 1; file <= 8; file++)

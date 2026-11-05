@@ -113,6 +113,36 @@ public sealed class HostTests
     }
 
     [Fact]
+    public async Task OneAddress_CanHoldOnlyItsShareOfConnections()
+    {
+        await using var fixture = new ServerFixture();
+        var port = ServerFixture.FreePort();
+        await fixture.Server.StartAsync(Options(fixture, port) with { ConnectionsPerAddress = 2 }, Ct);
+
+        using var first = new TcpClient();
+        using var second = new TcpClient();
+        await first.ConnectAsync(IPAddress.Loopback, port, Ct);
+        await second.ConnectAsync(IPAddress.Loopback, port, Ct);
+        await Task.Delay(100, Ct); // Kestrel counts a connection once it has accepted it.
+
+        using var refused = new TcpClient();
+        await refused.ConnectAsync(IPAddress.Loopback, port, Ct);
+
+        // Cut before TLS: the server neither says hello nor waits for one.
+        await Assert.ThrowsAsync<IOException>(async () =>
+        {
+            var read = await refused.GetStream().ReadAsync(new byte[1], Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(5), Ct);
+            if (read == 0) throw new IOException("Closed.");
+        });
+
+        // A place that opens up is free again.
+        first.Close();
+        await Task.Delay(100, Ct);
+        var response = await fixture.TlsClient().GetAsync(Url(port, "/api/v1/ping"), Ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Stop_LetsGoOfTheKeptPartOfTheLibrary()
     {
         await using var fixture = new ServerFixture();

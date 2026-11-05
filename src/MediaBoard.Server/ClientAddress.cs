@@ -12,9 +12,9 @@ internal static class ClientAddress
 {
     private const int InterfaceIdBytes = 8;
 
-    public static string Of(HttpContext context) => Normalise(context.Connection.RemoteIpAddress);
+    public static string Of(HttpContext context) => Of(context.Connection.RemoteIpAddress);
 
-    private static string Normalise(IPAddress? address)
+    public static string Of(IPAddress? address)
     {
         if (address is null) return "unknown";
         if (address.IsIPv4MappedToIPv6) return address.MapToIPv4().ToString();

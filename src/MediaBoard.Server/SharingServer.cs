@@ -21,6 +21,12 @@ public sealed record SharingOptions(int Port, string ServerName, X509Certificate
 {
     /// <summary>For tests: only this PC can connect, and so Windows Firewall has nothing to ask about.</summary>
     public bool LoopbackOnly { get; init; }
+
+    /// <summary>
+    /// One address's share of the connections, so a stranger can't hold them all. A family behind one router counts as
+    /// one address, and a player's seek takes several connections at once, so it's well above what one viewer needs.
+    /// </summary>
+    public int ConnectionsPerAddress { get; init; } = 32;
 }
 
 public sealed class PortInUseException(int port, Exception innerException) : Exception($"Port {port} is in use.", innerException)
@@ -43,6 +49,10 @@ public sealed class SharingServer(
 
     // Kestrel cuts whatever is still open after this, so a stuck client can't hold up closing the app.
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
+
+    // Shorter than Kestrel's defaults, which let a silent connection sit for minutes. Neither touches a response in progress.
+    private static readonly TimeSpan IdleConnectionLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan HeadersLimit = TimeSpan.FromSeconds(10);
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
@@ -186,10 +196,16 @@ public sealed class SharingServer(
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = MaxBodyBytes;
             kestrel.Limits.MaxConcurrentConnections = MaxConnections;
+            kestrel.Limits.KeepAliveTimeout = IdleConnectionLimit;
+            kestrel.Limits.RequestHeadersTimeout = HeadersLimit;
+            var perAddress = new ConnectionLimit(options.ConnectionsPerAddress);
             void Configure(ListenOptions listen)
             {
                 // The client speaks HTTP/1.1 only, so nothing else is offered.
                 listen.Protocols = HttpProtocols.Http1;
+
+                // Ahead of TLS, so a refused connection costs no handshake.
+                listen.Use(perAddress.Wrap);
                 listen.UseHttps(new HttpsConnectionAdapterOptions
                 {
                     ServerCertificate = options.Certificate,
