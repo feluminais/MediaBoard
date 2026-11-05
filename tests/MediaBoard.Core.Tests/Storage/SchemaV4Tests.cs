@@ -73,6 +73,52 @@ public sealed class SchemaV4Tests : IDisposable
         SqliteConnection.ClearAllPools();
     }
 
+    // Tables, columns, keys and indexes, whichever way the text was laid out.
+    private static List<string> ShapeOf(string path)
+    {
+        using var connection = new LibraryDatabase(path).Open();
+        return connection
+            .Query<(string Type, string Name, string? Sql)>("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
+            .Select(row => $"{row.Type} {row.Name}: {Normalised(row.Sql)}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string Normalised(string? sql)
+    {
+        var text = System.Text.RegularExpressions.Regex.Replace(sql ?? "", "--[^\n]*", "");
+        text = text.Replace("IF NOT EXISTS", "", StringComparison.OrdinalIgnoreCase).Replace("\"", "", StringComparison.Ordinal);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        return System.Text.RegularExpressions.Regex.Replace(text, @"\s*([(),])\s*", "$1").Trim().ToUpperInvariant();
+    }
+
+    [Fact]
+    public void MigratedFile_HasTheSameSchema_AsANewDatabase()
+    {
+        MakeV3File();
+        var freshPath = Path.Combine(_dir, "fresh.db");
+
+        var migrated = ShapeOf(DbPath);
+        var fresh = ShapeOf(freshPath);
+
+        Assert.NotEmpty(fresh);
+        Assert.Equal(fresh, migrated);
+    }
+
+    [Fact]
+    public void MigratedFile_HasTheOwnerRow()
+    {
+        MakeV3File();
+
+        using var connection = new LibraryDatabase(DbPath).Open();
+        var owner = connection.QuerySingle<(string Role, string? PasswordHash, long AllFolders)>(
+            "SELECT role, password_hash, all_folders FROM users WHERE id = @id", new { id = LibraryDatabase.OwnerId });
+
+        Assert.Equal("owner", owner.Role);
+        Assert.Null(owner.PasswordHash);
+        Assert.Equal(1, owner.AllFolders);
+    }
+
     [Fact]
     public void NewDatabase_HasOwnerRow()
     {
