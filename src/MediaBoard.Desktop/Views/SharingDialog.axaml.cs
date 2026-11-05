@@ -27,6 +27,11 @@ public partial class SharingDialog : Window
         panel.CloseRequested += Close;
         panel.PropertyChanged += OnPanelChanged;
         Opened += (_, _) => FocusStep();
+        // Only the owner's own close: the app quitting or the PC shutting down doesn't wait on a panel.
+        Closing += (_, e) =>
+        {
+            if (e.CloseReason == WindowCloseReason.WindowClosing && !panel.MayClose()) e.Cancel = true;
+        };
         Closed += (_, _) =>
         {
             panel.CloseRequested -= Close;

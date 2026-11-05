@@ -88,6 +88,50 @@ public sealed class ProgressEndpointTests
 
     private static ProgressEntry Entry(double positionS, DateTimeOffset at, bool? watched = null) => new(positionS, 3000, watched, at);
 
+    private static IEnumerable<SharingLogEntry> Finished(World world) =>
+        world.Fixture.Log.Recent(50).Where(e => e.Kind == SharingEvent.FinishedWatching);
+
+    [Fact]
+    public async Task Watched_Put_LogsFinished_OnlyOnARealChange()
+    {
+        await using var world = await World.StartAsync();
+
+        await world.PutWatchedAsync("{\"watched\":false}");
+        Assert.Empty(Finished(world));
+
+        await world.PutWatchedAsync("{\"watched\":true}");
+        await world.PutWatchedAsync("{\"watched\":true}");
+
+        var entry = Assert.Single(Finished(world));
+        Assert.Equal(world.Sam.Id, entry.UserId);
+        Assert.Equal("Heat", entry.Detail);
+    }
+
+    [Fact]
+    public async Task Progress_CarryingWatched_LogsFinished_OnlyOnARealChange()
+    {
+        await using var world = await World.StartAsync();
+
+        await world.PutProgressAsync(Entry(100, Start));
+        Assert.Empty(Finished(world));
+
+        await world.PutProgressAsync(Entry(2990, Start.AddMinutes(1), watched: true));
+        await world.PutProgressAsync(Entry(2995, Start.AddMinutes(1).AddSeconds(5), watched: true));
+
+        Assert.Single(Finished(world));
+    }
+
+    [Fact]
+    public async Task Watched_InAnOlderEntry_LogsNothing()
+    {
+        await using var world = await World.StartAsync();
+        await world.PutProgressAsync(Entry(100, Start));
+
+        await world.PutProgressAsync(Entry(50, Start.AddMinutes(-5), watched: true));
+
+        Assert.Empty(Finished(world));
+    }
+
     [Fact]
     public async Task Progress_IsPerAccount()
     {

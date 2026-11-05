@@ -177,6 +177,19 @@ public sealed class StreamTests
     }
 
     [Fact]
+    public async Task Stream_LogsItsStartOnce_AcrossSeeks()
+    {
+        await using var world = await World.OnTestHostAsync();
+
+        (await world.StreamAsync("bytes=0-99")).Dispose();
+        (await world.StreamAsync("bytes=1000-1099")).Dispose();
+
+        var entry = Assert.Single(world.Fixture.Log.Recent(10), e => e.Kind == SharingEvent.StartedWatching);
+        Assert.Equal(world.Sam.Id, entry.UserId);
+        Assert.Equal("Heat", entry.Detail);
+    }
+
+    [Fact]
     public async Task NoRange_Returns200WithLength()
     {
         await using var world = await World.OnTestHostAsync();

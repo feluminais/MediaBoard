@@ -54,6 +54,12 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
     /// <summary>Raised off the lock with the device whose stream the owner stopped.</summary>
     public event Action<int>? Stopped;
 
+    /// <summary>
+    /// Raised off the lock when a playback starts: once per session, however many requests its seeks make. A failing
+    /// listener doesn't stop the stream.
+    /// </summary>
+    public event Action<StreamSession>? Started;
+
     public IReadOnlyList<StreamSession> Current
     {
         get
@@ -78,14 +84,13 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
         ArgumentNullException.ThrowIfNull(file);
 
         StreamLease lease;
-        bool started;
+        StreamSession? started = null;
         lock (_gate)
         {
             var now = time.GetTimestamp();
             if (IsBlocked(who.Device.Id, file.FileId)) throw new StreamRefusedException(ApiErrorCode.StreamStopped);
 
             var live = Find(who.Device.Id, file.FileId);
-            started = live is null;
             if (live is null)
             {
                 if (_live.Values.Count(other => other.UserId == who.Account.Id) >= MaxPerAccount)
@@ -93,6 +98,7 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
 
                 live = new Live(who, file, time.GetUtcNow().UtcDateTime, now);
                 Add(live);
+                started = live.ToSession(time, now);
             }
 
             live.LastActivity = now;
@@ -101,7 +107,12 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
             lease = new StreamLease(live.Id, linked);
         }
 
-        if (started) RaiseChanged();
+        if (started is not null)
+        {
+            RaiseChanged();
+            RaiseStarted(started);
+        }
+
         return lease;
     }
 
@@ -139,12 +150,13 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
     }
 
     /// <summary>The owner's stop: ends the session and keeps that device off that file for a minute.</summary>
-    public void Stop(Guid session)
+    /// <returns>False when the session had ended already, so nothing was stopped.</returns>
+    public bool Stop(Guid session)
     {
         Live? stopped;
         lock (_gate)
         {
-            if (!_live.TryGetValue(session, out stopped)) return;
+            if (!_live.TryGetValue(session, out stopped)) return false;
 
             Remove(stopped);
             ForgetOldBlocks();
@@ -153,6 +165,7 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
 
         End([stopped]);
         Stopped?.Invoke(stopped.DeviceId);
+        return true;
     }
 
     /// <summary>Ends a session with no block on opening it again.</summary>
@@ -204,6 +217,23 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
             try
             {
                 handler();
+            }
+            catch (Exception e)
+            {
+                LogListenerFailed(_log, e.GetType().Name);
+            }
+        }
+    }
+
+    private void RaiseStarted(StreamSession session)
+    {
+        if (Started is not { } handlers) return;
+
+        foreach (var handler in handlers.GetInvocationList().Cast<Action<StreamSession>>())
+        {
+            try
+            {
+                handler(session);
             }
             catch (Exception e)
             {
@@ -340,9 +370,8 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
 
             // A session a moment old has sent for less than the window, and dividing by the whole window would undersell it.
             var seconds = Math.Clamp(time.GetElapsedTime(started, now).TotalSeconds, 1, RateWindow.TotalSeconds);
-            var title = file.EpisodeLabel is { } label ? $"{file.TitleName} {label}" : file.TitleName;
             return new StreamSession(
-                Id, UserId, who.Account.Name, DeviceId, who.Device.Name, FileId, title,
+                Id, UserId, who.Account.Name, DeviceId, who.Device.Name, FileId, file.Title,
                 PositionS, DurationS, SentBytes * 8 / 1_000_000.0 / seconds, startedAt);
         }
     }

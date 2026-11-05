@@ -84,6 +84,21 @@ public sealed class InviteStoreTests : IDisposable
     }
 
     [Fact]
+    public void PendingCounts_CountsLiveInvitesOnly()
+    {
+        _invites.Create(_anna);
+        var used = _invites.Create(_anna);
+        _invites.Create(_anna);
+        _invites.Consume(used);
+
+        Assert.Equal(2, _invites.PendingCounts()[_anna]);
+
+        _clock.Advance(TimeSpan.FromDays(7));
+
+        Assert.Empty(_invites.PendingCounts());
+    }
+
+    [Fact]
     public void Invite_IsSingleUse()
     {
         var code = _invites.Create(_anna);

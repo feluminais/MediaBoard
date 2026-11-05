@@ -57,6 +57,27 @@ public class DialogsTests
     }
 
     [AvaloniaTheory]
+    [InlineData(true, "danger")]
+    [InlineData(false, "accent")]
+    public async Task Confirm_StylesTheYesButton(bool danger, string style)
+    {
+        var owner = new Window();
+        owner.Show();
+        var dialogs = new Dialogs { Owner = owner };
+
+        var answer = dialogs.ConfirmAsync("Remove Anna?", "Remove", danger);
+        Ui.Flush();
+
+        var dialog = Assert.Single(owner.OwnedWindows);
+        var yes = dialog.GetVisualDescendants().OfType<Button>().Single(b => (string?)b.Content == "Remove");
+        Assert.Contains(style, yes.Classes);
+        yes.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        await answer;
+        owner.Close();
+    }
+
+    [AvaloniaTheory]
     [InlineData("Close it", true)]
     [InlineData("Leave it playing", false)]
     public async Task AskClosePlayer_NamesThePlayer_AndReturnsTheButtonPressed(string button, bool expected)

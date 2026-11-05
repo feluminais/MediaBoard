@@ -40,7 +40,8 @@ public sealed class ServerFixture : IAsyncDisposable
         Devices = new DeviceStore(Db, time);
         Invites = new InviteStore(Db);
         Guard = new SignInGuard(time);
-        Service = new AccountService(Db, Accounts, Devices, Invites, Guard, new SharingLog(Db));
+        Log = new SharingLog(Db);
+        Service = new AccountService(Db, Accounts, Devices, Invites, Guard, Log);
 
         Folders = new FolderStore(Db);
         Titles = new TitleStore(Db);
@@ -64,7 +65,7 @@ public sealed class ServerFixture : IAsyncDisposable
             viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
             new ImageCache(http, Connectivity, ImagesDir));
         Streams = new StreamRegistry(time, new SleepRecorder(), logs?.CreateLogger("Streams"));
-        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, logs, time) { ServerName = ServerName };
+        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, Log, logs, time) { ServerName = ServerName };
     }
 
     public LibraryDatabase Db { get; }
@@ -76,6 +77,8 @@ public sealed class ServerFixture : IAsyncDisposable
     public InviteStore Invites { get; }
 
     public SignInGuard Guard { get; }
+
+    public SharingLog Log { get; }
 
     public AccountService Service { get; }
 

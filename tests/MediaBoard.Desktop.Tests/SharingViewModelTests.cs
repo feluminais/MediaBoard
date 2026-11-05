@@ -21,6 +21,9 @@ public sealed class SharingViewModelTests
     {
         public List<string> Asked { get; } = [];
 
+        /// <summary>The yes buttons asked with the danger look.</summary>
+        public List<string> Dangerous { get; } = [];
+
         public List<SharingPanel> Panels { get; } = [];
 
         public bool Answer { get; set; } = true;
@@ -33,9 +36,10 @@ public sealed class SharingViewModelTests
         public Func<SharingPanel, Task>? InPanel { get; set; }
 
         public SharingDialogs Dialogs => new(
-            (question, _) =>
+            (question, yes, danger) =>
             {
                 Asked.Add(question);
+                if (danger) Dangerous.Add(yes);
                 return Task.FromResult(Answer);
             },
             async panel =>
@@ -58,7 +62,7 @@ public sealed class SharingViewModelTests
         return page;
     }
 
-    internal static SharingViewModel Build(SharingWorld world, OwnerAtDialogs? owner = null, TimeProvider? clock = null)
+    internal static SharingViewModel Build(SharingWorld world, OwnerAtDialogs? owner = null, TimeProvider? clock = null, ILibrary? library = null)
     {
         world.OpenDatabase();
         var services = world.Services;
@@ -72,7 +76,7 @@ public sealed class SharingViewModelTests
                 world.Streams,
                 services.GetRequiredService<SharingLog>(),
                 services.GetRequiredService<SignInGuard>(),
-                services.GetRequiredService<ILibrary>(),
+                library ?? services.GetRequiredService<ILibrary>(),
                 world.Settings,
                 services.GetRequiredService<StartWithWindows>(),
                 world.Hub,
@@ -156,6 +160,29 @@ public sealed class SharingViewModelTests
 
         Assert.Equal(world.Sharing.Problem, page.Problem);
         Assert.False(page.IsOn); // it isn't on, so the switch mustn't say so
+    }
+
+    [AvaloniaFact]
+    public async Task FailedResume_ShowsTheSwitchOn_SoItCanBeTurnedOff()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { On = true });
+        var page = Open(world);
+        await File.WriteAllBytesAsync(world.Paths.Certificate, [1, 2, 3], TestContext.Current.CancellationToken);
+
+        await world.Sharing.ResumeAsync();
+        await Ui.WaitUntil(() => page.HasProblem);
+
+        Assert.Equal(SharingStatus.Failed, world.Sharing.Status);
+        Assert.True(page.IsOn);
+        Assert.True(world.Settings.Load().Sharing.On);
+
+        page.IsOn = false;
+        await Ui.WaitUntil(() => world.Sharing.Status == SharingStatus.Off);
+
+        Assert.False(world.Settings.Load().Sharing.On); // the next launch stays off
+        await Ui.WaitUntil(() => !page.IsOn);
+        Assert.False(page.HasProblem);
     }
 
     [AvaloniaFact]
@@ -346,6 +373,37 @@ public sealed class SharingViewModelTests
         await Ui.WaitUntil(() => page.Watching.Count == 0);
         await page.RefreshAsync();
         Assert.Contains(page.Activity, row => row.Text == "Anna's stream was stopped: Movie");
+    }
+
+    [AvaloniaFact]
+    public async Task Stop_StreamAlreadyGone_LogsNothing()
+    {
+        await using var world = new SharingWorld();
+        var page = await OpenLoaded(world);
+        var lease = world.OpenStream();
+        await Ui.WaitUntil(() => page.Watching.Count == 1);
+        var row = page.Watching[0];
+        world.Streams.Close(lease.Session);
+
+        await page.StopCommand.ExecuteAsync(row);
+
+        await page.RefreshAsync();
+        Assert.DoesNotContain(page.Activity, line => line.Text.Contains("stopped", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public async Task Stop_SecondPress_LogsOnce()
+    {
+        await using var world = new SharingWorld();
+        var page = await OpenLoaded(world);
+        world.OpenStream();
+        await Ui.WaitUntil(() => page.Watching.Count == 1);
+        var row = page.Watching[0];
+
+        await Task.WhenAll(page.StopCommand.ExecuteAsync(row), page.StopCommand.ExecuteAsync(row));
+
+        await page.RefreshAsync();
+        Assert.Single(page.Activity, line => line.Text.Contains("stopped", StringComparison.Ordinal));
     }
 
     // ---- People ----
@@ -649,7 +707,10 @@ public sealed class SharingViewModelTests
 
         await page.ToggleDisabledCommand.ExecuteAsync(row);
 
-        Assert.Contains("Anna", Assert.Single(owner.Asked));
+        var question = Assert.Single(owner.Asked);
+        Assert.Contains("Anna", question);
+        Assert.Contains("devices sign out", question);
+        Assert.Contains("sign in again", question); // enabling doesn't bring the sessions back
         Assert.False(People(world).Get(anna.Id)!.Disabled);
 
         owner.Answer = true;
@@ -724,7 +785,141 @@ public sealed class SharingViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task OwnerRow_HasOnlySetPasswordAndNewInvite()
+    public async Task NewInvite_ReplacesOlderPendingInvites()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = Address });
+        var anna = world.Accounts.AddPerson("Anna", null);
+        var older = Invites(world).Create(anna.Id);
+        Invites(world).Create(anna.Id);
+        var page = await OpenLoaded(world);
+        var row = await OpenRow(page, "Anna");
+
+        await page.NewInviteCommand.ExecuteAsync(row);
+
+        Assert.Single(Invites(world).Pending(anna.Id));
+        Assert.Null(Invites(world).Peek(older));
+    }
+
+    [AvaloniaFact]
+    public async Task NewInvite_Fails_KeepsOlderInvites()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = "http://" });
+        var anna = world.Accounts.AddPerson("Anna", null);
+        Invites(world).Create(anna.Id);
+        var page = await OpenLoaded(world);
+        var row = await OpenRow(page, "Anna");
+
+        await page.NewInviteCommand.ExecuteAsync(row);
+
+        Assert.Single(Invites(world).Pending(anna.Id));
+    }
+
+    [AvaloniaFact]
+    public async Task NewInvite_WithNoAddress_PointsAtConnection()
+    {
+        await using var world = new SharingWorld();
+        var anna = world.Accounts.AddPerson("Anna", null);
+        var owner = new OwnerAtDialogs();
+        var page = await OpenLoaded(world, owner);
+        var row = await OpenRow(page, "Anna");
+
+        await page.NewInviteCommand.ExecuteAsync(row);
+
+        Assert.True(page.IsConnectionOpen);
+        Assert.Empty(owner.Panels);
+        Assert.Empty(Invites(world).Pending(anna.Id));
+    }
+
+    [AvaloniaFact]
+    public async Task Invite_WithSharingOff_SaysItWaitsForSharing_AndNotOnceItsOn()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = Address });
+        world.Accounts.AddPerson("Anna", null);
+        string? note = null;
+        var owner = new OwnerAtDialogs();
+        owner.InPanel = panel =>
+        {
+            note = ((InviteStep)panel.Step!).Note;
+            return Task.CompletedTask;
+        };
+        var page = await OpenLoaded(world, owner);
+        var row = await OpenRow(page, "Anna");
+
+        await page.NewInviteCommand.ExecuteAsync(row);
+        Assert.Contains("won't work until you turn it on", note);
+
+        await world.Sharing.SetOnAsync(true);
+        await page.NewInviteCommand.ExecuteAsync(row);
+        Assert.DoesNotContain("turn it on", note);
+    }
+
+    [AvaloniaFact]
+    public async Task Row_ShowsPendingInvites_AndCancelClearsThem_OnEveryRow()
+    {
+        await using var world = new SharingWorld();
+        var anna = world.Accounts.AddPerson("Anna", null);
+        Invites(world).Create(anna.Id);
+        Invites(world).Create(anna.Id);
+        Invites(world).Create(LibraryDatabase.OwnerId);
+        var page = await OpenLoaded(world);
+        var row = await OpenRow(page, "Anna");
+        var ownerRow = page.People[0];
+
+        Assert.Equal("2 invites pending", row.PendingInvites);
+        Assert.Equal("1 invite pending", ownerRow.PendingInvites);
+
+        await page.CancelInvitesCommand.ExecuteAsync(row);
+        await page.CancelInvitesCommand.ExecuteAsync(ownerRow);
+
+        Assert.Empty(Invites(world).Pending(anna.Id));
+        Assert.Empty(Invites(world).Pending(LibraryDatabase.OwnerId));
+        Assert.False(row.HasPendingInvites);
+        Assert.False(ownerRow.HasPendingInvites);
+    }
+
+    [AvaloniaFact]
+    public async Task Row_ClosingClearsItsMessage()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = "http://" });
+        world.Accounts.AddPerson("Anna", null);
+        var page = await OpenLoaded(world);
+        var row = await OpenRow(page, "Anna");
+        await page.NewInviteCommand.ExecuteAsync(row);
+        Assert.True(row.HasMessage);
+
+        await page.ToggleRowCommand.ExecuteAsync(row);
+
+        Assert.False(row.HasMessage);
+    }
+
+    [AvaloniaFact]
+    public async Task OwnerRow_ListsTheirDevices_AndSignsThemOut()
+    {
+        await using var world = new SharingWorld();
+        var devices = world.Services.GetRequiredService<DeviceStore>();
+        var page = await OpenLoaded(world);
+        await page.ToggleRowCommand.ExecuteAsync(page.People[0]);
+        var row = page.People[0];
+        await Ui.WaitUntil(() => row.Detail!.DevicesLoaded);
+        Assert.False(row.Detail!.ShowsDevices); // none, so nothing to list
+        Assert.False(row.Detail.HasNoDevices);
+
+        devices.Issue(LibraryDatabase.OwnerId, "Laptop", "198.51.100.2");
+        await page.RefreshAsync();
+        Assert.True(row.Detail.ShowsDevices);
+
+        await page.SignOutCommand.ExecuteAsync(row.Detail.Devices[0]);
+
+        Assert.Empty(devices.ForUser(LibraryDatabase.OwnerId));
+        Assert.False(row.Detail.ShowsDevices);
+    }
+
+    [AvaloniaFact]
+    public async Task OwnerRow_HasNoDisableRemoveFoldersOrReset()
     {
         await using var world = new SharingWorld();
         world.Accounts.AddPerson("Anna", null);
@@ -734,6 +929,7 @@ public sealed class SharingViewModelTests
 
         Assert.True(row.IsOwner); // listed first, whatever the names sort to
         Assert.False(row.CanManage);
+        Assert.False(row.CanResetPassword);
         Assert.True(row.CanInvite);
 
         await page.ToggleDisabledCommand.ExecuteAsync(row);
@@ -743,6 +939,134 @@ public sealed class SharingViewModelTests
         Assert.Empty(owner.Asked);
         Assert.NotNull(People(world).Get(LibraryDatabase.OwnerId));
         Assert.True(page.People.Single(r => r.Name == "Anna").CanManage);
+    }
+
+    [AvaloniaFact]
+    public void AddStep_StaysOpenWhileItRuns_AndSaysSo()
+    {
+        var running = new TaskCompletionSource();
+        var panel = new SharingPanel();
+        var step = new AddPersonStep([], _ => running.Task) { Name = "Anna" };
+        panel.Step = step;
+
+        var create = step.CreateCommand.ExecuteAsync(null);
+
+        Assert.Equal("Adding…", step.AddLabel);
+        Assert.False(panel.MayClose());
+
+        running.SetResult();
+        create.GetAwaiter().GetResult();
+
+        Assert.Equal("Add", step.AddLabel);
+        Assert.True(panel.MayClose());
+    }
+
+    [AvaloniaFact]
+    public void PasswordStep_StaysOpenWhileItRuns_AndSaysSo()
+    {
+        var running = new TaskCompletionSource();
+        var panel = new SharingPanel();
+        var step = new SetPasswordStep(_ => running.Task);
+        panel.Step = step;
+
+        var save = step.SaveCommand.ExecuteAsync(null);
+
+        Assert.Equal("Saving…", step.SaveLabel);
+        Assert.False(panel.MayClose());
+
+        running.SetResult();
+        save.GetAwaiter().GetResult();
+
+        Assert.True(panel.MayClose());
+    }
+
+    [AvaloniaFact]
+    public async Task Invite_NotCopied_WarnsOnce_ThenCloses()
+    {
+        var panel = new SharingPanel { Step = new InviteStep("Invite for Anna", "Send this.", "mb1-x", _ => Task.CompletedTask) };
+        var step = (InviteStep)panel.Step;
+
+        Assert.False(panel.MayClose());
+        Assert.Contains("won't see it again", step.Message);
+        Assert.Equal("Close anyway", step.DoneLabel);
+        Assert.True(panel.MayClose());
+
+        var copied = new SharingPanel { Step = new InviteStep("Invite for Anna", "Send this.", "mb1-x", _ => Task.CompletedTask) };
+        await ((InviteStep)copied.Step).CopyCommand.ExecuteAsync(null);
+
+        Assert.True(copied.MayClose());
+    }
+
+    [AvaloniaFact]
+    public async Task Panel_FinishedByItsStep_ClosesWhileBusy()
+    {
+        var closed = 0;
+        var panel = new SharingPanel();
+        panel.CloseRequested += () => closed++;
+        panel.Step = new AddPersonStep([], _ =>
+        {
+            panel.Finish();
+            Assert.True(panel.MayClose());
+            return Task.CompletedTask;
+        }) { Name = "Anna" };
+
+        await ((AddPersonStep)panel.Step).CreateCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, closed);
+    }
+
+    [AvaloniaFact]
+    public async Task NoFolders_SaysSo_WhenLeavingAllFolders()
+    {
+        await using var world = new SharingWorld();
+        world.Accounts.AddPerson("Anna", null);
+        var page = await OpenLoaded(world);
+        var row = await OpenRow(page, "Anna");
+        Assert.False(row.Detail!.HasNoFolders);
+
+        row.Detail.AllFolders = false;
+
+        Assert.True(row.Detail.HasNoFolders);
+        Assert.True(new AddPersonStep([], _ => Task.CompletedTask) { AllFolders = false }.HasNoFolders);
+    }
+
+    [AvaloniaFact]
+    public async Task DangerousAnswers_AreMarked()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = Address });
+        world.Accounts.AddPerson("Anna", null);
+        var owner = new OwnerAtDialogs();
+        var page = await OpenLoaded(world, owner);
+        var row = await OpenRow(page, "Anna");
+
+        await page.ResetPasswordCommand.ExecuteAsync(row);
+        await page.ToggleDisabledCommand.ExecuteAsync(row);
+        await page.ToggleDisabledCommand.ExecuteAsync(row);
+        await page.RemoveCommand.ExecuteAsync(row);
+        await page.ReplaceCertificateCommand.ExecuteAsync(null);
+
+        Assert.Equal(["Reset", "Disable", "Remove", "Replace"], owner.Dangerous);
+    }
+
+    [AvaloniaFact]
+    public async Task LoadFails_SaysSo_AndAGoodLoadClearsIt()
+    {
+        await using var world = new SharingWorld();
+        var library = new FakeLibrary { OnQuery = _ => throw new IOException("The disk is gone.") };
+        var page = Build(world, library: library);
+
+        page.Opened();
+        await Ui.WaitUntil(() => page.HasLoadProblem);
+
+        Assert.False(page.IsLoaded);
+        Assert.Contains("Couldn't load", page.LoadProblem);
+
+        library.OnQuery = null;
+        page.Opened();
+        await Ui.WaitUntil(() => page.IsLoaded);
+
+        Assert.False(page.HasLoadProblem);
     }
 
     [AvaloniaFact]
@@ -977,6 +1301,59 @@ public sealed class SharingViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task Connection_UnusableAddress_IsRefused()
+    {
+        await using var world = new SharingWorld();
+        var page = await OpenLoaded(world);
+
+        page.PublicAddress = "http://";
+        await page.SaveConnectionCommand.ExecuteAsync(null);
+
+        Assert.Null(world.Settings.Load().Sharing.PublicAddress);
+        Assert.Contains("can't be used", page.ConnectionMessage);
+    }
+
+    [AvaloniaFact]
+    public async Task Connection_NewNameWhileOn_SaysWhenItApplies_AndWhileOffSaysSaved()
+    {
+        await using var world = new SharingWorld();
+        var page = await OpenLoaded(world);
+
+        page.ServerName = "The den";
+        await page.SaveConnectionCommand.ExecuteAsync(null);
+        Assert.Equal("Saved", page.ConnectionMessage);
+
+        await world.Sharing.SetOnAsync(true);
+        await Ui.WaitUntil(() => page.StatusLine.StartsWith("Sharing on", StringComparison.Ordinal));
+        page.ServerName = "The attic";
+        await page.SaveConnectionCommand.ExecuteAsync(null);
+        Assert.Contains("library name", page.ConnectionMessage);
+        Assert.Contains("next time", page.ConnectionMessage);
+
+        page.ServerName = "The cellar";
+        page.PortText = SharingWorld.FreePort().ToString(CultureInfo.InvariantCulture);
+        await page.SaveConnectionCommand.ExecuteAsync(null);
+        Assert.Contains("port and library name", page.ConnectionMessage);
+    }
+
+    [AvaloniaFact]
+    public async Task CheckConnection_UnsavedAddress_SaysSaveFirst_AndEditingClearsTheResult()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { PublicAddress = Address });
+        var page = await OpenLoaded(world);
+        await world.Sharing.SetOnAsync(true);
+        await Ui.WaitUntil(() => page.StatusLine.StartsWith("Sharing on", StringComparison.Ordinal));
+
+        page.PublicAddress = "other.example.org";
+        await page.CheckConnectionCommand.ExecuteAsync(null);
+        Assert.Equal("Save first.", page.CheckResult);
+
+        page.PublicAddress = "another.example.org";
+        Assert.Null(page.CheckResult);
+    }
+
+    [AvaloniaFact]
     public async Task CheckConnection_SharingOff_SaysToTurnItOn()
     {
         await using var world = new SharingWorld();
@@ -1118,6 +1495,63 @@ public sealed class SharingViewModelTests
 
         Assert.Equal(SharingStatus.Failed, world.Sharing.Status);
         Assert.Empty(Invites(world).Pending(anna.Id));
+    }
+
+    // ---- The reload ----
+
+    [AvaloniaFact]
+    public async Task Reload_RunsEvery5Seconds_WhileOpenAndOn()
+    {
+        await using var world = new SharingWorld();
+        var clock = new ManualClock();
+        var page = await OpenLoaded(world, clock: clock);
+        await world.Sharing.SetOnAsync(true);
+
+        world.Accounts.AddPerson("Anna", null);
+        clock.Advance(TimeSpan.FromSeconds(5));
+
+        await Ui.WaitUntil(() => page.People.Any(row => row.Name == "Anna"));
+
+        world.Accounts.AddPerson("Boris", null); // the timer rearms itself
+        clock.Advance(TimeSpan.FromSeconds(5));
+
+        await Ui.WaitUntil(() => page.People.Any(row => row.Name == "Boris"));
+    }
+
+    [AvaloniaFact]
+    public async Task Reload_Skipped_WhileSharingIsOff()
+    {
+        await using var world = new SharingWorld();
+        var clock = new ManualClock();
+        var page = await OpenLoaded(world, clock: clock);
+
+        world.Accounts.AddPerson("Anna", null);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Ui.Flush();
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Ui.Flush();
+
+        Assert.DoesNotContain(page.People, row => row.Name == "Anna");
+        Assert.Equal(1, clock.PendingTimers); // still armed, for when sharing comes on
+    }
+
+    [AvaloniaFact]
+    public async Task Reload_Stops_WhenThePageCloses()
+    {
+        await using var world = new SharingWorld();
+        var clock = new ManualClock();
+        var page = await OpenLoaded(world, clock: clock);
+        await world.Sharing.SetOnAsync(true);
+
+        page.Closed();
+        world.Accounts.AddPerson("Anna", null);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Ui.Flush();
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Ui.Flush();
+
+        Assert.DoesNotContain(page.People, row => row.Name == "Anna");
+        Assert.Equal(0, clock.PendingTimers);
     }
 
     // Reading the certificate makes it if it isn't there yet.

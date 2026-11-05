@@ -45,11 +45,11 @@ public sealed record SharingServices(
     TimeProvider Time);
 
 /// <summary>The page's seams to the windowing system, so a test needs no window.</summary>
-/// <param name="Confirm">Asks the question with the given yes button; true when the owner agreed.</param>
+/// <param name="Confirm">Asks the question with the given yes button, marked as dangerous when the last argument is true; true when the owner agreed.</param>
 /// <param name="ShowPanel">Shows the modal panel and finishes when it has closed.</param>
 /// <param name="Copy">Puts text on the clipboard.</param>
 public sealed record SharingDialogs(
-    Func<string, string, Task<bool>> Confirm,
+    Func<string, string, bool, Task<bool>> Confirm,
     Func<SharingPanel, Task> ShowPanel,
     Func<string, Task> Copy);
 
@@ -90,7 +90,7 @@ public sealed partial class SharingViewModel : PageViewModel
     {
         _s = services;
         _dialogs = dialogs;
-        _query = new BackgroundQuery(services.Hub, "the sharing page");
+        _query = new BackgroundQuery(services.Hub, "the sharing page", () => LoadProblem = IsLoaded ? null : "Couldn't load this page. See the activity panel.");
         _watching = new UiThrottle(services.Time, WatchingRefresh, RefreshWatching);
         services.Controller.Changed += OnControllerChanged;
         services.Streams.Changed += OnStreamsChanged;
@@ -196,6 +196,13 @@ public sealed partial class SharingViewModel : PageViewModel
     [ObservableProperty]
     public partial bool IsLoaded { get; private set; }
 
+    /// <summary>Why the page has no data, after a first load that failed. It tries again as it reopens.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLoadProblem))]
+    public partial string? LoadProblem { get; private set; }
+
+    public bool HasLoadProblem => LoadProblem is not null;
+
     /// <summary>What the last page-wide action came to, when that needs saying.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasPeopleMessage))]
@@ -245,6 +252,7 @@ public sealed partial class SharingViewModel : PageViewModel
             accounts,
             _s.Library.Folders(),
             _s.Guard.LockedNames(),
+            _s.Invites.PendingCounts(),
             ReadActivity(accounts, ActivityLimit),
             openRows.ToDictionary(id => id, _s.Devices.ForUser),
             _s.Settings.Load().Sharing);
@@ -267,6 +275,7 @@ public sealed partial class SharingViewModel : PageViewModel
         ApplyActivity(data);
         ApplyStatus();
         IsLoaded = true;
+        LoadProblem = null;
         OnPropertyChanged(nameof(HasNoActivity));
         if (removedNear is { } near) RowsRemoved?.Invoke(near.Row);
     }
@@ -276,21 +285,25 @@ public sealed partial class SharingViewModel : PageViewModel
     {
         var locked = data.Locked.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var shown = People.ToDictionary(row => row.Id);
+        PersonRow? invitesGone = null;
         var wanted = data.Accounts
             .OrderBy(a => a.Role == AccountRole.Owner ? 0 : 1)
             .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
             .Select(account =>
             {
                 var row = shown.GetValueOrDefault(account.Id) ?? new PersonRow(account.Id, account.Role);
-                row.Apply(account, locked.Contains(account.Name), SeenText(account));
+                var hadInvites = row.HasPendingInvites;
+                row.Apply(account, locked.Contains(account.Name), SeenText(account), data.PendingInvites.GetValueOrDefault(account.Id));
+                if (hadInvites && !row.HasPendingInvites) invitesGone ??= row;
                 return row;
             })
             .ToList();
 
-        RemovedRow? removed = null;
+        // Cancel invites hides with the last invite, and it may have had the focus.
+        RemovedRow? removed = invitesGone is null ? null : new RemovedRow(invitesGone);
         var staying = wanted.ToHashSet();
         var firstGone = People.ToList().FindIndex(row => !staying.Contains(row));
-        if (firstGone >= 0) removed = new RemovedRow(wanted.ElementAtOrDefault(firstGone) ?? wanted.LastOrDefault());
+        if (firstGone >= 0) removed ??= new RemovedRow(wanted.ElementAtOrDefault(firstGone) ?? wanted.LastOrDefault());
         CollectionSync.Sync(People, wanted);
 
         foreach (var row in wanted.Where(row => row is { Detail: not null, Account: not null }))
@@ -355,8 +368,9 @@ public sealed partial class SharingViewModel : PageViewModel
         var controller = _s.Controller;
         var status = controller.Status;
 
+        // A failed resume stays on in the settings, and showing it on is what lets the owner turn it off.
         _applying = true;
-        IsOn = status is SharingStatus.On or SharingStatus.Starting;
+        IsOn = status is SharingStatus.On or SharingStatus.Starting || controller.ComesBackAtLaunch;
         _applying = false;
 
         StatusLine = status switch
@@ -366,7 +380,9 @@ public sealed partial class SharingViewModel : PageViewModel
             SharingStatus.Failed => "Sharing didn't start",
             _ => OffLine,
         };
-        StatusDetail = status == SharingStatus.On ? $"{ShownAddress()} · {WatchingCount(controller.Watching)}" : "";
+        StatusDetail = status == SharingStatus.On ? $"{ShownAddress()} · {WatchingCount(controller.Watching)}"
+            : controller.ComesBackAtLaunch ? "MediaBoard tries again the next time it starts, unless you turn this off."
+            : "";
         Problem = controller.Problem;
         Warning = controller.Warning;
         ShowFirewallNote = status is SharingStatus.Off or SharingStatus.Failed;
@@ -389,7 +405,7 @@ public sealed partial class SharingViewModel : PageViewModel
         try
         {
             if (!on && _s.Controller.Watching is > 0 and var watching &&
-                !await _dialogs.Confirm(OffQuestion(watching), "Turn off"))
+                !await _dialogs.Confirm(OffQuestion(watching), "Turn off", true))
             {
                 ApplyStatus();
                 return;
@@ -413,13 +429,21 @@ public sealed partial class SharingViewModel : PageViewModel
 
     private bool HasAddress => !string.IsNullOrWhiteSpace(_saved.PublicAddress) || !string.IsNullOrWhiteSpace(_saved.HomeAddress);
 
-    partial void OnPublicAddressChanged(string value) => ConnectionMessage = null;
+    partial void OnPublicAddressChanged(string value)
+    {
+        ConnectionMessage = null;
+        CheckResult = null;
+    }
 
     partial void OnHomeAddressChanged(string value) => ConnectionMessage = null;
 
     partial void OnServerNameChanged(string value) => ConnectionMessage = null;
 
-    partial void OnPortTextChanged(string value) => ConnectionMessage = null;
+    partial void OnPortTextChanged(string value)
+    {
+        ConnectionMessage = null;
+        CheckResult = null;
+    }
 
     partial void OnStartsWithWindowsChanged(bool value)
     {
@@ -464,6 +488,13 @@ public sealed partial class SharingViewModel : PageViewModel
         var publicAddress = NullIfBlank(PublicAddress);
         var homeAddress = NullIfBlank(HomeAddress);
         var serverName = NullIfBlank(ServerName);
+        if (new[] { publicAddress, homeAddress }.OfType<string>().Any(address => !SharingController.IsUsableAddress(address)))
+        {
+            ConnectionMessage = "That address can't be used. Enter a name or IP address, like myhome.example.org.";
+            return;
+        }
+
+        var nameChanged = !string.Equals(serverName, _saved.ServerName, StringComparison.Ordinal);
         try
         {
             _saved = await InTurnAsync(() =>
@@ -488,10 +519,17 @@ public sealed partial class SharingViewModel : PageViewModel
         PortText = port.ToString(CultureInfo.InvariantCulture);
         RouterSteps = StepsFor(port);
         ApplyStatus();
-        ConnectionMessage = _s.Controller.Port is { } running && running != port
-            ? "Saved. The new port applies the next time sharing starts."
-            : "Saved";
+        ConnectionMessage = SavedMessage(_s.Controller.Port is { } running && running != port, nameChanged && _s.Controller.Status == SharingStatus.On);
     }
+
+    // The server took its port and name as it started.
+    private static string SavedMessage(bool newPort, bool newName) => (newPort, newName) switch
+    {
+        (true, true) => "Saved. The new port and library name apply the next time sharing starts.",
+        (true, false) => "Saved. The new port applies the next time sharing starts.",
+        (false, true) => "Saved. The new library name applies the next time sharing starts.",
+        _ => "Saved",
+    };
 
     private static string? NullIfBlank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
@@ -509,6 +547,14 @@ public sealed partial class SharingViewModel : PageViewModel
         if (_s.Controller.Status != SharingStatus.On)
         {
             CheckResult = "Turn sharing on first.";
+            return;
+        }
+
+        // The check goes to the saved address, so it would say nothing about one that's only typed.
+        if (!string.Equals(NullIfBlank(PublicAddress), _saved.PublicAddress, StringComparison.Ordinal) ||
+            !string.Equals(PortText.Trim(), _saved.Port.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            CheckResult = "Save first.";
             return;
         }
 
@@ -535,7 +581,8 @@ public sealed partial class SharingViewModel : PageViewModel
         ConnectionMessage = null;
         if (!await _dialogs.Confirm(
                 "Replace the certificate? Every device stops connecting and everyone needs a new invite. Invites not used yet stop working.",
-                "Replace"))
+                "Replace",
+                true))
         {
             return;
         }
@@ -559,7 +606,7 @@ public sealed partial class SharingViewModel : PageViewModel
     // Thread pool. These invites carry the old fingerprint, so they would fail the client's pin.
     private void CancelPendingInvites()
     {
-        foreach (var invite in _s.People.All().SelectMany(account => _s.Invites.Pending(account.Id))) _s.Invites.Cancel(invite.Id);
+        foreach (var account in _s.People.All()) CancelInvitesOf(account.Id);
     }
 
     // ---- Watching now ----
@@ -595,14 +642,14 @@ public sealed partial class SharingViewModel : PageViewModel
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task StopAsync(WatchingRow? row)
     {
-        if (row is null) return;
+        if (row is null || row.Stopping) return;
 
+        row.Stopping = true;
         try
         {
             await Task.Run(() =>
             {
-                _s.Streams.Stop(row.Id);
-                _s.Log.Add(SharingEvent.StreamStopped, row.UserId, row.Title);
+                if (_s.Streams.Stop(row.Id)) _s.Log.Add(SharingEvent.StreamStopped, row.UserId, row.Title);
             });
         }
         catch (Exception e)
@@ -623,6 +670,7 @@ public sealed partial class SharingViewModel : PageViewModel
 
         row.IsOpen = !row.IsOpen;
         row.Detail = row.IsOpen ? NewDetail(row) : null;
+        if (!row.IsOpen) row.Message = null;
         return row.IsOpen ? RefreshAsync() : Task.CompletedTask;
     }
 
@@ -698,7 +746,7 @@ public sealed partial class SharingViewModel : PageViewModel
         var invite = await TryInviteAsync(account.Id, why => PeopleMessage = $"{name} is added, but no invite was made. {why}");
         if (invite is null)
         {
-            panel.Close();
+            panel.Finish();
             return;
         }
 
@@ -708,6 +756,12 @@ public sealed partial class SharingViewModel : PageViewModel
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task NewInviteAsync(PersonRow? row) => row is not { CanInvite: true } ? Task.CompletedTask : ActAsync(row, async () =>
     {
+        if (!HasAddress)
+        {
+            PointAtConnection();
+            return;
+        }
+
         if (await TryInviteAsync(row.Id, why => row.Message = $"No invite was made. {why}") is { } invite) await ShowInviteAsync(row, invite);
     });
 
@@ -721,7 +775,7 @@ public sealed partial class SharingViewModel : PageViewModel
         }
 
         var question = $"Reset {row.Name}'s password? Their devices sign out, and they'll need the new invite to get back in.";
-        if (!await _dialogs.Confirm(question, "Reset")) return;
+        if (!await _dialogs.Confirm(question, "Reset", true)) return;
 
         await InTurnAsync(() => _s.Accounts.ResetPassword(row.Id));
 
@@ -765,15 +819,15 @@ public sealed partial class SharingViewModel : PageViewModel
         }
 
         row.Message = "Password set.";
-        panel.Close();
+        panel.Finish();
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task ToggleDisabledAsync(PersonRow? row) => row is not { CanManage: true } ? Task.CompletedTask : ActAsync(row, async () =>
     {
         var disable = !row.IsDisabled;
-        var question = $"Disable {row.Name}? Their streams stop and they can't sign in until you enable them. Nothing is deleted.";
-        if (disable && !await _dialogs.Confirm(question, "Disable")) return;
+        var question = $"Disable {row.Name}? Their devices sign out and their streams stop. After you enable them, they'll need to sign in again. Nothing is deleted.";
+        if (disable && !await _dialogs.Confirm(question, "Disable", true)) return;
 
         await InTurnAsync(() => _s.Accounts.Disable(row.Id, disable));
     });
@@ -782,12 +836,22 @@ public sealed partial class SharingViewModel : PageViewModel
     private Task RemoveAsync(PersonRow? row) => row is not { CanManage: true } ? Task.CompletedTask : ActAsync(row, async () =>
     {
         var question = $"Remove {row.Name}? Their watch progress and devices are deleted, and this can't be undone.";
-        if (await _dialogs.Confirm(question, "Remove")) await InTurnAsync(() => _s.Accounts.Remove(row.Id));
+        if (await _dialogs.Confirm(question, "Remove", true)) await InTurnAsync(() => _s.Accounts.Remove(row.Id));
     });
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task SignOutAsync(DeviceRow? device) =>
         device is null ? Task.CompletedTask : ActAsync(People.FirstOrDefault(row => row.Id == device.UserId), () => InTurnAsync(() => _s.Accounts.SignOutDevice(device.Id)));
+
+    [RelayCommand(AllowConcurrentExecutions = true)]
+    private Task CancelInvitesAsync(PersonRow? row) =>
+        row is null ? Task.CompletedTask : ActAsync(row, () => InTurnAsync(() => CancelInvitesOf(row.Id)));
+
+    // Thread pool.
+    private void CancelInvitesOf(int userId)
+    {
+        foreach (var invite in _s.Invites.Pending(userId)) _s.Invites.Cancel(invite.Id);
+    }
 
     private void PointAtConnection()
     {
@@ -801,7 +865,7 @@ public sealed partial class SharingViewModel : PageViewModel
     {
         try
         {
-            return await InTurnAsync(() => _s.Controller.CreateInvite(userId));
+            return await InTurnAsync(() => InviteReplacingOlder(userId));
         }
         catch (InvalidOperationException)
         {
@@ -822,6 +886,15 @@ public sealed partial class SharingViewModel : PageViewModel
         return null;
     }
 
+    // Thread pool. The older ones go only once the new one exists, so a failure leaves them as they were.
+    private string InviteReplacingOlder(int userId)
+    {
+        var older = _s.Invites.Pending(userId);
+        var invite = _s.Controller.CreateInvite(userId);
+        foreach (var pending in older) _s.Invites.Cancel(pending.Id);
+        return invite;
+    }
+
     private async Task ShowInviteAsync(PersonRow row, string invite)
     {
         var panel = new SharingPanel { Step = InviteFor(row.Name, row.IsOwner, invite) };
@@ -830,10 +903,11 @@ public sealed partial class SharingViewModel : PageViewModel
 
     private InviteStep InviteFor(string name, bool isOwner, string invite)
     {
-        const string Life = "It works once, within 7 days. You won't see it again, but you can make another.";
+        var life = "It works once, within 7 days. You won't see it again, but you can make another.";
+        if (_s.Controller.Status != SharingStatus.On) life += " Sharing is off, so it won't work until you turn it on.";
         return isOwner
-            ? new InviteStep("Invite for your other PC", $"Paste this into MediaBoard on your other PC. {Life}", invite, _dialogs.Copy)
-            : new InviteStep($"Invite for {name}", $"Send this to {name}. {Life}", invite, _dialogs.Copy);
+            ? new InviteStep("Invite for your other PC", $"Paste this into MediaBoard on your other PC. {life}", invite, _dialogs.Copy)
+            : new InviteStep($"Invite for {name}", $"Send this to {name}. {life}", invite, _dialogs.Copy);
     }
 
     // An invite can't be read back, so it goes when the panel does.
@@ -979,71 +1053,8 @@ public sealed partial class SharingViewModel : PageViewModel
         IReadOnlyList<Account> Accounts,
         IReadOnlyList<FolderRow> Folders,
         IReadOnlyList<string> Locked,
+        IReadOnlyDictionary<int, int> PendingInvites,
         List<(SharingLogEntry Entry, string? Name)> Activity,
         Dictionary<int, IReadOnlyList<Device>> Devices,
         SharingSettings Sharing);
-}
-
-/// <summary>
-/// Runs an action on the UI thread at most once a period, however often it's asked for and from whatever thread: the
-/// first ask at once, and anything asked meanwhile once when the period ends.
-/// </summary>
-internal sealed class UiThrottle(TimeProvider time, TimeSpan period, Action action)
-{
-    private readonly Lock _gate = new();
-    private ITimer? _timer;
-    private bool _waiting;
-    private bool _asked;
-
-    public void Request()
-    {
-        lock (_gate)
-        {
-            if (_waiting)
-            {
-                _asked = true;
-                return;
-            }
-
-            _waiting = true;
-            Arm();
-        }
-
-        Dispatcher.UIThread.Post(action);
-    }
-
-    public void Stop()
-    {
-        lock (_gate)
-        {
-            _timer?.Dispose();
-            _timer = null;
-            _waiting = false;
-            _asked = false;
-        }
-    }
-
-    private void OnPeriodEnded()
-    {
-        lock (_gate)
-        {
-            if (!_waiting) return;
-            if (!_asked)
-            {
-                _waiting = false;
-                return;
-            }
-
-            _asked = false;
-            Arm();
-        }
-
-        Dispatcher.UIThread.Post(action);
-    }
-
-    private void Arm()
-    {
-        if (_timer is null) _timer = time.CreateTimer(_ => OnPeriodEnded(), null, period, Timeout.InfiniteTimeSpan);
-        else _timer.Change(period, Timeout.InfiniteTimeSpan);
-    }
 }

@@ -5,7 +5,11 @@ namespace MediaBoard.Core.Library;
 /// <param name="FullPath">Server side only. Never serialised.</param>
 public sealed record ReachableFile(
     int FileId, int TitleId, string FullPath, string FileName, string TitleName,
-    string? EpisodeLabel, double? DurationS, bool Missing);
+    string? EpisodeLabel, double? DurationS, bool Missing)
+{
+    /// <summary>The title with its episode, as people read it.</summary>
+    public string Title => EpisodeLabel is { } label ? $"{TitleName} {label}" : TitleName;
+}
 
 /// <summary>
 /// Decides what a viewer may reach by id. It reads the same <see cref="LibrarySnapshot"/> the library queries do,

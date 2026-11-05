@@ -66,6 +66,16 @@ public sealed class InviteStore(LibraryDatabase db, TimeProvider? time = null)
             .Select(row => row.ToInvite()).ToList();
     }
 
+    /// <returns>How many live invites each account has. An account with none isn't listed.</returns>
+    public IReadOnlyDictionary<int, int> PendingCounts()
+    {
+        using var connection = db.Open();
+        return connection.Query<CountRow>(
+                "SELECT user_id AS UserId, COUNT(*) AS Count FROM invites WHERE used_at IS NULL AND expires_at > @now GROUP BY user_id",
+                new { now = Now() })
+            .ToDictionary(row => (int)row.UserId, row => (int)row.Count);
+    }
+
     public void Cancel(int inviteId)
     {
         using var connection = db.Open();
@@ -76,6 +86,12 @@ public sealed class InviteStore(LibraryDatabase db, TimeProvider? time = null)
         connection.Execute("DELETE FROM invites WHERE user_id = @userId", new { userId }, transaction);
 
     private string Now() => FileStore.FormatTime(_time.GetUtcNow());
+
+    private sealed class CountRow
+    {
+        public long UserId { get; set; }
+        public long Count { get; set; }
+    }
 
     private sealed class Row
     {

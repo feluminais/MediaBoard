@@ -45,7 +45,10 @@ public sealed class Dialogs
     }
 
     /// <summary>Asks <paramref name="question"/> with two buttons; true when the user pressed <paramref name="yes"/>.</summary>
-    public async Task<bool> ConfirmAsync(string question, string yes)
+    /// <param name="question">What to ask.</param>
+    /// <param name="yes">The button that goes ahead.</param>
+    /// <param name="danger">The answer can't easily be undone, so the button looks like the Remove it answers for.</param>
+    public async Task<bool> ConfirmAsync(string question, string yes, bool danger = false)
     {
         if (ShownOwner() is not { } owner) return false;
 
@@ -58,7 +61,7 @@ public sealed class Dialogs
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
-        var accept = new Button { Content = yes, Classes = { "accent" }, MinWidth = 88 };
+        var accept = new Button { Content = yes, Classes = { danger ? "danger" : "accent" }, MinWidth = 88 };
         var cancel = new Button { Content = "Cancel", MinWidth = 88, IsCancel = true };
         accept.Click += (_, _) => dialog.Close(true);
         cancel.Click += (_, _) => dialog.Close(false);

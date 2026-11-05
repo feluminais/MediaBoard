@@ -20,6 +20,9 @@ public sealed partial class WatchingRow(StreamSession session) : ObservableObjec
 
     public string Title { get; } = session.Title;
 
+    /// <summary>Stop has been pressed, so another press has nothing to do.</summary>
+    internal bool Stopping { get; set; }
+
     /// <summary>"12:05 of 1:30:00", or "12:05" while the length isn't known.</summary>
     [ObservableProperty]
     public partial string Position { get; private set; } = "";
@@ -65,6 +68,13 @@ public sealed partial class PersonRow(int id, AccountRole role) : ObservableObje
     [ObservableProperty]
     public partial string Access { get; private set; } = "";
 
+    /// <summary>"1 invite pending", or empty.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingInvites))]
+    public partial string PendingInvites { get; private set; } = "";
+
+    public bool HasPendingInvites => PendingInvites.Length > 0;
+
     /// <summary>"Seen 5 min ago", "Hasn't joined yet".</summary>
     [ObservableProperty]
     public partial string Seen { get; private set; } = "";
@@ -94,8 +104,9 @@ public sealed partial class PersonRow(int id, AccountRole role) : ObservableObje
     /// <summary>The account as last read, for filling the detail the moment the row opens.</summary>
     internal Account? Account { get; private set; }
 
-    internal void Apply(Account account, bool isLocked, string seen)
+    internal void Apply(Account account, bool isLocked, string seen, int pendingInvites)
     {
+        PendingInvites = pendingInvites == 0 ? "" : $"{Plural.Of(pendingInvites, "invite")} pending";
         Account = account;
         Name = account.Name;
         IsDisabled = account.Disabled;
@@ -123,13 +134,19 @@ public sealed partial class PersonDetail(PersonRow row, Action<PersonDetail> fol
 
     /// <summary>On, the person also gets folders added later.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoFolders))]
     public partial bool AllFolders { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoDevices))]
     public partial bool DevicesLoaded { get; private set; }
 
-    public bool HasNoDevices => DevicesLoaded && Devices.Count == 0;
+    public bool HasNoDevices => DevicesLoaded && Devices.Count == 0 && Row.CanManage;
+
+    /// <summary>Everyone's row lists devices. The owner's shows them only when there are some, so a lost PC can be signed out.</summary>
+    public bool ShowsDevices => Row.CanManage || Devices.Count > 0;
+
+    public bool HasNoFolders => !AllFolders && Folders.Count == 0;
 
     /// <summary>Null for no choice, or the ticked folders.</summary>
     internal IReadOnlyCollection<int>? ChosenFolders =>
@@ -150,6 +167,7 @@ public sealed partial class PersonDetail(PersonRow row, Action<PersonDetail> fol
                 return choice;
             }).ToList();
             CollectionSync.Sync(Folders, choices);
+            OnPropertyChanged(nameof(HasNoFolders));
         }
         finally
         {
@@ -171,7 +189,12 @@ public sealed partial class PersonDetail(PersonRow row, Action<PersonDetail> fol
         var gone = shown.Keys.Except(devices.Select(d => d.Id)).Any();
         CollectionSync.Sync(Devices, rows);
         DevicesLoaded = true;
-        if (before != Devices.Count) OnPropertyChanged(nameof(HasNoDevices));
+        if (before != Devices.Count)
+        {
+            OnPropertyChanged(nameof(HasNoDevices));
+            OnPropertyChanged(nameof(ShowsDevices));
+        }
+
         return gone;
     }
 

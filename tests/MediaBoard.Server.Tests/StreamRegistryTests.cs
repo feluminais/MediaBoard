@@ -46,6 +46,46 @@ public sealed class StreamRegistryTests
     }
 
     [Fact]
+    public void Started_RaisedOncePerPlayback_WithItsEpisode()
+    {
+        var started = new List<StreamSession>();
+        _streams.Started += started.Add;
+
+        var first = Open(Who(), File(episode: "S01E02"));
+        first.Dispose();
+        Open(Who(), File(episode: "S01E02")); // a seek reconnects
+
+        Assert.Equal("Heat S01E02", Assert.Single(started).Title);
+
+        _streams.Close(first.Session);
+        Open(Who(), File(episode: "S01E02"));
+
+        Assert.Equal(2, started.Count);
+    }
+
+    [Fact]
+    public void Started_ListenerFails_TheStreamStillOpens()
+    {
+        var seen = 0;
+        _streams.Started += _ => throw new InvalidOperationException("The log is full.");
+        _streams.Started += _ => seen++;
+
+        Open(Who(), File());
+
+        Assert.Single(_streams.Current);
+        Assert.Equal(1, seen);
+    }
+
+    [Fact]
+    public void Stop_SaysWhetherItStoppedAnything()
+    {
+        var lease = Open(Who(), File());
+
+        Assert.True(_streams.Stop(lease.Session));
+        Assert.False(_streams.Stop(lease.Session));
+    }
+
+    [Fact]
     public void OverlappingRanges_AreOneSession()
     {
         var changes = 0;

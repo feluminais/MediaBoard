@@ -65,6 +65,12 @@ public sealed class SharingController(
     /// <summary>Sharing is on, but something will get in the way of connections.</summary>
     public string? Warning => _state.Warning;
 
+    /// <summary>
+    /// A failed start with the setting still on, as after a failed resume: the next launch tries again unless the owner
+    /// turns sharing off.
+    /// </summary>
+    public bool ComesBackAtLaunch => _state.ComesBackAtLaunch;
+
     /// <summary>The port in use while on. The saved one can differ: a change waits for the next start.</summary>
     public int? Port => _state.Port;
 
@@ -157,6 +163,9 @@ public sealed class SharingController(
         await InTurnAsync(async () => replaced = await ReplaceInTurnAsync().ConfigureAwait(false)).ConfigureAwait(false);
         return replaced;
     }
+
+    /// <summary>Whether <see cref="CreateInvite"/> could use what the owner typed as an address.</summary>
+    public static bool IsUsableAddress(string typed) => ConnectAddress(typed, 1) is not null;
 
     private static string NameOf(SharingSettings sharing) => sharing.ServerName ?? $"{Environment.UserName}'s library";
 
@@ -318,7 +327,7 @@ public sealed class SharingController(
     private void Fail(string problem)
     {
         hub.Log(ActivityLevel.Error, problem);
-        Set(new State(SharingStatus.Failed, problem));
+        Set(new State(SharingStatus.Failed, problem, ComesBackAtLaunch: settings.Load().Sharing.On));
     }
 
     private void Remember(bool on)
@@ -354,5 +363,6 @@ public sealed class SharingController(
     /// <param name="Problem">See <see cref="SharingController.Problem"/>.</param>
     /// <param name="Warning">See <see cref="SharingController.Warning"/>.</param>
     /// <param name="Port">See <see cref="SharingController.Port"/>.</param>
-    private sealed record State(SharingStatus Status, string? Problem = null, string? Warning = null, int? Port = null);
+    /// <param name="ComesBackAtLaunch">See <see cref="SharingController.ComesBackAtLaunch"/>.</param>
+    private sealed record State(SharingStatus Status, string? Problem = null, string? Warning = null, int? Port = null, bool ComesBackAtLaunch = false);
 }

@@ -12,7 +12,10 @@ namespace MediaBoard.Desktop.ViewModels;
 /// same failure is not logged again until a query succeeds) and never reaches the dispatcher as an exception. An
 /// apply step that throws is logged the same way, since callers do not await the task.
 /// </summary>
-public sealed class BackgroundQuery(ActivityHub hub, string what)
+/// <param name="hub">Where failures are logged.</param>
+/// <param name="what">What loads, for the log.</param>
+/// <param name="failed">Called on the UI thread each time the newest query fails, or null.</param>
+public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed = null)
 {
     public const string FailureHint = "Restart MediaBoard to try again.";
 
@@ -55,6 +58,7 @@ public sealed class BackgroundQuery(ActivityHub hub, string what)
                 return;
             }
 
+            failed?.Invoke();
             if (e.Message == _lastFailure) return;
             _lastFailure = e.Message;
             hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", FailureHint);

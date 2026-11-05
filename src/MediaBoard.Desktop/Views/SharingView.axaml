@@ -61,6 +61,7 @@
                 <StackPanel Spacing="4" IsVisible="{Binding Row.CanManage}">
                     <TextBlock Classes="heading" Text="Folders" />
                     <CheckBox Content="All folders" IsChecked="{Binding AllFolders}" />
+                    <TextBlock Classes="muted" Text="No folders yet" IsVisible="{Binding HasNoFolders}" />
                     <!-- A library can have many folders: they scroll in a box instead of growing the page. -->
                     <ItemsControl ItemsSource="{Binding Folders}" IsVisible="{Binding !AllFolders}" MaxHeight="180">
                         <ItemsControl.Template>
@@ -85,7 +86,7 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <StackPanel Spacing="4" IsVisible="{Binding Row.CanManage}">
+                <StackPanel Spacing="4" IsVisible="{Binding ShowsDevices}">
                     <TextBlock Classes="heading" Text="Devices" />
                     <TextBlock Classes="muted" Text="No devices" IsVisible="{Binding HasNoDevices}" />
                     <ItemsControl ItemsSource="{Binding Devices}">
@@ -116,6 +117,10 @@
                             ToolTip.Tip="Adds a device. Someone with a password enters it after pasting."
                             Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).NewInviteCommand}"
                             CommandParameter="{Binding Row}" />
+                    <Button Classes="small" Content="Cancel invites" IsVisible="{Binding Row.HasPendingInvites}"
+                            ToolTip.Tip="{Binding Row.PendingInvites}"
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).CancelInvitesCommand}"
+                            CommandParameter="{Binding Row}" />
                     <Button Classes="small" Content="Set password" IsVisible="{Binding Row.IsOwner}"
                             ToolTip.Tip="For signing in from another PC."
                             Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).SetPasswordCommand}"
@@ -144,6 +149,8 @@
             </Grid.ColumnDefinitions>
         <StackPanel Spacing="16" Margin="0,0,12,16">
             <TextBlock Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,4" />
+            <TextBlock Text="{Binding LoadProblem}" IsVisible="{Binding HasLoadProblem}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource ErrorTextBrush}" />
 
             <!-- The switch, and the connection settings behind it. -->
             <Border Classes="panel">
@@ -242,10 +249,11 @@
                                     <StackPanel>
                                         <DockPanel>
                                             <TextBlock DockPanel.Dock="Left" Text="{Binding Person}" FontWeight="SemiBold" MaxWidth="240"
-                                                       TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Classes="muted" Text="{Binding Device}" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                                                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Person}" />
+                                            <TextBlock Classes="muted" Text="{Binding Device}" Margin="8,0,0,0" TextTrimming="CharacterEllipsis"
+                                                       ToolTip.Tip="{Binding Device}" />
                                         </DockPanel>
-                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
                                         <TextBlock Classes="muted" Text="{Binding Position}" FontSize="{DynamicResource SmallFontSize}" />
                                     </StackPanel>
                                 </DockPanel>
@@ -291,9 +299,14 @@
                                                             <TextBlock Text="Disabled" />
                                                         </Border>
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                               ToolTip.Tip="{Binding Name}" />
                                                 </DockPanel>
-                                                <TextBlock Classes="muted" Text="{Binding Access}" FontSize="{DynamicResource SmallFontSize}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Classes="muted" Text="{Binding Access}" FontSize="{DynamicResource SmallFontSize}" />
+                                                    <TextBlock Classes="muted" Text="{Binding PendingInvites}" IsVisible="{Binding HasPendingInvites}"
+                                                               FontSize="{DynamicResource SmallFontSize}" />
+                                                </StackPanel>
                                             </StackPanel>
                                             <TextBlock Grid.Column="2" Classes="muted" Text="{Binding Seen}" VerticalAlignment="Center"
                                                        FontSize="{DynamicResource SmallFontSize}" />
@@ -329,7 +342,8 @@
                                 <DockPanel Margin="0,2">
                                     <TextBlock DockPanel.Dock="Left" Classes="muted" Text="{Binding When}" Width="84"
                                                FontSize="{DynamicResource SmallFontSize}" VerticalAlignment="Center" />
-                                    <SelectableTextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" IsTabStop="False" />
+                                    <SelectableTextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" IsTabStop="False"
+                                                         ToolTip.Tip="{Binding Text}" />
                                 </DockPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

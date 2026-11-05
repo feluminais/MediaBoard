@@ -9,6 +9,7 @@ using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Settings;
+using MediaBoard.Core.Storage;
 using MediaBoard.Desktop.Tests.Support;
 using MediaBoard.Desktop.ViewModels;
 using MediaBoard.Desktop.Views;
@@ -104,6 +105,31 @@ public sealed class SharingViewTests
     }
 
     [AvaloniaFact]
+    public async Task PanelHeldOpen_StillClosesWithItsOwner()
+    {
+        var running = new TaskCompletionSource();
+        var panel = new SharingPanel();
+        var step = new AddPersonStep([], _ => running.Task) { Name = "Anna" };
+        panel.Step = step;
+        var owner = new Window();
+        owner.Show();
+        var dialog = new SharingDialog(panel);
+        var shown = dialog.ShowDialog(owner);
+        Settle(dialog);
+        var create = step.CreateCommand.ExecuteAsync(null);
+
+        dialog.Close();
+        Settle(dialog);
+        Assert.False(shown.IsCompleted); // the owner's close waits for the step
+
+        owner.Close();
+        await Ui.WaitUntil(() => shown.IsCompleted); // the app closing doesn't
+
+        running.SetResult();
+        await create;
+    }
+
+    [AvaloniaFact]
     public async Task FullLog_BuildsOnlyTheLinesThatShow()
     {
         var rows = Enumerable.Range(0, 5000).Select(i => new SharingActivityRow(i, "10:00", $"Entry {i}")).ToList();
@@ -141,7 +167,7 @@ public sealed class SharingViewTests
     }
 
     [AvaloniaFact]
-    public async Task OwnerRow_OffersOnlySetPasswordAndNewInvite()
+    public async Task OwnerRow_OffersItsDevices_NoFoldersOrViewerActions()
     {
         await using var world = new SharingWorld();
         var page = SharingViewModelTests.Build(world);
@@ -153,6 +179,13 @@ public sealed class SharingViewTests
 
         Assert.Equal(["New invite", "Set password"], Actions(window, page.People[0]));
         Assert.DoesNotContain(window.GetVisualDescendants().OfType<CheckBox>(), box => box.IsEffectivelyVisible);
+
+        world.Services.GetRequiredService<DeviceStore>().Issue(LibraryDatabase.OwnerId, "Laptop", "198.51.100.2");
+        world.Services.GetRequiredService<InviteStore>().Create(LibraryDatabase.OwnerId);
+        await page.RefreshAsync();
+        Settle(window);
+
+        Assert.Equal(["Sign out", "New invite", "Cancel invites", "Set password"], Actions(window, page.People[0]));
         window.Close();
     }
 
@@ -234,6 +267,26 @@ public sealed class SharingViewTests
     }
 
     [AvaloniaFact]
+    public async Task CancellingInvites_PutsTheFocusOnTheRow()
+    {
+        await using var world = new SharingWorld();
+        var anna = world.Accounts.AddPerson("Anna", null);
+        world.Services.GetRequiredService<InviteStore>().Create(anna.Id);
+        var page = SharingViewModelTests.Build(world);
+        page.Opened();
+        var window = await Show(page);
+        var row = await OpenRow(page, window, "Anna");
+        Button(window, "Cancel invites").Focus();
+
+        await page.CancelInvitesCommand.ExecuteAsync(row);
+        Settle(window);
+
+        var focused = Assert.IsType<Button>(window.FocusManager!.GetFocusedElement());
+        Assert.Same(row, focused.DataContext);
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public async Task ARefresh_LeavesTheFocusWhereItWas()
     {
         await using var world = new SharingWorld();
@@ -296,6 +349,10 @@ public sealed class SharingViewTests
 
         var copy = Assert.IsType<Button>(dialog.FocusManager!.GetFocusedElement());
         Assert.Equal("Copy", copy.Content);
+
+        dialog.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        Settle(dialog);
+        Assert.False(shown.IsCompleted); // not copied, so the first Escape warns
 
         dialog.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         await Ui.WaitUntil(() => shown.IsCompleted);

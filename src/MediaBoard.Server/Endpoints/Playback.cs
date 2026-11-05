@@ -1,3 +1,4 @@
+using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Storage;
@@ -14,7 +15,7 @@ namespace MediaBoard.Server.Endpoints;
 /// </summary>
 internal static class Playback
 {
-    public static void Map(IEndpointRouteBuilder api, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
+    public static void Map(IEndpointRouteBuilder api, SharedLibrary shared, StreamRegistry streams, StreamWatch watch, SharingLog log)
     {
         api.MapGet("files/{id:int}", (HttpContext context, int id) =>
         {
@@ -35,7 +36,7 @@ internal static class Playback
         api.MapPut("files/{id:int}/progress", async (HttpContext context, int id) =>
         {
             var who = DeviceAuth.Viewer(context);
-            if (shared.Access.File(who.Viewer, id) is null) return ApiResults.Error(ApiErrorCode.NotFound);
+            if (shared.Access.File(who.Viewer, id) is not { } file) return ApiResults.Error(ApiErrorCode.NotFound);
 
             var entry = await ApiResults.ReadJson<ProgressEntry>(context);
             if (entry is null || !IsSound(entry)) return ApiResults.Error(ApiErrorCode.BadRequest);
@@ -44,7 +45,10 @@ internal static class Playback
             streams.Heartbeat(who.Device.Id, id, entry.PositionS, entry.DurationS);
             try
             {
-                shared.Progress.SaveIfNewer(who.Account.Id, id, entry);
+                var wasWatched = IsWatched(shared, who.Account.Id, id);
+                if (shared.Progress.SaveIfNewer(who.Account.Id, id, entry) && entry.Watched == true && !wasWatched)
+                    log.Add(SharingEvent.FinishedWatching, who.Account.Id, file.Title);
+
                 return Results.NoContent();
             }
             catch (ArgumentException)
@@ -55,15 +59,19 @@ internal static class Playback
 
         api.MapPut("files/{id:int}/watched", async (HttpContext context, int id) =>
         {
-            var viewer = DeviceAuth.Viewer(context).Viewer;
-            if (shared.Access.File(viewer, id) is null) return ApiResults.Error(ApiErrorCode.NotFound);
+            var who = DeviceAuth.Viewer(context);
+            var viewer = who.Viewer;
+            if (shared.Access.File(viewer, id) is not { } file) return ApiResults.Error(ApiErrorCode.NotFound);
 
             var body = await ApiResults.ReadJson<WatchedRequest>(context);
             if (body is not { Watched: { } watched }) return ApiResults.Error(ApiErrorCode.BadRequest);
 
             try
             {
+                var wasWatched = IsWatched(shared, who.Account.Id, id);
                 shared.Owner.ForViewer(viewer).SetWatched(id, watched);
+                if (watched && !wasWatched) log.Add(SharingEvent.FinishedWatching, who.Account.Id, file.Title);
+
                 return Results.NoContent();
             }
             catch (Exception e) when (e is ArgumentException || ProgressStore.IsUnknownFile(e))
@@ -72,6 +80,8 @@ internal static class Playback
             }
         });
     }
+
+    private static bool IsWatched(SharedLibrary shared, int userId, int fileId) => shared.Progress.Get(userId, fileId)?.Watched == true;
 
     private static bool IsSound(ProgressEntry entry) =>
         double.IsFinite(entry.PositionS) && entry.PositionS >= 0

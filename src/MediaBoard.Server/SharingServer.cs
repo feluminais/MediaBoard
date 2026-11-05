@@ -34,7 +34,7 @@ public sealed class PortInUseException(int port, Exception innerException) : Exc
 /// <param name="logs">Where the host's warnings and errors go, or null for nowhere.</param>
 /// <param name="time">The clock, or null for the real one.</param>
 public sealed class SharingServer(
-    AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, StreamRegistry streams,
+    AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, StreamRegistry streams, SharingLog log,
     ILoggerProvider? logs = null, TimeProvider? time = null)
 {
     private const int MaxBodyBytes = 64 * 1024;
@@ -125,7 +125,7 @@ public sealed class SharingServer(
         Search.Map(api, library);
 
         var watch = new StreamWatch(streams, service, accounts, devices, library);
-        Playback.Map(api, library, streams, watch);
+        Playback.Map(api, library, streams, watch, log);
         var events = new EventHub(service, streams, library.Owner, _time);
         Events.Map(api, events, watch, app.Lifetime.ApplicationStopping);
         // Not started by hand here: a start that fails on the port would leave these listening to the events for good.
@@ -133,10 +133,12 @@ public sealed class SharingServer(
         {
             watch.Start();
             events.Start();
+            streams.Started += LogStarted;
         });
         // Kestrel waits for open requests while it stops, and a stream would use up the whole timeout.
         app.Lifetime.ApplicationStopping.Register(() =>
         {
+            streams.Started -= LogStarted;
             events.Dispose();
             watch.Dispose();
             streams.CloseAll();
@@ -144,6 +146,8 @@ public sealed class SharingServer(
 
         authenticated.MapFallback("{*path}", () => ApiResults.Error(ApiErrorCode.NotFound));
     }
+
+    private void LogStarted(StreamSession session) => log.Add(SharingEvent.StartedWatching, session.UserId, session.Title);
 
     // Kestrel enforces the limit as a body is read, which a chunked body needs. A declared length can be refused at once.
     private static async Task AnswerBadBodies(HttpContext context, RequestDelegate next)

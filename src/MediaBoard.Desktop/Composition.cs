@@ -169,7 +169,7 @@ public static class Composition
                 sp.GetRequiredService<IFolderActions>(),
                 sp.GetRequiredService<ActivityHub>(),
                 dialogs.PickFolderAsync,
-                question => dialogs.ConfirmAsync(question, "Remove"));
+                question => dialogs.ConfirmAsync(question, "Remove", danger: true));
         });
         services.AddSingleton(sp =>
         {
@@ -291,6 +291,7 @@ public static class Composition
             sp.GetRequiredService<DeviceStore>(),
             sp.GetRequiredService<SharedLibrary>(),
             sp.GetRequiredService<StreamRegistry>(),
+            sp.GetRequiredService<SharingLog>(),
             time: sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => new SharingController(
             sp.GetRequiredService<SettingsStore>(),
