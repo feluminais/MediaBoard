@@ -97,6 +97,19 @@ public sealed class PlaybackSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task Ended_UnknownDuration_LocalSource_StillMarksWatched()
+    {
+        _source.Add(new PlayTarget(7, Url, "Local", DurationS: null, Saved: null, Missing: false));
+        await _service.PlayAsync(7, fromStart: false, CancellationToken.None);
+        var session = _sessions[^1];
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(120)));
+
+        session.Raise(new PlaybackEvent.Ended());
+
+        Assert.Equal([7], _sink.Watched);
+    }
+
+    [Fact]
     public async Task PlayOtherFile_ResolvesOnce()
     {
         _source.Add(new PlayTarget(7, Url, "Remote", 6000, Saved: null, Missing: false));
@@ -131,6 +144,8 @@ public sealed class PlaybackSourceTests : IDisposable
     {
         public List<(int FileId, double PositionS, double DurationS)> Saves { get; } = [];
 
+        public List<int> Watched { get; } = [];
+
         public Exception? Failure { get; set; }
 
         public void Save(int fileId, double positionS, double durationS)
@@ -142,6 +157,7 @@ public sealed class PlaybackSourceTests : IDisposable
         public void SetWatched(int fileId, bool watched)
         {
             if (Failure is not null) throw Failure;
+            if (watched) Watched.Add(fileId);
         }
     }
 }

@@ -21,7 +21,10 @@ public interface IStreamUrls
     /// <summary>The file behind a URL from <see cref="UrlFor"/>, or null. Answers from memory: it runs under the session gate.</summary>
     int? FileOf(string locator);
 
-    /// <summary>Nothing will use this URL again: its session ended or never began. Must not block.</summary>
+    /// <summary>
+    /// Nothing will use this URL again: its session ended or never began. Any way of ending a session can race a stop, so a
+    /// URL can be released more than once, and a repeat must change nothing. Must not block.
+    /// </summary>
     void Release(string url);
 
     /// <summary>

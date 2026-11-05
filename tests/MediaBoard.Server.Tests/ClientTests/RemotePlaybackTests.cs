@@ -528,6 +528,45 @@ public sealed class RemotePlaybackTests
         Assert.Null(world.Outbox.Waiting(world.File));
     }
 
+    // A file not yet probed, on this viewer's first play, with a player that gives no length: 115 s of nobody knows how much.
+    [Theory]
+    [MemberData(nameof(WaysToLeave))]
+    public async Task EndedWithUnknownDuration_ThenTheWholeFileClaimed_KeepsLastPosition_NotWatched(string way)
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        var (other, _) = await world.Live.AddFilmAsync("Ronin (1998).mkv", 4096);
+        await world.PlayAsync();
+        var player = world.Player;
+        player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(115)));
+        player.Raise(new PlaybackEvent.Paused());
+        player.Raise(new PlaybackEvent.Ended());
+
+        Assert.NotEqual(true, world.Outbox.Waiting(world.File)?.Watched);
+
+        player.Position = TimeSpan.FromSeconds(Duration);
+        switch (way)
+        {
+            case "Stop":
+                await world.Service.StopAsync(closePlayer: true, Ct);
+                break;
+            case "PlayAnother":
+                await world.Service.PlayAsync(other, fromStart: false, Ct);
+                break;
+            case "Replay":
+                await world.PlayAsync();
+                Assert.Equal(TimeSpan.FromSeconds(115), Assert.Single(world.Player.Starts).StartAt);
+                break;
+            default:
+                await world.Service.SavePositionAsync(Ct);
+                break;
+        }
+
+        var waiting = world.Outbox.Waiting(world.File);
+        Assert.Equal(115, waiting?.PositionS);
+        Assert.NotEqual(true, waiting?.Watched);
+    }
+
     [Fact]
     public async Task EndedOnAResumeBeforeAnyReport_KeepsTheServersPosition_NotWatched()
     {
