@@ -490,6 +490,81 @@ public sealed class RemotePlaybackTests
         Assert.NotEqual(true, waiting?.Watched);
     }
 
+    // A stream that drops before the player's first report. MPC-HC reports every 5 s, so a real file ending this way is a
+    // clip under 5 s, and that clip staying unwatched costs far less than a film marked watched.
+    [Theory]
+    [MemberData(nameof(WaysToLeave))]
+    public async Task EndedWithNoKnownPosition_ThenTheWholeFileClaimed_SavesNothing_NotWatched(string way)
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        var (other, _) = await world.Live.AddFilmAsync("Ronin (1998).mkv", 4096);
+        await world.PlayAsync();
+        var player = world.Player;
+        player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Paused());
+        player.Raise(new PlaybackEvent.Ended());
+
+        Assert.Null(world.Outbox.Waiting(world.File));
+
+        player.Position = TimeSpan.FromSeconds(Duration);
+        switch (way)
+        {
+            case "Stop":
+                await world.Service.StopAsync(closePlayer: true, Ct);
+                break;
+            case "PlayAnother":
+                await world.Service.PlayAsync(other, fromStart: false, Ct);
+                break;
+            case "Replay":
+                await world.PlayAsync();
+                Assert.Null(Assert.Single(world.Player.Starts).StartAt);
+                break;
+            default:
+                await world.Service.SavePositionAsync(Ct);
+                break;
+        }
+
+        Assert.Null(world.Outbox.Waiting(world.File));
+    }
+
+    [Fact]
+    public async Task EndedOnAResumeBeforeAnyReport_KeepsTheServersPosition_NotWatched()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        world.SaveOnServer(600);
+        await world.PlayAsync();
+        var player = world.Player;
+        player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Ended());
+
+        player.Position = TimeSpan.FromSeconds(Duration);
+        await world.Service.StopAsync(closePlayer: true, Ct);
+
+        Assert.Null(world.Outbox.Waiting(world.File));
+        var stored = world.Live.Fixture.Progress.Get(world.Live.Sam.Id, world.File);
+        Assert.Equal(600, stored?.PositionS);
+        Assert.False(stored?.Watched);
+    }
+
+    [Fact]
+    public async Task EndedWithNoKnownPosition_ThenPlayingAgain_TrustsThePlayerAgain()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+        var player = world.Player;
+        player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Ended());
+
+        player.Raise(new PlaybackEvent.Playing());
+        player.Position = TimeSpan.FromSeconds(300);
+        await world.Service.StopAsync(closePlayer: true, Ct);
+
+        Assert.Equal(300, world.Outbox.Waiting(world.File)?.PositionS);
+    }
+
     [Fact]
     public async Task EarlyEnded_ThenPlayingAgain_TrustsThePlayerAgain()
     {

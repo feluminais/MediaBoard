@@ -16,8 +16,9 @@ public interface IPlaybackSource
 
     /// <summary>
     /// Whether the player reads over a link that can break without it saying so. A player that lost its stream reports
-    /// Ended early and then claims the whole file, so <see cref="PlaybackService"/> stops believing its positions after an
-    /// Ended that doesn't count as watched, until it plays again. A file on this PC can't go that way.
+    /// Ended early and then claims the whole file. So <see cref="PlaybackService"/> doesn't count an Ended with no position
+    /// known, and after any Ended that doesn't count it stops believing the player's positions until it plays again. A file
+    /// on this PC can't go that way.
     /// </summary>
     bool PlayerCanLoseItsStream => false;
 

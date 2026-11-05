@@ -515,11 +515,14 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
             case PlaybackEvent.Ended:
                 SaveLastPosition(playing);
-                var counts = WatchRules.EndedCountsAsWatched(playing.LastPosition, playing.Duration);
+
+                // A player that lost its stream without anyone hearing of it now claims the whole file, for as long as it
+                // sits here. With no position yet, the stream may have dropped before the first report, so that proves nothing.
+                var canLose = _source.PlayerCanLoseItsStream;
+                var counts = WatchRules.EndedCountsAsWatched(playing.LastPosition, playing.Duration) && !(canLose && playing.LastPosition is null);
                 if (counts && !playing.Marked) MarkWatched(playing);
 
-                // A player that lost its stream without anyone hearing of it now claims the whole file, for as long as it sits here.
-                playing.EndedEarly = !counts && _source.PlayerCanLoseItsStream;
+                playing.EndedEarly = !counts && canLose;
                 Finish(playing);
                 break;
 
