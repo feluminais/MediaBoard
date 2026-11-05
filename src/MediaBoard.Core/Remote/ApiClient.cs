@@ -54,7 +54,7 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
     /// <summary>Blocks the caller. Safe on the UI thread, where a wait on an async call could deadlock.</summary>
     /// <exception cref="ApiException">The server refused.</exception>
     /// <exception cref="ServerUnreachableException">No address gave a usable answer in time.</exception>
-    /// <exception cref="IdentityChangedException">Every address answered with another certificate.</exception>
+    /// <exception cref="IdentityChangedException">An address showed another certificate and none passed the pin.</exception>
     public T Get<T>(string route)
     {
         using var response = Exchange(root => Request(HttpMethod.Get, root + route));
@@ -240,7 +240,7 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         Exception? failure = null;
         var reached = false;
-        var wrongIdentities = 0;
+        var wrongIdentity = false;
 
         foreach (var root in InTryOrder())
         {
@@ -260,7 +260,7 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
             catch (Exception e) when (e is HttpRequestException || (e is OperationCanceledException && !ct.IsCancellationRequested))
             {
                 failure = e;
-                if (IsWrongIdentity(e)) wrongIdentities++;
+                wrongIdentity |= IsWrongIdentity(e);
                 reached = timeout.IsCancellationRequested || !NeverReachedTheServer(e);
                 if (reached) break;
             }
@@ -268,8 +268,10 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
 
         if (reached) throw new ServerUnreachableException(failure);
 
-        // With any address unaccounted for, the real server may be behind it, and trying again is the right answer.
-        if (wrongIdentities > 0 && wrongIdentities == _roots.Count)
+        // A dead address says nothing either way. Invites list the home address first, so away from home one is always
+        // dead, and waiting for it to agree would keep a viewer from ever hearing that the certificate was replaced.
+        // The price is a false alarm from a stranger on that port at the home address while the real server is down.
+        if (wrongIdentity)
         {
             report(ConnectionEvent.IdentityChanged);
             throw new IdentityChangedException();

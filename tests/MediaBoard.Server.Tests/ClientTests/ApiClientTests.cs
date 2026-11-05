@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Settings;
@@ -25,6 +26,15 @@ public sealed class ApiClientTests
         new(Endpoint(fingerprint, api.Address), () => Token, _ => { }, time);
 
     private static string FingerprintOf(ServerFixture fixture) => CertificateStore.Fingerprint(fixture.NewCertificate());
+
+    /// <summary>Takes the connection and never answers the handshake, so connecting ends only at the connect limit.</summary>
+    private static TcpListener SilentAddress(out string address)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        address = $"127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
+        return listener;
+    }
 
     private sealed class Live : IAsyncDisposable
     {
@@ -197,7 +207,7 @@ public sealed class ApiClientTests
     }
 
     [Fact]
-    public async Task Pin_WrongFirstAddress_ThenADeadOne_IsUnreachable()
+    public async Task Pin_WrongFirstAddress_ThenARefusingOne_IsIdentityChanged()
     {
         await using var fixture = new ServerFixture();
         await using var stranger = new ServerFixture();
@@ -205,9 +215,59 @@ public sealed class ApiClientTests
         var reports = new List<ConnectionEvent>();
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, $"127.0.0.1:{ServerFixture.FreePort()}"), () => Token, reports.Add);
 
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Equal([ConnectionEvent.IdentityChanged], reports);
+    }
+
+    // The clock never moves, so the 5 s connect limit is what ends the wait, and these two also pin that limit.
+    [Fact]
+    public async Task Pin_DeadFirstAddress_ThenAWrongOne_IsIdentityChanged()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        using var dead = SilentAddress(out var deadAddress);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), deadAddress, wrong.Address), () => Token, reports.Add, new FakeTimeProvider());
+
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(Within, Ct));
+
+        Assert.Equal([ConnectionEvent.IdentityChanged], reports);
+    }
+
+    [Fact]
+    public async Task Pin_WrongFirstAddress_ThenADeadOne_IsIdentityChanged()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        using var dead = SilentAddress(out var deadAddress);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, deadAddress), () => Token, reports.Add, new FakeTimeProvider());
+
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(Within, Ct));
+
+        Assert.Equal([ConnectionEvent.IdentityChanged], reports);
+    }
+
+    [Fact]
+    public async Task Pin_WrongFirstAddress_ThenOneThatCutsOff_IsNoIdentityChange()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        await using var right = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
+        {
+            context.Abort();
+            return Task.CompletedTask;
+        });
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, right.Address), () => Token, reports.Add);
+
         await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetAsync<PingReply>("ping", Ct));
 
-        Assert.Equal([ConnectionEvent.Unreachable], reports);
+        Assert.Empty(reports);
     }
 
     [Fact]
