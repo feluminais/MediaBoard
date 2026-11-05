@@ -65,6 +65,9 @@ public sealed class SharingController(
     /// <summary>Sharing is on, but something will get in the way of connections.</summary>
     public string? Warning => _state.Warning;
 
+    /// <summary>The port in use while on. The saved one can differ: a change waits for the next start.</summary>
+    public int? Port => _state.Port;
+
     /// <summary>Open streams, the same count as the rows of Watching now.</summary>
     public int Watching => streams.Current.Count;
 
@@ -147,7 +150,18 @@ public sealed class SharingController(
     /// or if it was failing, since the old certificate may be why. The new one is made first: if that fails the status
     /// stays as it was, streams play on, and <see cref="Problem"/> says what happened.
     /// </summary>
-    public Task ReplaceCertificateAsync() => InTurnAsync(async () =>
+    /// <returns>Whether the certificate changed, which is so even if the server then failed to come back.</returns>
+    public async Task<bool> ReplaceCertificateAsync()
+    {
+        var replaced = false;
+        await InTurnAsync(async () => replaced = await ReplaceInTurnAsync().ConfigureAwait(false)).ConfigureAwait(false);
+        return replaced;
+    }
+
+    private static string NameOf(SharingSettings sharing) => sharing.ServerName ?? $"{Environment.UserName}'s library";
+
+    // Called in turn.
+    private async Task<bool> ReplaceInTurnAsync()
     {
         try
         {
@@ -159,16 +173,15 @@ public sealed class SharingController(
             Trace.TraceWarning($"Replacing the certificate failed: {e.GetType().Name}");
             hub.Log(ActivityLevel.Error, problem);
             Set(_state with { Problem = problem });
-            return;
+            return false;
         }
 
         var restart = Status != SharingStatus.Off;
         await StopAsync().ConfigureAwait(false);
         if (restart) await StartAsync().ConfigureAwait(false);
         else Set(new State(SharingStatus.Off));
-    });
-
-    private static string NameOf(SharingSettings sharing) => sharing.ServerName ?? $"{Environment.UserName}'s library";
+        return true;
+    }
 
     /// <summary>The host and port a device connects to, from what the owner typed, or null if nothing usable was typed.</summary>
     private static string? ConnectAddress(string? typed, int port)
@@ -263,7 +276,7 @@ public sealed class SharingController(
         _listening = true;
         streams.Changed += OnStreamsChanged;
         Remember(on: true);
-        Set(new State(SharingStatus.On, Warning: warning));
+        Set(new State(SharingStatus.On, Warning: warning, Port: sharing.Port));
     }
 
     // Called in turn. The server closes its own streams and events as it stops.
@@ -340,5 +353,6 @@ public sealed class SharingController(
 
     /// <param name="Problem">See <see cref="SharingController.Problem"/>.</param>
     /// <param name="Warning">See <see cref="SharingController.Warning"/>.</param>
-    private sealed record State(SharingStatus Status, string? Problem = null, string? Warning = null);
+    /// <param name="Port">See <see cref="SharingController.Port"/>.</param>
+    private sealed record State(SharingStatus Status, string? Problem = null, string? Warning = null, int? Port = null);
 }

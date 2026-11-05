@@ -102,6 +102,11 @@ internal sealed class SharingWorld : IAsyncDisposable
 
     public void OpenDatabase() => Services.GetRequiredService<LibraryDatabase>().Open().Dispose();
 
+    /// <summary>A library folder with nothing in it.</summary>
+    /// <returns>The folder's id.</returns>
+    public int AddFolder(string name) =>
+        Services.GetRequiredService<FolderStore>().Add(Directory.CreateDirectory(Path.Combine(_dir, "library", name)).FullName).Id;
+
     public void SetSharing(Func<SharingSettings, SharingSettings> change) =>
         Settings.Update(s => s with { Sharing = change(s.Sharing) });
 

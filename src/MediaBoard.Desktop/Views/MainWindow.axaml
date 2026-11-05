@@ -33,6 +33,9 @@
         <DataTemplate DataType="vm:FoldersViewModel">
             <views:FoldersView />
         </DataTemplate>
+        <DataTemplate DataType="vm:SharingViewModel">
+            <views:SharingView />
+        </DataTemplate>
         <DataTemplate DataType="vm:SettingsViewModel">
             <views:SettingsView />
         </DataTemplate>
@@ -105,6 +108,9 @@
         </Style>
         <Style Selector="Path.icon[Tag=Folders]">
             <Setter Property="Data" Value="M3.5 5.5 Q3.5 5 4 5 H8 L9.8 7 H16 Q16.5 7 16.5 7.5 V14.5 Q16.5 15 16 15 H4 Q3.5 15 3.5 14.5 Z" />
+        </Style>
+        <Style Selector="Path.icon[Tag=Sharing]">
+            <Setter Property="Data" Value="M5 8 A2 2 0 1 0 5 12 A2 2 0 1 0 5 8 Z M14.5 3 A2 2 0 1 0 14.5 7 A2 2 0 1 0 14.5 3 Z M14.5 13 A2 2 0 1 0 14.5 17 A2 2 0 1 0 14.5 13 Z M6.8 9.1 L12.7 5.9 M6.8 10.9 L12.7 14.1" />
         </Style>
         <Style Selector="Path.icon[Tag=Settings]">
             <Setter Property="Data" Value="M3.5 6.5 H16.5 M3.5 13.5 H16.5 M7 4.5 V8.5 M13 11.5 V15.5" />
@@ -187,8 +193,9 @@
     <!-- Root takes the focus from a text box when the viewer presses empty space (it is no tab stop). -->
     <Panel x:Name="Root" Background="Transparent" Focusable="True" IsTabStop="False" PointerPressed="OnRootPressed">
         <DockPanel>
-            <!-- Status bar: always visible. The key segment opens Settings; the rest toggles the activity panel. A problem
-                 segment (red) shows warnings and errors logged since the panel was last open. -->
+            <!-- Status bar: always visible. The key segment opens Settings and the sharing segment opens Sharing; the rest
+                 toggles the activity panel. A problem segment (red) shows warnings and errors logged since the panel was
+                 last open. -->
             <Border DockPanel.Dock="Bottom" Height="28"
                     Background="{DynamicResource StripBrush}"
                     BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0">
@@ -198,6 +205,11 @@
                             IsVisible="{Binding StatusBar.KeyProblem, Converter={x:Static ObjectConverters.IsNotNull}}"
                             Command="{Binding StatusBar.OpenSettingsCommand}"
                             ToolTip.Tip="Open Settings" />
+                    <Button DockPanel.Dock="Right" Classes="strip" x:Name="SharingSegment"
+                            Content="{Binding StatusBar.Sharing}"
+                            IsVisible="{Binding StatusBar.Sharing, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            Command="{Binding StatusBar.OpenSharingCommand}"
+                            ToolTip.Tip="Open Sharing" />
                     <Button Classes="strip" x:Name="StatusStrip" Command="{Binding ToggleActivityCommand}"
                             ToolTip.Tip="Activity">
                         <DockPanel>
@@ -236,8 +248,6 @@
                                           Width="8" Height="9" VerticalAlignment="Center" />
                                     <TextBlock Text="{Binding StatusBar.Player}" />
                                 </StackPanel>
-                                <TextBlock x:Name="SharingText" Text="{Binding StatusBar.Sharing}"
-                                           IsVisible="{Binding StatusBar.Sharing, Converter={x:Static ObjectConverters.IsNotNull}}" />
                             </StackPanel>
                         </DockPanel>
                     </Button>

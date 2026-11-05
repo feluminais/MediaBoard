@@ -33,6 +33,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public const string ShowsPage = "Shows";
     public const string ReviewPage = "Review";
     public const string FoldersPage = "Folders";
+    public const string SharingPage = "Sharing";
     public const string SettingsPage = "Settings";
 
     private readonly ILibrary _library;
@@ -58,7 +59,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         PosterLoader posters,
         TitleServices titles,
         Func<Task>? rescanAll = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        SharingViewModel? sharing = null)
     {
         _library = library;
         _hub = hub;
@@ -98,6 +100,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             [FoldersPage] = folders,
             [SettingsPage] = settings,
         };
+        if (sharing is not null) _pages[SharingPage] = sharing;
         ReviewItem = new NavItem(ReviewPage, ReviewLabel(0));
         NavItems =
         [
@@ -105,6 +108,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             new NavItem(MoviesPage, "Movies"),
             new NavItem(ShowsPage, "Shows"),
             new NavItem(FoldersPage, "Folders"),
+            .. sharing is null ? [] : new[] { new NavItem(SharingPage, "Sharing") },
             new NavItem(SettingsPage, "Settings"),
         ];
 
@@ -112,6 +116,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         NavItems[0].IsSelected = true;
 
         statusBar.SettingsRequested += () => Navigate(SettingsPage);
+        statusBar.SharingRequested += () => Navigate(SharingPage);
         statusBar.PropertyChanged += OnStatusBarChanged;
         library.Changed += OnLibraryChanged;
     }

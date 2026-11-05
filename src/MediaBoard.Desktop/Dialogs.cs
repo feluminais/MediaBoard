@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using MediaBoard.Core.Library;
 using MediaBoard.Desktop.Controls;
+using MediaBoard.Desktop.ViewModels;
 using MediaBoard.Desktop.Views;
 
 namespace MediaBoard.Desktop;
@@ -150,6 +152,20 @@ public sealed class Dialogs
         if (ShownOwner() is not { } owner) return null;
 
         return await new FinishedPromptDialog(title).ShowDialog<bool?>(owner);
+    }
+
+    /// <summary>Shows a Sharing page panel; finishes when it has closed.</summary>
+    public async Task ShowSharingPanelAsync(SharingPanel panel)
+    {
+        if (ShownOwner() is not { } owner) return;
+
+        await new SharingDialog(panel).ShowDialog(owner);
+    }
+
+    /// <summary>Puts text on the clipboard.</summary>
+    public async Task CopyAsync(string text)
+    {
+        if (Owner?.Clipboard is { } clipboard) await clipboard.SetTextAsync(text);
     }
 
     // The window may be hidden in the tray or never have opened, and a dialog can't open over a hidden owner.

@@ -182,6 +182,27 @@ public static class Composition
                 dialogs.OpenUrl);
         });
 
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new SharingViewModel(
+                new SharingServices(
+                    sp.GetRequiredService<SharingController>(),
+                    sp.GetRequiredService<AccountService>(),
+                    sp.GetRequiredService<AccountStore>(),
+                    sp.GetRequiredService<DeviceStore>(),
+                    sp.GetRequiredService<InviteStore>(),
+                    sp.GetRequiredService<StreamRegistry>(),
+                    sp.GetRequiredService<SharingLog>(),
+                    sp.GetRequiredService<SignInGuard>(),
+                    sp.GetRequiredService<ILibrary>(),
+                    sp.GetRequiredService<SettingsStore>(),
+                    sp.GetRequiredService<StartWithWindows>(),
+                    sp.GetRequiredService<ActivityHub>(),
+                    sp.GetRequiredService<TimeProvider>()),
+                new SharingDialogs(dialogs.ConfirmAsync, dialogs.ShowSharingPanelAsync, dialogs.CopyAsync));
+        });
+
         services.AddSingleton(sp => new PlayerExitPrompt(
             sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<Dialogs>().AskClosePlayerAsync));
         services.AddSingleton(sp =>
@@ -220,7 +241,8 @@ public static class Composition
             sp.GetRequiredService<PosterLoader>(),
             sp.GetRequiredService<TitleServices>(),
             sp.GetRequiredService<FolderActions>().RescanAllAsync,
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<SharingViewModel>()));
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

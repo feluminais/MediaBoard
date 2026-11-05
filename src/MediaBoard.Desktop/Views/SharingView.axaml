@@ -1,0 +1,342 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             x:Class="MediaBoard.Desktop.Views.SharingView"
+             x:DataType="vm:SharingViewModel">
+    <UserControl.Styles>
+        <!-- A row that opens: flat until hovered, with a chevron that turns when it's open. -->
+        <Style Selector="Button.disclosure">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="4,8" />
+        </Style>
+        <Style Selector="Button.disclosure /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.disclosure:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
+        </Style>
+        <Style Selector="Button.disclosure:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SelectedNavBrush}" />
+        </Style>
+        <Style Selector="Path.chevron">
+            <Setter Property="Data" Value="M6 3 L11 8 L6 13" />
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Stretch" Value="None" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeLineCap" Value="Round" />
+            <Setter Property="StrokeJoin" Value="Round" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Stroke" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+        </Style>
+        <Style Selector="Button.open Path.chevron">
+            <Setter Property="RenderTransform" Value="rotate(90deg)" />
+        </Style>
+        <Style Selector="TextBlock.heading">
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+        </Style>
+        <Style Selector="Border.warningTag">
+            <Setter Property="CornerRadius" Value="{StaticResource ChipRadius}" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="Background" Value="{DynamicResource WarningSurfaceBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.warningTag TextBlock">
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
+            <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <UserControl.DataTemplates>
+        <!-- An open row. Built only while it's open, so 100 closed rows cost their headers alone. -->
+        <DataTemplate DataType="vm:PersonDetail">
+            <StackPanel Spacing="12" Margin="28,2,4,12">
+                <StackPanel Spacing="4" IsVisible="{Binding Row.CanManage}">
+                    <TextBlock Classes="heading" Text="Folders" />
+                    <CheckBox Content="All folders" IsChecked="{Binding AllFolders}" />
+                    <!-- A library can have many folders: they scroll in a box instead of growing the page. -->
+                    <ItemsControl ItemsSource="{Binding Folders}" IsVisible="{Binding !AllFolders}" MaxHeight="180">
+                        <ItemsControl.Template>
+                            <ControlTemplate>
+                                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FolderChoice">
+                                <CheckBox IsChecked="{Binding IsChecked}" ToolTip.Tip="{Binding Path}">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                </CheckBox>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <StackPanel Spacing="4" IsVisible="{Binding Row.CanManage}">
+                    <TextBlock Classes="heading" Text="Devices" />
+                    <TextBlock Classes="muted" Text="No devices" IsVisible="{Binding HasNoDevices}" />
+                    <ItemsControl ItemsSource="{Binding Devices}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:DeviceRow">
+                                <DockPanel Margin="0,2">
+                                    <Button DockPanel.Dock="Right" Classes="small" Content="Sign out" Margin="12,0,0,0"
+                                            VerticalAlignment="Center"
+                                            ToolTip.Tip="Ends this device's session. They can sign back in with their password."
+                                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).SignOutCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <SelectableTextBlock Classes="muted" Text="{Binding Details}" IsTabStop="False"
+                                                             TextTrimming="CharacterEllipsis"
+                                                             FontSize="{DynamicResource SmallFontSize}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <TextBlock Text="{Binding Row.Message}" IsVisible="{Binding Row.HasMessage}" TextWrapping="Wrap" />
+
+                <WrapPanel ItemSpacing="8" LineSpacing="8">
+                    <Button Classes="small" Content="New invite" IsVisible="{Binding Row.CanInvite}"
+                            ToolTip.Tip="Adds a device. Someone with a password enters it after pasting."
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).NewInviteCommand}"
+                            CommandParameter="{Binding Row}" />
+                    <Button Classes="small" Content="Set password" IsVisible="{Binding Row.IsOwner}"
+                            ToolTip.Tip="For signing in from another PC."
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).SetPasswordCommand}"
+                            CommandParameter="{Binding Row}" />
+                    <Button Classes="small" Content="Reset password" IsVisible="{Binding Row.CanResetPassword}"
+                            ToolTip.Tip="Clears the password, signs out every device and makes a new invite."
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).ResetPasswordCommand}"
+                            CommandParameter="{Binding Row}" />
+                    <Button Classes="small" Content="{Binding Row.DisableLabel}" IsVisible="{Binding Row.CanManage}"
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).ToggleDisabledCommand}"
+                            CommandParameter="{Binding Row}" />
+                    <Button Classes="small danger" Content="Remove" IsVisible="{Binding Row.CanManage}"
+                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).RemoveCommand}"
+                            CommandParameter="{Binding Row}" />
+                </WrapPanel>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.DataTemplates>
+
+    <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled">
+        <!-- A column, not a width on the panel: the panels keep one width whatever is open in them, and still narrow with the window. -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="{DynamicResource ReadingWidth}" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+        <StackPanel Spacing="16" Margin="0,0,12,16">
+            <TextBlock Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,4" />
+
+            <!-- The switch, and the connection settings behind it. -->
+            <Border Classes="panel">
+                <StackPanel Spacing="10">
+                    <DockPanel>
+                        <ToggleSwitch x:Name="Switch" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="16,0,-12,0"
+                                      OnContent="" OffContent="" IsChecked="{Binding IsOn}"
+                                      AutomationProperties.Name="Sharing" />
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Classes="rowTitle" Text="{Binding StatusLine}" TextWrapping="Wrap" />
+                            <SelectableTextBlock Classes="muted" Text="{Binding StatusDetail}" IsTabStop="False" TextWrapping="Wrap"
+                                                 IsVisible="{Binding HasStatusDetail}" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource ErrorTextBrush}" />
+                    <TextBlock Text="{Binding Warning}" IsVisible="{Binding HasWarning}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource WarningTextBrush}" />
+                    <TextBlock Classes="muted" Text="{Binding FirewallNote}" IsVisible="{Binding ShowFirewallNote}" TextWrapping="Wrap" />
+
+                    <Button x:Name="ConnectionToggle" Classes="disclosure" Classes.open="{Binding IsConnectionOpen}" Margin="-4,0"
+                            Command="{Binding ToggleConnectionCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Path Classes="chevron" />
+                            <TextBlock Text="Connection" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <StackPanel Spacing="12" Margin="0,0,0,4" IsVisible="{Binding IsConnectionOpen}" IsEnabled="{Binding IsLoaded}">
+                        <TextBlock Text="{Binding ConnectionMessage}" IsVisible="{Binding HasConnectionMessage}" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="8">
+                            <TextBlock Text="Public address" VerticalAlignment="Center" />
+                            <TextBox x:Name="PublicBox" Grid.Column="1" Text="{Binding PublicAddress}"
+                                     PlaceholderText="myhome.example.org" AutomationProperties.Name="Public address" />
+                            <TextBlock Grid.Row="1" Text="Home address" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HomeAddress}"
+                                     PlaceholderText="Optional, like 192.168.1.20" AutomationProperties.Name="Home address" />
+                            <TextBlock Grid.Row="2" Text="Port" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="2" Grid.Column="1" Width="90" HorizontalAlignment="Left" Text="{Binding PortText}"
+                                     AutomationProperties.Name="Port" />
+                            <TextBlock Grid.Row="3" Text="Library name" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding ServerName}" MaxLength="64"
+                                     PlaceholderText="{Binding ServerNameHint}" AutomationProperties.Name="Library name" />
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="accent" Content="Save" Command="{Binding SaveConnectionCommand}" />
+                            <Button Content="Check connection" Command="{Binding CheckConnectionCommand}"
+                                    ToolTip.Tip="Tries the public address from this PC." />
+                        </StackPanel>
+                        <SelectableTextBlock Classes="muted" Text="{Binding CheckResult}" IsTabStop="False" TextWrapping="Wrap"
+                                             IsVisible="{Binding HasCheckResult}" />
+
+                        <CheckBox Content="Start with Windows" IsChecked="{Binding StartsWithWindows}" />
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="heading" Text="Router port forward" />
+                            <ItemsControl ItemsSource="{Binding RouterSteps}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Classes="muted" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="heading" Text="Certificate" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap"
+                                       Text="Devices trust this PC by its certificate. Replacing it means everyone needs a new invite." />
+                            <Button Content="Replace certificate" Command="{Binding ReplaceCertificateCommand}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Watching now -->
+            <Border Classes="panel">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="rowTitle" Text="Watching now" />
+                    <TextBlock Classes="muted" Text="{Binding NobodyWatching}" IsVisible="{Binding IsNobodyWatching}" />
+                    <ItemsControl x:Name="WatchingList" ItemsSource="{Binding Watching}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel CacheLength="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:WatchingRow">
+                                <DockPanel Margin="0,4">
+                                    <Button DockPanel.Dock="Right" Classes="small" Content="Stop" Margin="12,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).StopCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <TextBlock DockPanel.Dock="Right" Classes="muted" Text="{Binding Speed}" Margin="12,0,0,0"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Person}" FontWeight="SemiBold" MaxWidth="240"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Classes="muted" Text="{Binding Device}" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Classes="muted" Text="{Binding Position}" FontSize="{DynamicResource SmallFontSize}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- People -->
+            <Border Classes="panel">
+                <StackPanel Spacing="8">
+                    <DockPanel>
+                        <Button x:Name="AddPersonButton" DockPanel.Dock="Right" Classes="accent" Content="Add person" VerticalAlignment="Center"
+                                IsEnabled="{Binding IsLoaded}" Command="{Binding AddPersonCommand}" />
+                        <TextBlock Classes="rowTitle" Text="People" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding PeopleMessage}" IsVisible="{Binding HasPeopleMessage}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource WarningTextBrush}" />
+                    <!-- The cache keeps rows just past the edge built: Tab only finds built rows, so with none it would stop at the fold. -->
+                    <ItemsControl x:Name="PeopleList" ItemsSource="{Binding People}" Margin="-4,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel CacheLength="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PersonRow">
+                                <StackPanel>
+                                    <Button Classes="disclosure" Classes.open="{Binding IsOpen}"
+                                            Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).ToggleRowCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                            <Path Classes="chevron" />
+                                            <StackPanel Grid.Column="1">
+                                                <DockPanel>
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0">
+                                                        <Border Classes="warningTag" IsVisible="{Binding IsLocked}"
+                                                                ToolTip.Tip="Too many wrong passwords. It clears by itself within 15 minutes.">
+                                                            <TextBlock Text="Locked" />
+                                                        </Border>
+                                                        <Border Classes="warningTag" IsVisible="{Binding IsDisabled}">
+                                                            <TextBlock Text="Disabled" />
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
+                                                <TextBlock Classes="muted" Text="{Binding Access}" FontSize="{DynamicResource SmallFontSize}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Classes="muted" Text="{Binding Seen}" VerticalAlignment="Center"
+                                                       FontSize="{DynamicResource SmallFontSize}" />
+                                        </Grid>
+                                    </Button>
+                                    <ContentControl Content="{Binding Detail}" IsVisible="{Binding IsOpen}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Activity -->
+            <Border Classes="panel">
+                <StackPanel Spacing="8">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Classes="textLink" VerticalAlignment="Center"
+                                Command="{Binding ShowAllActivityCommand}">
+                            <TextBlock Text="See all" TextDecorations="Underline" />
+                        </Button>
+                        <TextBlock Classes="rowTitle" Text="Activity" />
+                    </DockPanel>
+                    <TextBlock Classes="muted" Text="Nothing yet." IsVisible="{Binding HasNoActivity}" />
+                    <ItemsControl ItemsSource="{Binding Activity}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SharingActivityRow">
+                                <DockPanel Margin="0,2">
+                                    <TextBlock DockPanel.Dock="Left" Classes="muted" Text="{Binding When}" Width="84"
+                                               FontSize="{DynamicResource SmallFontSize}" VerticalAlignment="Center" />
+                                    <SelectableTextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" IsTabStop="False" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

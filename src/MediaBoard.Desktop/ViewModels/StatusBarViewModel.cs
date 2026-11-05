@@ -26,6 +26,9 @@ public sealed partial class StatusBarViewModel : ObservableObject
     /// <summary>Raised when the user clicks the TMDB key segment.</summary>
     public event Action? SettingsRequested;
 
+    /// <summary>Raised when the user clicks the sharing segment.</summary>
+    public event Action? SharingRequested;
+
     /// <summary>"Scanning Supernatural, 12 of 44", "Up to date", or null while only identification runs.</summary>
     [ObservableProperty]
     public partial string? Progress { get; private set; }
@@ -90,6 +93,9 @@ public sealed partial class StatusBarViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenSettings() => SettingsRequested?.Invoke();
+
+    [RelayCommand]
+    private void OpenSharing() => SharingRequested?.Invoke();
 
     partial void OnIsActivityOpenChanged(bool value)
     {
