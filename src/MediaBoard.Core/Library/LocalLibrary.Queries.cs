@@ -90,7 +90,9 @@ public sealed partial class LocalLibrary
             // A season the library holds nothing of is TMDB's list, not the user's.
             if (!group.Any(e => filesByEpisode.ContainsKey(e.Id))) continue;
 
-            var rows = group.Select(e => EpisodeRowOf(snapshot, e, filesByEpisode.GetValueOrDefault(e.Id))).ToList();
+            // An episode the viewer may not see is not listed, not even as an empty row with its name.
+            var rows = group.Where(e => snapshot.SeesHidden || !snapshot.IsHidden(TargetKind.Episode, e.Id))
+                .Select(e => EpisodeRowOf(snapshot, e, filesByEpisode.GetValueOrDefault(e.Id))).ToList();
             var id = LibraryIds.Season(titleId, group.Key);
             var fallbackName = group.Key == 0 ? "Specials" : $"Season {group.Key}";
             seasons.Add(new SeasonView(
@@ -278,7 +280,7 @@ public sealed partial class LocalLibrary
         snapshot.NameOverride(TargetKind.Episode, episode.EpisodeId)
         ?? (string.IsNullOrWhiteSpace(episode.Name) ? $"Episode {episode.Number}" : episode.Name);
 
-    private static string? EpisodeLabel(List<EpisodeRef> episodes)
+    internal static string? EpisodeLabel(List<EpisodeRef> episodes)
     {
         if (episodes.Count == 0) return null;
 

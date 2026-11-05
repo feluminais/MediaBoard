@@ -7,7 +7,9 @@ public sealed class SearchService(
     ILibrary library,
     IMetadataProvider provider,
     Connectivity connectivity,
-    TitleStore titles) : ISearchService
+    TitleStore titles,
+    ViewerAccess? access = null,
+    Viewer? viewer = null) : ISearchService
 {
     public const int MaxLibraryResults = 10;
     public const int MaxOnlineResults = 10;
@@ -38,7 +40,7 @@ public sealed class SearchService(
         {
             var found = await provider.SearchAnyAsync(text, ct).ConfigureAwait(false);
             var online = found.Take(MaxOnlineResults)
-                .Select(c => new OnlineResult(c, titles.ByTmdb(c.TmdbId, c.Kind)?.Id))
+                .Select(c => new OnlineResult(c, ReachableTitleId(c)))
                 .ToList();
             return new SearchResults(local, online, OnlineState.Ok);
         }
@@ -46,6 +48,16 @@ public sealed class SearchService(
         {
             return new SearchResults(local, [], StateOf(e.Reason));
         }
+    }
+
+    /// <summary>The local title of an online hit, left out when the viewer can't reach it so a search doesn't reveal it.</summary>
+    private int? ReachableTitleId(SearchCandidate candidate)
+    {
+        var id = titles.ByTmdb(candidate.TmdbId, candidate.Kind)?.Id;
+        if (id is null || viewer is not { IsOwner: false }) return id;
+
+        ArgumentNullException.ThrowIfNull(access);
+        return access.CanReachTitle(viewer, id.Value) ? id : null;
     }
 
     public async Task<TitleDetails?> GetOnlineDetailsAsync(int tmdbId, TitleKind kind, CancellationToken ct)

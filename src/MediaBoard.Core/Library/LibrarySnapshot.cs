@@ -64,8 +64,10 @@ internal sealed class LibrarySnapshot
         Dictionary<int, (int Shows, int Movies)> titleCountByFolder,
         Dictionary<int, TitleRow> titles,
         Dictionary<(TargetKind, int), OverrideRow> overrides,
-        Dictionary<int, DateTime> continueDismissed)
+        Dictionary<int, DateTime> continueDismissed,
+        bool seesHidden)
     {
+        SeesHidden = seesHidden;
         ContinueDismissed = continueDismissed;
         Folders = folders;
         Files = files;
@@ -85,6 +87,9 @@ internal sealed class LibrarySnapshot
         FilesByTitle = byTitle;
         Titles = titles.Where(t => byTitle.ContainsKey(t.Key)).ToDictionary(t => t.Key, t => t.Value);
     }
+
+    /// <summary>False for a viewer who may not see hidden items: the files a hide covers are not in this snapshot at all.</summary>
+    public bool SeesHidden { get; }
 
     public IReadOnlyList<LibraryFolder> Folders { get; }
 
@@ -162,13 +167,7 @@ internal sealed class LibrarySnapshot
                 (int?)r.EndYear, r.Overview, r.Rating, r.PosterPath, null))
             .ToDictionary(t => t.Id);
 
-        var fileCountByFolder = files.GroupBy(f => f.FolderId).ToDictionary(g => g.Key, g => g.Count());
-        var titleCountByFolder = new Dictionary<int, (int Shows, int Movies)>();
-        foreach (var group in files.Where(f => f.TitleId is { } id && titles.ContainsKey(id)).GroupBy(f => f.FolderId))
-        {
-            var kinds = group.Select(f => f.TitleId!.Value).Distinct().Select(id => titles[id].Kind).ToList();
-            titleCountByFolder[group.Key] = (kinds.Count(k => k == TitleKind.Show), kinds.Count(k => k == TitleKind.Movie));
-        }
+        var (fileCountByFolder, titleCountByFolder) = CountByFolder(files, titles);
 
         var disabled = allFolders.Where(f => !f.Enabled).Select(f => f.Id).ToHashSet();
         if (disabled.Count > 0) files = files.Where(f => !disabled.Contains(f.FolderId)).ToList();
@@ -202,11 +201,47 @@ internal sealed class LibrarySnapshot
                           || (overrides.TryGetValue((TargetKind.File, file.Id), out var o) && o.Hidden);
         }
 
+        if (!viewer.SeesHidden)
+        {
+            // A hide at any level blocks the viewer, so the queries never see the file and agree with ViewerAccess.
+            files = files.Where(f => !f.Hidden && !IsHiddenByTitleSeasonOrEpisode(f, overrides)).ToList();
+            folders = folders.Where(f => !folderHidden.Contains(f.Id)).ToList();
+            (fileCountByFolder, titleCountByFolder) = CountByFolder(files, titles);
+        }
+
         var dismissed = connection.Query<DismissedDto>("SELECT title_id AS TitleId, played_at AS PlayedAt " +
                                                          "FROM continue_dismissed WHERE user_id = @UserId", new { viewer.UserId })
             .ToDictionary(r => (int)r.TitleId, r => ParseTime(r.PlayedAt));
 
-        return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides, dismissed);
+        return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides, dismissed, viewer.SeesHidden);
+    }
+
+    private static bool IsHiddenByTitleSeasonOrEpisode(FileEntry file, Dictionary<(TargetKind, int), OverrideRow> overrides)
+    {
+        bool Hidden(TargetKind kind, int id) => overrides.TryGetValue((kind, id), out var row) && row.Hidden;
+
+        if (file.TitleId is { } titleId && Hidden(TargetKind.Title, titleId)) return true;
+        foreach (var episode in file.Episodes)
+        {
+            if (Hidden(TargetKind.Episode, episode.EpisodeId)) return true;
+            if (file.TitleId is { } id && LibraryIds.TrySeason(id, episode.Season) is { } season && Hidden(TargetKind.Season, season)) return true;
+        }
+
+        return false;
+    }
+
+    private static (Dictionary<int, int> Files, Dictionary<int, (int Shows, int Movies)> Titles) CountByFolder(
+        List<FileEntry> files, Dictionary<int, TitleRow> titles)
+    {
+        var fileCountByFolder = files.GroupBy(f => f.FolderId).ToDictionary(g => g.Key, g => g.Count());
+        var titleCountByFolder = new Dictionary<int, (int Shows, int Movies)>();
+        foreach (var group in files.Where(f => f.TitleId is { } id && titles.ContainsKey(id)).GroupBy(f => f.FolderId))
+        {
+            var kinds = group.Select(f => f.TitleId!.Value).Distinct().Select(id => titles[id].Kind).ToList();
+            titleCountByFolder[group.Key] = (kinds.Count(k => k == TitleKind.Show), kinds.Count(k => k == TitleKind.Movie));
+        }
+
+        return (fileCountByFolder, titleCountByFolder);
     }
 
     private static DateTime ParseTime(string text) =>

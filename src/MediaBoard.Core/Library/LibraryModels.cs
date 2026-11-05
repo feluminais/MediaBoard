@@ -149,5 +149,9 @@ public static class LibraryIds
         return checked(titleId * SeasonsPerTitle + season);
     }
 
+    /// <summary>The id of a season, or null for a season number the id scheme cannot hold.</summary>
+    internal static int? TrySeason(int titleId, int season) =>
+        season is < 0 or >= SeasonsPerTitle ? null : Season(titleId, season);
+
     internal static (int TitleId, int Season) SplitSeason(int id) => (id / SeasonsPerTitle, id % SeasonsPerTitle);
 }

@@ -298,7 +298,7 @@ public sealed partial class LocalLibrary : ILibrary
     }
 
     /// <summary>The file's full path, or null when it does not lie below its library folder (a ".." or rooted path).</summary>
-    private static string? InsideLibrary(Dictionary<int, string> folders, int folderId, string relPath)
+    internal static string? InsideLibrary(Dictionary<int, string> folders, int folderId, string relPath)
     {
         if (!folders.TryGetValue(folderId, out var folder) || string.IsNullOrWhiteSpace(relPath) || Path.IsPathRooted(relPath)) return null;
 

@@ -11,5 +11,8 @@ public sealed record Viewer(int UserId, IReadOnlySet<int>? AllowedFolderIds)
 
     public bool IsOwner => UserId == LibraryDatabase.OwnerId;
 
+    /// <summary>Only the owner sees what they hid. For everyone else a hide at any level makes the item unreachable.</summary>
+    public bool SeesHidden => IsOwner;
+
     public bool CanReach(int folderId) => AllowedFolderIds is null || AllowedFolderIds.Contains(folderId);
 }
