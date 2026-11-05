@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -173,6 +174,23 @@ public sealed partial class PosterCardViewModel : ObservableObject
 /// <summary>Builds the cards of a list, keeping the previous card for every record that didn't change.</summary>
 internal static class PosterCards
 {
+    /// <summary>
+    /// Runs on the thread pool because a viewer's library waits for the server, and this is called from a click. The list
+    /// refreshes from the library's <c>Changed</c>, so nothing waits for the result; a failure is traced, and the
+    /// connection state already says what is wrong.
+    /// </summary>
+    public static void Dismiss(ILibrary library, int titleId) => _ = Task.Run(() =>
+    {
+        try
+        {
+            library.DismissContinue(titleId);
+        }
+        catch (Exception e)
+        {
+            Trace.TraceWarning($"Removing from Continue watching failed: {e.GetType().Name}");
+        }
+    });
+
     public static List<PosterCardViewModel> Build<T>(
         IReadOnlyList<T> records, IReadOnlyDictionary<string, PosterCardViewModel> previous, Func<T, PosterCardViewModel> create)
     {

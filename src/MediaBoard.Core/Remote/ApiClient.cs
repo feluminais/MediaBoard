@@ -74,6 +74,14 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         using var response = await ExchangeAsync(root => Request(method, root + route, body), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
     }
 
+    /// <summary>For a body that isn't JSON, such as an image. It is read whole, so it is for small ones.</summary>
+    /// <inheritdoc cref="Get{T}"/>
+    public async Task<byte[]> GetBytesAsync(string route, CancellationToken ct)
+    {
+        using var response = await ExchangeAsync(root => Request(HttpMethod.Get, root + route), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
     /// <summary>For a request whose answer matters, such as the <see cref="SessionReply"/> of <c>sign-in</c>.</summary>
     /// <inheritdoc cref="Get{T}"/>
     public async Task<T> SendAsync<T>(HttpMethod method, string route, object? body, CancellationToken ct)
