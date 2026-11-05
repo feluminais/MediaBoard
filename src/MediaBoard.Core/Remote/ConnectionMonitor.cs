@@ -133,11 +133,20 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         lock (_gate) return _retry;
     }
 
-    /// <summary>One try: returns when the connection has ended or could not be made.</summary>
+    /// <summary>One try: returns when the connection has ended or could not be made, or at once from a final state.</summary>
     private async Task HoldAsync(CancellationToken ct)
     {
         using var hold = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        lock (_gate) _hold = hold;
+
+        // Checked with _hold set under one gate: a request can reach a final state during the wait before a try, and a
+        // connection opened in that state could neither change it nor be ended by it.
+        lock (_gate)
+        {
+            if (IsFinal(_state)) return;
+
+            _hold = hold;
+        }
+
         try
         {
             var ping = await client.GetAsync<PingReply>("ping", hold.Token);

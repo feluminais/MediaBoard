@@ -17,6 +17,7 @@ public sealed class ApiClientTests
     private const string Token = "device-token-value";
 
     private static readonly TimeSpan Within = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PastTheConnectLimit = TimeSpan.FromSeconds(8);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -26,6 +27,12 @@ public sealed class ApiClientTests
         new(Endpoint(fingerprint, api.Address), () => Token, _ => { }, time);
 
     private static string FingerprintOf(ServerFixture fixture) => CertificateStore.Fingerprint(fixture.NewCertificate());
+
+    private static async Task HoldEventsAsync(HttpContext context)
+    {
+        await FakeApi.OpenEventsAsync(context);
+        await FakeApi.HangAsync(context);
+    }
 
     /// <summary>Takes the connection and never answers the handshake, so connecting ends only at the connect limit.</summary>
     private static TcpListener SilentAddress(out string address)
@@ -220,7 +227,8 @@ public sealed class ApiClientTests
         Assert.Equal([ConnectionEvent.IdentityChanged], reports);
     }
 
-    // The clock never moves, so the 5 s connect limit is what ends the wait, and these two also pin that limit.
+    // The clock never moves, so only the 5 s connect limit can end the wait. These two also pin that limit, which has to
+    // stay under the request's 10 s or a dead address would use up the time the wrong one needs to show its certificate.
     [Fact]
     public async Task Pin_DeadFirstAddress_ThenAWrongOne_IsIdentityChanged()
     {
@@ -231,7 +239,7 @@ public sealed class ApiClientTests
         var reports = new List<ConnectionEvent>();
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), deadAddress, wrong.Address), () => Token, reports.Add, new FakeTimeProvider());
 
-        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(Within, Ct));
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(PastTheConnectLimit, Ct));
 
         Assert.Equal([ConnectionEvent.IdentityChanged], reports);
     }
@@ -246,7 +254,7 @@ public sealed class ApiClientTests
         var reports = new List<ConnectionEvent>();
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, deadAddress), () => Token, reports.Add, new FakeTimeProvider());
 
-        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(Within, Ct));
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct).WaitAsync(PastTheConnectLimit, Ct));
 
         Assert.Equal([ConnectionEvent.IdentityChanged], reports);
     }
@@ -349,7 +357,7 @@ public sealed class ApiClientTests
     public async Task WorkingAddressGoesDown_ALaterRequestFallsBack()
     {
         await using var fixture = new ServerFixture();
-        var first = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
+        await using var first = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
         await using var second = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
         var reports = new List<ConnectionEvent>();
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), first.Address, second.Address), () => Token, reports.Add);
@@ -987,6 +995,71 @@ public sealed class ApiClientTests
             await Task.Delay(200, Ct);
 
             Assert.Equal(ConnectionState.IdentityChanged, monitor.State);
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_IdentityChanged_ThenRetry_ConnectsToTheRealServer()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), HoldEventsAsync);
+        var (monitor, client) = Watched(Endpoint(FingerprintOf(fixture), wrong.Address), Token);
+        using (client)
+        {
+            await using var running = new Running(monitor);
+            await ReachAsync(monitor, ConnectionState.IdentityChanged);
+
+            await wrong.DisposeAsync();
+            await using var right = await FakeApi.ForEventsAsync(fixture.NewCertificate(), HoldEventsAsync, port: wrong.Port);
+            monitor.Retry();
+
+            await ReachAsync(monitor, ConnectionState.Connected);
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_IdentityChanged_DuringABackOffWait_StaysOffUntilRetry()
+    {
+        await using var fixture = new ServerFixture();
+        var clock = new FakeTimeProvider();
+        var port = ServerFixture.FreePort();
+        var (monitor, client) = Watched(Endpoint(FingerprintOf(fixture), $"127.0.0.1:{port}"), Token, clock);
+        using (client)
+        {
+            await using var running = new Running(monitor);
+            await ReachAsync(monitor, ConnectionState.Unreachable);
+            await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), HoldEventsAsync, port: port);
+
+            monitor.Report(ConnectionEvent.IdentityChanged);
+            clock.Advance(TimeSpan.FromMinutes(5));
+            await Task.Delay(300, Ct);
+
+            Assert.Equal(ConnectionState.IdentityChanged, monitor.State);
+            Assert.Empty(api.Urls);
+
+            monitor.Retry();
+
+            await ReachAsync(monitor, ConnectionState.Connected);
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_PingWithNoVersion_IsAFailedTry()
+    {
+        await using var fixture = new ServerFixture();
+        var clock = new FakeTimeProvider();
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context => context.Response.WriteAsync("{}", context.RequestAborted));
+        var (monitor, client) = Watched(Endpoint(FingerprintOf(fixture), api.Address), Token, clock);
+        using (client)
+        {
+            await using var running = new Running(monitor);
+
+            await ReachAsync(monitor, ConnectionState.Unreachable);
+            await WaitWhileMovingAsync(clock, () => api.Count("ping") >= 2);
+
+            Assert.Null(monitor.ServerVersion);
+            Assert.Equal(ConnectionState.Unreachable, monitor.State);
         }
     }
 

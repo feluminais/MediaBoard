@@ -1,9 +1,13 @@
+using System.Text.Json.Serialization;
+
 namespace MediaBoard.Core.Remote;
 
 // The requests and SessionReply are classes, not records: a record's ToString would print the password or token
 // into any log that formats one.
 
-public sealed record PingReply(int Version, string Name);
+/// <param name="Version">Required, because one left out would read as 0, a version mismatch that stops the retries.</param>
+/// <param name="Name">The server's name.</param>
+public sealed record PingReply([property: JsonRequired] int Version, string Name);
 
 /// <summary>A null <see cref="Password"/> asks which form to show: see <c>AccountService.Redeem</c>.</summary>
 public sealed class RedeemRequest

@@ -230,8 +230,10 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
 
     /// <summary>
     /// Tries the addresses in turn under one timeout. It moves on only from a failure to connect, so a request the server
-    /// may have acted on is never sent twice. Only connecting nowhere is reported: the end of the events connection or
-    /// the next failed connect finds a server that has really gone, and until then a slow route must not look like one.
+    /// may have acted on is never sent twice. Only a failure to connect at every address, with time left, is reported.
+    /// Running out of time proves nothing, and a slow route must not look like a dead server. Two addresses that drop
+    /// packets end that way too, because together they use up the time, so a server that has really gone is found by the
+    /// end of the events connection, its silence limit or the monitor's own ping.
     /// </summary>
     private async Task<HttpResponseMessage> ExchangeAsync(
         Func<string, HttpRequestMessage> build, HttpCompletionOption completion, bool blocking, CancellationToken ct, TimeSpan? within = null)
@@ -239,7 +241,7 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         using var timeout = new CancellationTokenSource(within ?? RequestTimeout, _time);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         Exception? failure = null;
-        var reached = false;
+        var serverMayBeUp = false;
         var wrongIdentity = false;
 
         foreach (var root in InTryOrder())
@@ -261,12 +263,14 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
             {
                 failure = e;
                 wrongIdentity |= IsWrongIdentity(e);
-                reached = timeout.IsCancellationRequested || !NeverReachedTheServer(e);
-                if (reached) break;
+
+                // After a timeout nobody can tell: the request may have been waiting for an answer or still connecting.
+                serverMayBeUp = timeout.IsCancellationRequested || !NeverReachedTheServer(e);
+                if (serverMayBeUp) break;
             }
         }
 
-        if (reached) throw new ServerUnreachableException(failure);
+        if (serverMayBeUp) throw new ServerUnreachableException(failure);
 
         // A dead address says nothing either way. Invites list the home address first, so away from home one is always
         // dead, and waiting for it to agree would keep a viewer from ever hearing that the certificate was replaced.

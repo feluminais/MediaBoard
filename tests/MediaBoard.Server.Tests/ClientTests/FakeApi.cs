@@ -18,6 +18,7 @@ namespace MediaBoard.Server.Tests.ClientTests;
 internal sealed class FakeApi : IAsyncDisposable
 {
     private readonly WebApplication _app;
+    private bool _disposed;
 
     private FakeApi(WebApplication app, int port)
     {
@@ -96,8 +97,12 @@ internal sealed class FakeApi : IAsyncDisposable
         }
     }
 
+    /// <summary>Can be called early, to take a server down in the middle of a test.</summary>
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
+
+        _disposed = true;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         try
         {
