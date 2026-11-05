@@ -21,6 +21,7 @@ public sealed class PlaybackServiceTests : IDisposable
     private readonly LibraryDatabase _db;
     private readonly FileStore _files;
     private readonly ProgressStore _progress;
+    private readonly LocalPlaybackSource _source;
     private readonly ActivityHub _hub = new();
     private readonly SettingsStore _settings;
     private readonly PlaybackService _service;
@@ -33,12 +34,13 @@ public sealed class PlaybackServiceTests : IDisposable
         _db = new LibraryDatabase(Path.Combine(_dir, "library.db"));
         _files = new FileStore(_db);
         _progress = new ProgressStore(_db);
+        _source = new LocalPlaybackSource(_files, _progress);
         _settings = new SettingsStore(Path.Combine(_dir, "settings.json"));
         _settings.Save(new AppSettings { DefaultPlayerId = "mpv" });
         _folderId = new FolderStore(_db).Add(_library.Root).Id;
 
         var detector = new PlayerDetector(_ => _playerInstalled, () => [], _hub);
-        _service = new PlaybackService(_files, _progress, detector, _settings, _hub,
+        _service = new PlaybackService(_source, _source, detector, _settings, _hub,
             player =>
             {
                 var session = new FakePlayerSession(player.TracksProgress);
@@ -374,7 +376,7 @@ public sealed class PlaybackServiceTests : IDisposable
     public async Task StartThrows_LogsAndDoesNotThrow()
     {
         var id = AddFile("Movie (2020).mkv");
-        var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
+        var service = new PlaybackService(_source, _source, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
             _ => new FakePlayerSession { StartFailure = new IOException("boom") });
 
         await service.PlayAsync(id, fromStart: false, CancellationToken.None);
@@ -401,7 +403,7 @@ public sealed class PlaybackServiceTests : IDisposable
     {
         var transport = new FakeTransport();
         var process = new FakePlayerProcess();
-        var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
+        var service = new PlaybackService(_source, _source, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
             player => new MpcHcSession(player, () => transport, _ => process));
         var id = AddFile("Movie (2020).mkv");
         await service.PlayAsync(id, fromStart: false, CancellationToken.None);
@@ -695,7 +697,7 @@ public sealed class PlaybackServiceTests : IDisposable
         var first = AddFile("First.mkv");
         var second = AddFile("Second.mkv");
         var calls = 0;
-        var service = new PlaybackService(_files, _progress, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
+        var service = new PlaybackService(_source, _source, new PlayerDetector(_ => true, () => [], _hub), _settings, _hub,
             _ => ++calls == 1 ? new FakePlayerSession() : throw new ArgumentException("bad player"));
         await service.PlayAsync(first, fromStart: false, CancellationToken.None);
         Assert.Equal("mpv", _hub.Current.PlayerName);

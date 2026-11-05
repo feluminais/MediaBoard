@@ -55,11 +55,8 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     private const double RealPositionS = 1;
     private static readonly TimeSpan PositionTimeout = TimeSpan.FromSeconds(2);
 
-    // Playback happens at this PC, so it is the owner who watches.
-    private static readonly int OwnerId = Viewer.Owner.UserId;
-
-    private readonly FileStore _files;
-    private readonly ProgressStore _progress;
+    private readonly IPlaybackSource _source;
+    private readonly IProgressSink _progress;
     private readonly PlayerDetector _detector;
     private readonly SettingsStore _settings;
     private readonly ActivityHub _hub;
@@ -70,14 +67,14 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     private Playing? _current;
 
     public PlaybackService(
-        FileStore files,
-        ProgressStore progress,
+        IPlaybackSource source,
+        IProgressSink progress,
         PlayerDetector detector,
         SettingsStore settings,
         ActivityHub hub,
         Func<PlayerInfo, IPlayerSession>? createSession = null)
     {
-        _files = files;
+        _source = source;
         _progress = progress;
         _detector = detector;
         _settings = settings;
@@ -173,7 +170,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     public void AnswerFinished(int fileId, bool finished)
     {
-        _progress.SetWatched(OwnerId, fileId, finished);
+        _progress.SetWatched(fileId, finished);
         ProgressChanged?.Invoke();
     }
 
@@ -224,17 +221,16 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private async Task PlayCoreAsync(int fileId, bool fromStart, CancellationToken ct)
     {
-        var file = _files.Get(fileId);
-        if (file is null)
+        var target = await _source.ResolveAsync(fileId, ct).ConfigureAwait(false);
+        if (target is null)
         {
             LogFileMissing(null);
             return;
         }
 
-        var path = _files.FullPath(file);
-        if (file.Missing || !File.Exists(path))
+        if (target.Missing)
         {
-            LogFileMissing(Path.GetFileName(file.RelPath));
+            LogFileMissing(Path.GetFileName(target.Locator));
             return;
         }
 
@@ -244,7 +240,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         // The old session is closed only now: a file or player that cannot start leaves it playing.
         await StopCurrentAsync(ct).ConfigureAwait(false);
 
-        var saved = _progress.Get(OwnerId, fileId);
+        var saved = target.Saved;
         var startAt = !fromStart && saved is { Watched: false, PositionS: > 0 }
             ? TimeSpan.FromSeconds(saved.PositionS)
             : (TimeSpan?)null;
@@ -260,9 +256,9 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             return;
         }
 
-        var playing = new Playing(fileId, TitleOf(file), player.Name, session)
+        var playing = new Playing(fileId, target.Title, player.Name, session)
         {
-            Duration = file.DurationS ?? saved?.DurationS ?? 0,
+            Duration = target.DurationS ?? saved?.DurationS ?? 0,
             Marked = saved?.Watched ?? false,
             // With a saved position, the player's first positions may still be 0 (the resume seek has not landed).
             CanSave = saved is null || saved.PositionS <= RealPositionS,
@@ -277,7 +273,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
         try
         {
-            await session.StartAsync(path, startAt, ct).ConfigureAwait(false);
+            await session.StartAsync(target.Locator, startAt, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -317,7 +313,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             {
                 Apply(playing, e);
             }
-            catch (Exception ex) when (ex is SqliteException or IOException)
+            catch (Exception ex) when (IsSaveFailure(ex))
             {
                 // The player keeps playing; say so once instead of on every position.
                 Trace.TraceWarning($"Could not save progress: {ex}");
@@ -357,16 +353,17 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     /// </summary>
     private void OnFileChanged(Playing playing, string? path)
     {
-        var next = path is null ? null : _files.FindByPath(path);
         lock (playing.Gate)
         {
-            if (playing.Final || next?.Id == playing.FileId) return;
+            // Under the gate on the player's event thread: the source must answer without blocking.
+            var next = path is null ? null : _source.FindByLocator(path);
+            if (playing.Final || next?.FileId == playing.FileId) return;
 
             try
             {
                 SaveLastPosition(playing);
             }
-            catch (Exception ex) when (ex is SqliteException or IOException)
+            catch (Exception ex) when (IsSaveFailure(ex))
             {
                 Trace.TraceWarning($"Could not save progress: {ex}");
             }
@@ -378,20 +375,20 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     }
 
     // Called with playing.Gate held.
-    private void Rebind(Playing playing, MediaFileRow? file)
+    private static void Rebind(Playing playing, PlayTarget? target)
     {
-        var saved = file is null ? null : _progress.Get(OwnerId, file.Id);
-        playing.FileId = file?.Id;
-        playing.Title = file is null ? "" : TitleOf(file);
-        playing.Duration = file?.DurationS ?? saved?.DurationS ?? 0;
+        var saved = target?.Saved;
+        playing.FileId = target?.FileId;
+        playing.Title = target?.Title ?? "";
+        playing.Duration = target?.DurationS ?? saved?.DurationS ?? 0;
         playing.LastPosition = null;
         playing.Marked = saved?.Watched ?? false;
         // The player starts a file it opened itself at the start, so a saved position stays until it is passed.
         playing.CanSave = saved is null || saved.PositionS <= RealPositionS;
     }
 
-    private static string TitleOf(MediaFileRow file) =>
-        string.IsNullOrWhiteSpace(file.Parsed.Title) ? Path.GetFileNameWithoutExtension(file.RelPath) : file.Parsed.Title;
+    // A local database or file failed, or a remote sink could not reach its server. The player keeps playing.
+    private static bool IsSaveFailure(Exception ex) => ex is SqliteException or IOException or HttpRequestException;
 
     // Called with playing.Gate held. Closed and Failed are already marked final, so Closed's save is the last one.
     private void Apply(Playing playing, PlaybackEvent e)
@@ -433,7 +430,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     {
         if (playing.FileId is not { } fileId || playing.LastPosition is not { } position || !playing.CanSave) return;
 
-        _progress.Save(OwnerId, fileId, position, playing.Duration);
+        _progress.Save(fileId, position, playing.Duration);
         if (!playing.Marked && WatchRules.IsWatched(position, playing.Duration)) MarkWatched(playing);
     }
 
@@ -441,7 +438,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     {
         if (playing.FileId is not { } fileId) return;
 
-        _progress.SetWatched(OwnerId, fileId, true);
+        _progress.SetWatched(fileId, true);
         playing.Marked = true;
     }
 
@@ -505,7 +502,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
                 SaveLastPosition(playing);
             }
-            catch (Exception ex) when (ex is SqliteException or IOException)
+            catch (Exception ex) when (IsSaveFailure(ex))
             {
                 Trace.TraceWarning($"Could not save progress: {ex}");
                 _hub.Log(ActivityLevel.Warning, "Couldn't save progress", "Check that the library database is writable");

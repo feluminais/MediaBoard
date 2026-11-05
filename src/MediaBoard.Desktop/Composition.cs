@@ -125,9 +125,12 @@ public static class Composition
             sp.GetRequiredService<TitleStore>()));
 
         services.AddSingleton(sp => PlayerDetector.CreateDefault(sp.GetRequiredService<ActivityHub>()));
-        services.AddSingleton(sp => new PlaybackService(
+        services.AddSingleton(sp => new LocalPlaybackSource(
             sp.GetRequiredService<FileStore>(),
-            sp.GetRequiredService<ProgressStore>(),
+            sp.GetRequiredService<ProgressStore>()));
+        services.AddSingleton(sp => new PlaybackService(
+            sp.GetRequiredService<LocalPlaybackSource>(),
+            sp.GetRequiredService<LocalPlaybackSource>(),
             sp.GetRequiredService<PlayerDetector>(),
             sp.GetRequiredService<SettingsStore>(),
             sp.GetRequiredService<ActivityHub>(),
