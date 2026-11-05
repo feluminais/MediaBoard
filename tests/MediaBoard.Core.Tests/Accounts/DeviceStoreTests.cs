@@ -78,6 +78,17 @@ public sealed class DeviceStoreTests : IDisposable
         Assert.Equal(issued.Device, _devices.ByToken(issued.Token));
     }
 
+    [Fact]
+    public void IssuedDevice_DoesNotPrintTheToken()
+    {
+        var issued = _devices.Issue(_anna, "Laptop", Address);
+
+        var text = issued.ToString();
+
+        Assert.DoesNotContain(issued.Token, text, StringComparison.Ordinal);
+        Assert.Contains("Laptop", text, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("nothing-like-a-token")]

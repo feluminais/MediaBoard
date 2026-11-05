@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Dapper;
 using MediaBoard.Core.Storage;
 using Microsoft.Data.Sqlite;
@@ -9,7 +11,15 @@ namespace MediaBoard.Core.Accounts;
 public sealed record Device(int Id, int UserId, string Name, DateTime CreatedAt, DateTime? LastSeen, string? LastAddress);
 
 /// <param name="Token">The raw token. It exists only here, for the caller to hand to the device once.</param>
-public sealed record IssuedDevice(Device Device, string Token);
+public sealed record IssuedDevice(Device Device, string Token)
+{
+    // The generated ToString would print the token into any log that formats this record.
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append(CultureInfo.InvariantCulture, $"Device = {Device}");
+        return true;
+    }
+}
 
 /// <summary>
 /// The devices signed in to an account. Only a hash of each token is stored, so a copy of the database lets nobody in.

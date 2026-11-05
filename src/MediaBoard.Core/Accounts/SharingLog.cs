@@ -4,7 +4,7 @@ using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Core.Accounts;
 
-public enum SharingEvent { Joined, SignedIn, SignInLocked, StartedWatching, FinishedWatching, StreamStopped, SignedOut, Disabled }
+public enum SharingEvent { Joined, SignedIn, SignInLocked, StartedWatching, FinishedWatching, StreamStopped, SignedOut, Disabled, PasswordReset, Removed }
 
 /// <param name="UserId">Null once the account was removed.</param>
 /// <param name="At">In UTC.</param>
@@ -22,11 +22,12 @@ public sealed class SharingLog(LibraryDatabase db, TimeProvider? time = null)
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private int _inserts;
 
+    /// <param name="userId">An account that has gone by now is stored as no user, so a removal racing a sign-in can't fail it.</param>
     public void Add(SharingEvent kind, int? userId, string detail)
     {
         using var connection = db.Open();
         connection.Execute(
-            "INSERT INTO sharing_log(at, user_id, kind, detail) VALUES (@at, @userId, @kind, @detail)",
+            "INSERT INTO sharing_log(at, user_id, kind, detail) VALUES (@at, (SELECT id FROM users WHERE id = @userId), @kind, @detail)",
             new { at = FileStore.FormatTime(_time.GetUtcNow()), userId, kind = kind.ToString(), detail });
 
         if (Interlocked.Increment(ref _inserts) % TrimEvery != 1) return;

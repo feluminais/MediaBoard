@@ -34,7 +34,8 @@ internal sealed record PasswordWork(Func<string, string> Hash, Func<string, stri
 public sealed class AccountService(
     LibraryDatabase db, AccountStore accounts, DeviceStore devices, InviteStore invites, SignInGuard guard, SharingLog log)
 {
-    // One check runs, 8 wait. That also caps what a flood can cost the PC.
+    // One check runs, 8 wait. That limits the hashing strangers can cause; a new account's password is hashed outside
+    // the gate, but reaching that takes a live invite.
     private const int MaxAtGate = 9;
 
     private readonly Lock _gate = new();
@@ -42,6 +43,12 @@ public sealed class AccountService(
 
     /// <summary>Raised after an account's tokens are dead, with the id of the account whose sessions must end.</summary>
     public event Action<int>? AccountClosed;
+
+    /// <summary>
+    /// Raised after one device's token is dead, with the device id, so what it has open can end. The account stays open:
+    /// the person's other devices carry on.
+    /// </summary>
+    public event Action<int>? DeviceSignedOut;
 
     /// <summary>Raised with the id of an account whose folders changed.</summary>
     public event Action<int>? AccessChanged;
@@ -62,6 +69,7 @@ public sealed class AccountService(
         if (devices.Get(deviceId) is not { } device) return;
 
         devices.Revoke(deviceId);
+        DeviceSignedOut?.Invoke(deviceId);
         log.Add(SharingEvent.SignedOut, device.UserId, device.Name);
     }
 
@@ -98,7 +106,7 @@ public sealed class AccountService(
             InviteStore.CancelAll(connection, transaction, userId);
         });
         AccountClosed?.Invoke(userId);
-        log.Add(SharingEvent.SignedOut, userId, "");
+        log.Add(SharingEvent.PasswordReset, userId, "");
     }
 
     /// <exception cref="PasswordRefusedException">The password is too short.</exception>
@@ -117,7 +125,7 @@ public sealed class AccountService(
         accounts.Remove(userId);
         AccountClosed?.Invoke(userId);
         // The row for this id is gone, so the entry carries the name and no user.
-        log.Add(SharingEvent.SignedOut, null, account.Name);
+        log.Add(SharingEvent.Removed, null, account.Name);
     }
 
     /// <summary>The person's own change. Their devices stay signed in. Wrong guesses count toward the name's lock.</summary>

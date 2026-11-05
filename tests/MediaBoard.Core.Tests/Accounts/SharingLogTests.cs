@@ -70,6 +70,24 @@ public sealed class SharingLogTests : IDisposable
     }
 
     [Fact]
+    public void Add_ForAnAccountThatIsGone_KeepsTheEntryWithNoUser()
+    {
+        _log.Add(SharingEvent.SignInLocked, 999, "");
+
+        var entry = Assert.Single(_log.Recent(10));
+        Assert.Null(entry.UserId);
+        Assert.Equal(SharingEvent.SignInLocked, entry.Kind);
+    }
+
+    [Fact]
+    public void Add_ForALiveAccount_KeepsTheUser()
+    {
+        _log.Add(SharingEvent.SignedIn, LibraryDatabase.OwnerId, "");
+
+        Assert.Equal(LibraryDatabase.OwnerId, Assert.Single(_log.Recent(10)).UserId);
+    }
+
+    [Fact]
     public void Log_TrimsOnTheFirstInsertAfterARestart()
     {
         for (var i = 0; i < 5_050; i++) _log.Add(SharingEvent.SignedIn, null, "old");

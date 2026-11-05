@@ -6,10 +6,22 @@ namespace MediaBoard.Core.Tests.Accounts;
 
 public sealed class InviteStringTests
 {
-    private static readonly InvitePayload Payload = new(
-        "Andrii's library", ["192.168.1.20:47880", "media.example.net:47880"], "ab12cd34", "the-code");
+    private const string Fingerprint = "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34";
 
-    private static string Wrap(string json) => "mb1-" + Base64Url.EncodeToString(Encoding.UTF8.GetBytes(json));
+    private static readonly InvitePayload Payload = new(
+        "Andrii's library", ["192.168.1.20:47880", "media.example.net:47880"], Fingerprint, "the-code");
+
+    private static string WithFingerprint(string json) => json.Replace("@fp", Fingerprint, StringComparison.Ordinal);
+
+    private static string Wrap(string json) => "mb1-" + Base64Url.EncodeToString(Encoding.UTF8.GetBytes(WithFingerprint(json)));
+
+    [Fact]
+    public void InviteString_AcceptsCompleteContent()
+    {
+        var text = Wrap("""{"serverName":"x","addresses":["a"],"fingerprint":"@fp","code":"c"}""");
+
+        Assert.True(InviteString.TryDecode(text, out _));
+    }
 
     private static void AssertSame(InvitePayload? payload)
     {
@@ -67,26 +79,50 @@ public sealed class InviteStringTests
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{}")]
-    [InlineData("""{"serverName":"x","addresses":[],"fingerprint":"f","code":"c"}""")]
-    [InlineData("""{"serverName":"x","addresses":[null],"fingerprint":"f","code":"c"}""")]
+    [InlineData("""{"serverName":"x","addresses":[],"fingerprint":"@fp","code":"c"}""")]
+    [InlineData("""{"serverName":"x","addresses":[null],"fingerprint":"@fp","code":"c"}""")]
     [InlineData("""{"serverName":"x","addresses":["a"],"fingerprint":"","code":"c"}""")]
-    [InlineData("""{"serverName":"x","addresses":["a"],"fingerprint":"f","code":""}""")]
-    [InlineData("""{"serverName":"x","addresses":["a"],"fingerprint":"f"}""")]
-    [InlineData("""{"serverName":null,"addresses":["a"],"fingerprint":"f","code":"c"}""")]
-    [InlineData("""{"serverName":"x","addresses":"a","fingerprint":"f","code":"c"}""")]
+    [InlineData("""{"serverName":"x","addresses":["a"],"fingerprint":"@fp","code":""}""")]
+    [InlineData("""{"serverName":"x","addresses":["a"],"fingerprint":"@fp"}""")]
+    [InlineData("""{"serverName":null,"addresses":["a"],"fingerprint":"@fp","code":"c"}""")]
+    [InlineData("""{"serverName":"x","addresses":"a","fingerprint":"@fp","code":"c"}""")]
     public void InviteString_RejectsBadContent(string json)
     {
         Assert.False(InviteString.TryDecode(Wrap(json), out var payload));
         Assert.Null(payload);
     }
 
+    [Theory]
+    [InlineData("ab12cd34")]
+    [InlineData("ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd3")]
+    [InlineData("ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd345")]
+    [InlineData("gb12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34")]
+    [InlineData("ab:2cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34")]
+    [InlineData("аb12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34")]
+    public void InviteString_RejectsAFingerprintThatIsNotSha256Hex(string fingerprint)
+    {
+        var text = InviteString.Encode(Payload with { Fingerprint = fingerprint });
+
+        Assert.False(InviteString.TryDecode(text, out var payload));
+        Assert.Null(payload);
+    }
+
     [Fact]
     public void InviteString_RejectsInvalidUtf8()
     {
-        var bytes = Encoding.UTF8.GetBytes("""{"serverName":"x?","addresses":["a"],"fingerprint":"f","code":"c"}""");
+        var bytes = Encoding.UTF8.GetBytes(WithFingerprint("""{"serverName":"x?","addresses":["a"],"fingerprint":"@fp","code":"c"}"""));
         bytes[Array.IndexOf(bytes, (byte)'?')] = 0xFF;
 
         Assert.False(InviteString.TryDecode("mb1-" + Base64Url.EncodeToString(bytes), out _));
+    }
+
+    [Fact]
+    public void Payload_DoesNotPrintTheCode()
+    {
+        var text = Payload.ToString();
+
+        Assert.DoesNotContain(Payload.Code, text, StringComparison.Ordinal);
+        Assert.Contains(Payload.ServerName, text, StringComparison.Ordinal);
     }
 
     [Fact]

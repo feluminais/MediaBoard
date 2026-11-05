@@ -476,6 +476,44 @@ public sealed class AccountServiceTests : IDisposable
         Assert.Null(result.Issued);
     }
 
+    [Fact]
+    public void SignIn_RemoveDuringTheFailureThatLocks_StillAnswersWrongPassword()
+    {
+        var account = Joined();
+        for (var i = 0; i < 4; i++) _service.SignIn("Anna", Bad, "Phone", Address);
+        _whileChecking = () =>
+        {
+            _whileChecking = () => { };
+            _service.Remove(account.Id);
+        };
+
+        var result = _service.SignIn("Anna", Bad, "Phone", Address);
+
+        Assert.Equal(RedeemFailure.WrongPassword, result.Failure);
+        Assert.Null(Assert.Single(Logged(SharingEvent.SignInLocked)).UserId);
+    }
+
+    [Fact]
+    public void SignIn_RemoveDuringARightPassword_StillAnswersWrongPassword()
+    {
+        var account = Joined();
+        _whileChecking = () => _service.Remove(account.Id);
+
+        Assert.Equal(RedeemFailure.WrongPassword, _service.SignIn("Anna", Good, "Phone", Address).Failure);
+    }
+
+    [Fact]
+    public void Results_DoNotPrintTheToken()
+    {
+        var account = Joined();
+
+        var signIn = _service.SignIn("Anna", Good, "Phone", Address);
+        var redeem = _service.Redeem(_invites.Create(account.Id), Good, "Tablet", Address);
+
+        Assert.DoesNotContain(signIn.Issued!.Token, signIn.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(redeem.Issued!.Token, redeem.ToString(), StringComparison.Ordinal);
+    }
+
     // The gate
 
     [Fact]
@@ -675,6 +713,8 @@ public sealed class AccountServiceTests : IDisposable
         Assert.False(_accounts.Get(account.Id)!.HasPassword);
         Assert.Null(_devices.ByToken(device.Token));
         Assert.Equal([account.Id], closed);
+        Assert.Equal(account.Id, Assert.Single(Logged(SharingEvent.PasswordReset)).UserId);
+        Assert.Empty(Logged(SharingEvent.SignedOut));
         Assert.Equal(RedeemFailure.WrongPassword, _service.SignIn("Anna", Good, "Phone", Address).Failure);
     }
 
@@ -732,10 +772,36 @@ public sealed class AccountServiceTests : IDisposable
     }
 
     [Fact]
+    public void SignOutDevice_RaisesDeviceSignedOut_AfterTheTokenIsDead_LeavingTheAccountOpen()
+    {
+        var account = Joined();
+        var device = SignedIn(account);
+        var signedOut = new List<int>();
+        var closed = new List<int>();
+        Device? seen = device.Device;
+        _service.DeviceSignedOut += id =>
+        {
+            signedOut.Add(id);
+            seen = _devices.ByToken(device.Token);
+        };
+        _service.AccountClosed += closed.Add;
+
+        _service.SignOutDevice(device.Device.Id);
+
+        Assert.Equal([device.Device.Id], signedOut);
+        Assert.Null(seen);
+        Assert.Empty(closed);
+    }
+
+    [Fact]
     public void SignOutDevice_Unknown_DoesNothing()
     {
+        var signedOut = new List<int>();
+        _service.DeviceSignedOut += signedOut.Add;
+
         _service.SignOutDevice(999);
 
+        Assert.Empty(signedOut);
         Assert.Empty(_log.Recent(10));
     }
 
@@ -754,9 +820,10 @@ public sealed class AccountServiceTests : IDisposable
         Assert.Null(_accounts.Get(account.Id));
         Assert.Null(_devices.ByToken(device.Token));
         Assert.Equal([account.Id], closed);
-        var entry = Assert.Single(Logged(SharingEvent.SignedOut));
+        var entry = Assert.Single(Logged(SharingEvent.Removed));
         Assert.Null(entry.UserId);
         Assert.Contains("Anna", entry.Detail, StringComparison.Ordinal);
+        Assert.Empty(Logged(SharingEvent.SignedOut));
     }
 
     [Fact]
