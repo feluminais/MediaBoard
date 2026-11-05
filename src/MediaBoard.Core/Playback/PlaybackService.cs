@@ -238,7 +238,24 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         if (player is null) return;
 
         // The old session is closed only now: a file or player that cannot start leaves it playing.
-        await StopCurrentAsync(ct).ConfigureAwait(false);
+        var stoppedFileId = await StopCurrentAsync(ct).ConfigureAwait(false);
+
+        // Stopping saved a fresher position and may have marked the file watched, so the resolved progress is stale.
+        if (stoppedFileId == target.FileId)
+        {
+            target = await _source.ResolveAsync(fileId, ct).ConfigureAwait(false);
+            if (target is null)
+            {
+                LogFileMissing(null);
+                return;
+            }
+
+            if (target.Missing)
+            {
+                LogFileMissing(Path.GetFileName(target.Locator));
+                return;
+            }
+        }
 
         var saved = target.Saved;
         var startAt = !fromStart && saved is { Watched: false, PositionS: > 0 }
@@ -446,7 +463,8 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     /// Saves the current session's last position (asking the player for a fresher one) and ends it: closes the
     /// player, or with <paramref name="closePlayer"/> false leaves it running.
     /// </summary>
-    private async Task StopCurrentAsync(CancellationToken ct, bool closePlayer = true)
+    /// <returns>The file the stopped session was on, or null when nothing ran or the player had no library file.</returns>
+    private async Task<int?> StopCurrentAsync(CancellationToken ct, bool closePlayer = true)
     {
         Playing? playing;
         lock (_stateGate)
@@ -456,13 +474,17 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             if (playing is not null) _hub.SetPlayer(null);
         }
 
-        if (playing is null) return;
+        if (playing is null) return null;
 
         var position = await FreshPositionAsync(playing, ct).ConfigureAwait(false);
         if (SaveAt(playing, position, final: true)) ProgressChanged?.Invoke();
 
+        int? fileId;
+        lock (playing.Gate) fileId = playing.FileId;
+
         if (!closePlayer) playing.Session.Detach();
         await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        return fileId;
     }
 
     /// <summary>Where the player is now, or null when it can't tell (the last reported position then stands).</summary>

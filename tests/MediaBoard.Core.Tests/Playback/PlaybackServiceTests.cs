@@ -761,6 +761,32 @@ public sealed class PlaybackServiceTests : IDisposable
         Assert.Equal(1, changes);
     }
 
+    [Fact]
+    public async Task Replay_SameFile_ResumesFromPositionTheStopSaved()
+    {
+        var id = await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Position = TimeSpan.FromMinutes(12);
+
+        await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
+
+        Assert.Equal(TimeSpan.FromMinutes(12), Assert.Single(Session.Starts).StartAt);
+    }
+
+    [Fact]
+    public async Task Replay_StopCrossesWatchedThreshold_StartsFromBeginning()
+    {
+        var id = await Play("Movie (2020).mkv");
+        Session.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Hour)));
+        Session.Raise(new PlaybackEvent.Position(TimeSpan.FromMinutes(10)));
+        Session.Position = TimeSpan.FromSeconds(Hour * 0.95);
+
+        await _service.PlayAsync(id, fromStart: false, CancellationToken.None);
+
+        Assert.True(_progress.Get(Owner, id)!.Watched);
+        Assert.Null(Assert.Single(Session.Starts).StartAt);
+    }
+
     private async Task<int> Play(string relPath)
     {
         var id = AddFile(relPath);

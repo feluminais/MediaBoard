@@ -80,14 +80,32 @@ public sealed class PlaybackSourceTests : IDisposable
         Assert.Equal("mpv", _hub.Current.PlayerName);
     }
 
+    [Fact]
+    public async Task PlayOtherFile_ResolvesOnce()
+    {
+        _source.Add(new PlayTarget(7, Url, "Remote", 6000, Saved: null, Missing: false));
+        _source.Add(new PlayTarget(8, NextUrl, "Next", 6000, Saved: null, Missing: false));
+        await _service.PlayAsync(7, fromStart: false, CancellationToken.None);
+        _source.Resolves.Clear();
+
+        await _service.PlayAsync(8, fromStart: false, CancellationToken.None);
+
+        Assert.Equal([8], _source.Resolves);
+    }
+
     private sealed class FakeSource : IPlaybackSource
     {
         private readonly Dictionary<int, PlayTarget> _byId = [];
 
+        public List<int> Resolves { get; } = [];
+
         public void Add(PlayTarget target) => _byId[target.FileId] = target;
 
-        public Task<PlayTarget?> ResolveAsync(int fileId, CancellationToken ct) =>
-            Task.FromResult(_byId.GetValueOrDefault(fileId));
+        public Task<PlayTarget?> ResolveAsync(int fileId, CancellationToken ct)
+        {
+            Resolves.Add(fileId);
+            return Task.FromResult(_byId.GetValueOrDefault(fileId));
+        }
 
         public PlayTarget? FindByLocator(string locator) =>
             _byId.Values.FirstOrDefault(t => string.Equals(t.Locator, locator, StringComparison.Ordinal));
