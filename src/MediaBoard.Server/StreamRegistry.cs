@@ -1,5 +1,7 @@
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Remote;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MediaBoard.Server;
 
@@ -29,7 +31,10 @@ public sealed class StreamLease(Guid session, CancellationTokenSource stop) : ID
 /// heartbeat, and a request still open ends with it: a stalled client could hold its socket forever, keeping the PC
 /// awake for nobody.
 /// </summary>
-public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
+/// <param name="time">The clock.</param>
+/// <param name="sleep">Held while any session exists.</param>
+/// <param name="log">Where failed checks and subscribers go, or null for nowhere.</param>
+public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker sleep, ILogger? log = null)
 {
     private const int MaxPerAccount = 8;
 
@@ -37,6 +42,7 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
     private static readonly TimeSpan BlockFor = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(5);
 
+    private readonly ILogger _log = log ?? NullLogger.Instance;
     private readonly Lock _gate = new();
     private readonly Dictionary<Guid, Live> _live = [];
     private readonly Dictionary<(int DeviceId, int FileId), long> _blockedSince = [];
@@ -92,7 +98,7 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
             lease = new StreamLease(live.Id, linked);
         }
 
-        if (started) Changed?.Invoke();
+        if (started) RaiseChanged();
         return lease;
     }
 
@@ -126,7 +132,7 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
             if (durationS > 0) live.DurationS = durationS;
         }
 
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     /// <summary>The owner's stop: ends the session and keeps that device off that file for a minute.</summary>
@@ -154,7 +160,10 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
 
     public void CloseAll() => Close(_ => true);
 
-    /// <summary>Ends every session the viewer can no longer reach. Blocks nothing: access given back works at once.</summary>
+    /// <summary>
+    /// Ends every session the viewer can no longer reach, and any it can't check: a stream nobody can vouch for doesn't
+    /// play on. One failed check leaves the others to run. Blocks nothing, so access given back works at once.
+    /// </summary>
     /// <param name="reachable">Takes a user id and a file id. It can be slow, so it runs outside the lock.</param>
     public void CloseUnreachable(Func<int, int, bool> reachable)
     {
@@ -163,9 +172,47 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
         List<Live> open;
         lock (_gate) open = [.. _live.Values];
 
-        var gone = open.Where(live => !reachable(live.UserId, live.FileId)).ToHashSet();
+        var gone = open.Where(live => !StillReachable(live, reachable)).ToHashSet();
         if (gone.Count > 0) Close(gone.Contains);
     }
+
+    private bool StillReachable(Live live, Func<int, int, bool> reachable)
+    {
+        try
+        {
+            return reachable(live.UserId, live.FileId);
+        }
+        catch (Exception e)
+        {
+            // The type alone: a message can hold a path, and no path goes in a log.
+            LogCheckFailed(_log, e.GetType().Name);
+            return false;
+        }
+    }
+
+    // A subscriber's failure must not take the rest with it. Off the timer, it would take the whole process.
+    private void RaiseChanged()
+    {
+        if (Changed is not { } handlers) return;
+
+        foreach (var handler in handlers.GetInvocationList().Cast<Action>())
+        {
+            try
+            {
+                handler();
+            }
+            catch (Exception e)
+            {
+                LogListenerFailed(_log, e.GetType().Name);
+            }
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "A stream ended because its access check failed: {failure}")]
+    private static partial void LogCheckFailed(ILogger logger, string failure);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "A listener to stream changes failed: {failure}")]
+    private static partial void LogListenerFailed(ILogger logger, string failure);
 
     private void Close(Func<Live, bool> which)
     {
@@ -190,7 +237,7 @@ public sealed class StreamRegistry(TimeProvider time, ISleepBlocker sleep)
             live.Stop.Dispose();
         }
 
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     private void EndQuietOnes()

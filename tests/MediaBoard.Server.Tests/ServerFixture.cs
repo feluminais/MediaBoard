@@ -60,7 +60,7 @@ public sealed class ServerFixture : IAsyncDisposable
             Progress,
             viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
             new ImageCache(http, Connectivity, ImagesDir));
-        Streams = new StreamRegistry(TimeProvider.System, new SleepRecorder());
+        Streams = new StreamRegistry(TimeProvider.System, new SleepRecorder(), logs?.CreateLogger("Streams"));
         Server = new SharingServer(Service, Accounts, Devices, shared, Streams, logs) { ServerName = ServerName };
     }
 

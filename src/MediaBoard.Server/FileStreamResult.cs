@@ -9,7 +9,16 @@ namespace MediaBoard.Server;
 /// Headers are out by then, so a cut is all that can be said: the client finds out why from its next request, which
 /// is answered with a code.
 /// </summary>
-internal sealed class FileStreamResult(FileStream file, string path, StreamRegistry streams, StreamLease lease, CancellationToken stop) : IResult
+/// <param name="file">The open file. This takes it over.</param>
+/// <param name="length">
+/// The file's length, read at open. Pinned, because a torrent client may be appending, and sending more than the headers
+/// promised breaks the response.
+/// </param>
+/// <param name="path">Where the file should still be.</param>
+/// <param name="streams">Told of every byte sent.</param>
+/// <param name="lease">The request's place in its session. This takes it over.</param>
+/// <param name="stop">Ends the response.</param>
+internal sealed class FileStreamResult(FileStream file, long length, string path, StreamRegistry streams, StreamLease lease, CancellationToken stop) : IResult
 {
     private const int BufferBytes = 1024 * 1024;
 
@@ -29,7 +38,7 @@ internal sealed class FileStreamResult(FileStream file, string path, StreamRegis
     public async Task ExecuteAsync(HttpContext context)
     {
         using (lease)
-        await using (var body = new Body(file, path, streams, lease.Session, stop))
+        await using (var body = new Body(file, length, path, streams, lease.Session, stop))
         await using (stop.Register(context.Abort))
         {
             // A paused player stops reading, and that is no reason to drop it. The session's quiet limit ends a dead one.
@@ -44,10 +53,8 @@ internal sealed class FileStreamResult(FileStream file, string path, StreamRegis
     /// as cancellation, which that copy answers by aborting the connection: any other exception would land in the log
     /// with the file's path in its message.
     /// </summary>
-    private sealed class Body(FileStream file, string path, StreamRegistry streams, Guid session, CancellationToken stop) : Stream
+    private sealed class Body(FileStream file, long length, string path, StreamRegistry streams, Guid session, CancellationToken stop) : Stream
     {
-        // Pinned, because a torrent client may be appending: sending more than the headers promised breaks the response.
-        private readonly long _length = file.Length;
         private long _position;
         private long _sinceNameCheck;
 
@@ -57,7 +64,7 @@ internal sealed class FileStreamResult(FileStream file, string path, StreamRegis
 
         public override bool CanWrite => false;
 
-        public override long Length => _length;
+        public override long Length => length;
 
         public override long Position
         {
@@ -67,7 +74,7 @@ internal sealed class FileStreamResult(FileStream file, string path, StreamRegis
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            var left = _length - _position;
+            var left = length - _position;
             if (left <= 0) return 0;
 
             var read = await ReadFileAsync(buffer[..(int)Math.Min(buffer.Length, left)]);

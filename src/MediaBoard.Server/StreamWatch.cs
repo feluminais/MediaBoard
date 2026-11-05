@@ -6,7 +6,8 @@ namespace MediaBoard.Server;
 /// Ends streams whose access went away, for as long as the server listens. A library edit or a change of folders can
 /// come from the UI thread and can take any file away, so those re-checks run on the pool and pile up into one.
 /// </summary>
-internal sealed class StreamWatch(StreamRegistry streams, AccountService service, AccountStore accounts, SharedLibrary library) : IDisposable
+internal sealed class StreamWatch(
+    StreamRegistry streams, AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library) : IDisposable
 {
     private int _queued;
 
@@ -25,6 +26,9 @@ internal sealed class StreamWatch(StreamRegistry streams, AccountService service
         service.AccessChanged -= OnAccessChanged;
         library.Owner.Changed -= RecheckSoon;
     }
+
+    /// <summary>Whether the device's row still exists. Every way of revoking a token deletes it.</summary>
+    public bool IsSignedIn(int deviceId) => devices.Get(deviceId) is not null;
 
     /// <summary>Reads the account afresh: a viewer built earlier holds the folders as they were then.</summary>
     public bool Reachable(int userId, int fileId) =>

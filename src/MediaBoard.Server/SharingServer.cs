@@ -115,7 +115,7 @@ public sealed class SharingServer(
         Library.Map(api, library);
         Search.Map(api, library);
 
-        var watch = new StreamWatch(streams, service, accounts, library);
+        var watch = new StreamWatch(streams, service, accounts, devices, library);
         Playback.Map(api, library, streams, watch);
         // Not started by hand here: a start that fails on the port would leave this listening to the events for good.
         app.Lifetime.ApplicationStarted.Register(watch.Start);

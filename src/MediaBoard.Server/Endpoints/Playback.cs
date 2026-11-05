@@ -22,7 +22,10 @@ internal static class Playback
                 shared.Progress.Get(viewer.UserId, id), file.Missing || !File.Exists(file.FullPath)));
         });
 
-        api.MapGet("files/{id:int}/stream", (HttpContext context, int id) => Stream(context, id, shared, streams, watch));
+        api.MapGet("files/{id:int}/stream", (HttpContext context, int id) =>
+        {
+            return Stream(context, id, shared, streams, watch);
+        });
     }
 
     private static IResult Stream(HttpContext context, int id, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
@@ -30,15 +33,20 @@ internal static class Playback
         var who = DeviceAuth.Viewer(context);
         if (Reachable(shared, who.Viewer, id) is not { } file) return ApiResults.Error(ApiErrorCode.NotFound);
 
-        FileStream source;
+        FileStream? opened = null;
+        long length;
         try
         {
-            source = FileStreamResult.OpenFile(file.FullPath);
+            opened = FileStreamResult.OpenFile(file.FullPath);
+            length = opened.Length;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
+            opened?.Dispose();
             return ApiResults.Error(FileStreamResult.ProblemWith(file.FullPath));
         }
+
+        var source = opened;
 
         StreamLease lease;
         CancellationToken stop;
@@ -52,16 +60,26 @@ internal static class Playback
             return ApiResults.Error(e.Code);
         }
 
-        // Access can change between the check above and the session appearing, where no re-check would see this stream.
-        if (!watch.Reachable(who.Account.Id, id))
+        var started = false;
+        try
         {
-            streams.Close(lease.Session);
-            lease.Dispose();
-            source.Dispose();
-            return ApiResults.Error(ApiErrorCode.NotFound);
-        }
+            // A token can die or access change after the checks above but before the session appeared, where neither
+            // an event nor a re-check would have found this stream.
+            if (!watch.IsSignedIn(who.Device.Id)) return ApiResults.Error(ApiErrorCode.Unauthorized);
+            if (!watch.Reachable(who.Account.Id, id)) return ApiResults.Error(ApiErrorCode.NotFound);
 
-        return new FileStreamResult(source, file.FullPath, streams, lease, stop);
+            started = true;
+            return new FileStreamResult(source, length, file.FullPath, streams, lease, stop);
+        }
+        finally
+        {
+            if (!started)
+            {
+                streams.Close(lease.Session);
+                lease.Dispose();
+                source.Dispose();
+            }
+        }
     }
 
     // The saved progress has the length only once this viewer has played the file. The probed one covers the rest.

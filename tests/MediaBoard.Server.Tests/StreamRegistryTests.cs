@@ -345,6 +345,49 @@ public sealed class StreamRegistryTests
     }
 
     [Fact]
+    public void AccessCheck_ThatThrows_EndsThatStream_AndStillChecksTheRest()
+    {
+        var logs = new HostTests.LogCapture();
+        var streams = new StreamRegistry(_time, _sleep, logs.CreateLogger("Streams"));
+        streams.Open(Who(), File(1), CancellationToken.None, out var failed);
+        streams.Open(Who(), File(2), CancellationToken.None, out var kept);
+        streams.Open(Who(), File(3), CancellationToken.None, out var gone);
+
+        streams.CloseUnreachable((_, fileId) => fileId switch
+        {
+            1 => throw new IOException(@"C:\library\1.mkv"),
+            2 => true,
+            _ => false,
+        });
+
+        Assert.True(failed.IsCancellationRequested);
+        Assert.False(kept.IsCancellationRequested);
+        Assert.True(gone.IsCancellationRequested);
+        var line = Assert.Single(logs.Lines);
+        Assert.Contains(nameof(IOException), line, StringComparison.Ordinal);
+        Assert.DoesNotContain("library", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Changed_SubscriberThrows_OnTheTimer_ReachesTheOthersAndGoesToTheLog()
+    {
+        var logs = new HostTests.LogCapture();
+        var streams = new StreamRegistry(_time, _sleep, logs.CreateLogger("Streams"));
+        streams.Open(Who(), File(), CancellationToken.None, out _);
+        var heard = 0;
+        streams.Changed += () => throw new InvalidOperationException(@"C:\library\1.mkv");
+        streams.Changed += () => heard++;
+
+        _time.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.Empty(streams.Current);
+        Assert.Equal(1, heard);
+        var line = Assert.Single(logs.Lines);
+        Assert.Contains(nameof(InvalidOperationException), line, StringComparison.Ordinal);
+        Assert.DoesNotContain("library", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Blocker_HoldsAndClearsOnOneThreadOfItsOwn()
     {
         const uint Continuous = 0x80000000;

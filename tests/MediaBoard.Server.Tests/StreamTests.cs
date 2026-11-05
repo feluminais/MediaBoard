@@ -49,6 +49,8 @@ public sealed class StreamTests
 
         public string FilePath => Path.Combine(Open.Path, "Sub", "Heat (1995).mkv");
 
+        public string ForbiddenPath => Path.Combine(Closed.Path, "Ronin (1998).mkv");
+
         public Account Sam { get; private set; } = null!;
 
         public IssuedDevice Phone { get; private set; } = null!;
@@ -70,9 +72,8 @@ public sealed class StreamTests
             await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()), Ct);
             var world = new World(fixture) { Client = fixture.TlsClient(), _base = $"https://127.0.0.1:{port}" };
             await world.FillAsync();
-            System.IO.File.Delete(world.FilePath);
-            await using var big = System.IO.File.Create(world.FilePath);
-            big.SetLength(BigSize);
+            await MakeBigAsync(world.FilePath);
+            await MakeBigAsync(world.ForbiddenPath);
             return world;
         }
 
@@ -87,9 +88,9 @@ public sealed class StreamTests
             Client.SendAsync(Fixture.Request("GET", $"{_base}/api/v1/files/{id}", Token), Ct);
 
         /// <summary>A stream the server is in the middle of sending, a little of it read.</summary>
-        public async Task<Stream> LiveBodyAsync(string? range = null)
+        public async Task<Stream> LiveBodyAsync(string? range = null, int? fileId = null)
         {
-            var response = await StreamAsync(range, completion: HttpCompletionOption.ResponseHeadersRead);
+            var response = await StreamAsync(range, fileId, HttpCompletionOption.ResponseHeadersRead);
             Assert.True(response.IsSuccessStatusCode, $"The stream answered {response.StatusCode}.");
 
             var body = await response.Content.ReadAsStreamAsync(Ct);
@@ -99,7 +100,20 @@ public sealed class StreamTests
 
         public RequestViewer Viewer() => new(new Viewer(Sam.Id, null), Sam, Phone.Device);
 
+        /// <summary>Every read of an account now throws, which fails the access check behind it.</summary>
+        public void BreakAccountReads()
+        {
+            using var connection = Fixture.Db.Open();
+            connection.Execute("ALTER TABLE user_folders RENAME TO user_folders_gone");
+        }
+
         public ValueTask DisposeAsync() => Fixture.DisposeAsync();
+
+        private static async Task MakeBigAsync(string path)
+        {
+            await using var big = System.IO.File.Create(path);
+            big.SetLength(BigSize);
+        }
 
         private async Task FillAsync()
         {
@@ -418,17 +432,78 @@ public sealed class StreamTests
     }
 
     [Fact]
-    public async Task FolderTaken_LeavesOtherStreamsPlaying()
+    public async Task FolderTaken_CutsOnlyStreamsFromThatFolder()
     {
         await using var world = await World.OnSocketAsync();
-        var kept = await world.LiveBodyAsync();
-        var row = world.Fixture.Streams.Current.Single();
-
         world.Fixture.Service.SetFolders(world.Sam.Id, [world.Open.Id, world.Closed.Id]);
-        await Task.Delay(TimeSpan.FromMilliseconds(200), Ct);
+        var kept = await world.LiveBodyAsync();
+        var taken = await world.LiveBodyAsync(fileId: world.ForbiddenFile);
 
-        Assert.Equal(row.Id, Assert.Single(world.Fixture.Streams.Current).Id);
-        await kept.ReadExactlyAsync(new byte[1024], Ct);
+        world.Fixture.Service.SetFolders(world.Sam.Id, [world.Open.Id]);
+
+        // The cut shows the re-check has run, so what survives it was looked at and kept.
+        await AssertCutAsync(taken);
+        Assert.Equal(world.File, Assert.Single(world.Fixture.Streams.Current).FileId);
+        await kept.ReadExactlyAsync(new byte[8 * 1024 * 1024], Ct);
+    }
+
+    [Fact]
+    public async Task AccessCheckFails_DuringARecheck_CutsTheStream()
+    {
+        var logs = new HostTests.LogCapture();
+        await using var world = await World.OnSocketAsync(logs);
+        var body = await world.LiveBodyAsync();
+
+        world.BreakAccountReads();
+        world.Fixture.Owner.NotifyChanged();
+
+        await AssertCutAsync(body);
+        Assert.Empty(world.Fixture.Streams.Current);
+        Assert.Contains(logs.Lines, line => line.Contains("SqliteException", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AccessCheckFails_WhileTheSessionOpens_LeavesNoRowOrOpenFile()
+    {
+        await using var world = await World.OnSocketAsync();
+        var broken = false;
+        world.Fixture.Streams.Changed += () =>
+        {
+            if (broken) return;
+
+            broken = true;
+            world.BreakAccountReads();
+        };
+
+        var response = await world.StreamAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Empty(world.Fixture.Streams.Current);
+        // Refused while any handle on the file is still open.
+        await using var alone = new FileStream(world.FilePath, FileMode.Open, FileAccess.Read, FileShare.None);
+    }
+
+    [Fact]
+    public async Task DeviceRevoked_WhileTheSessionOpens_401AndNoRow()
+    {
+        await using var world = await World.OnTestHostAsync();
+        // Past DeviceAuth, and too early for the event to find a session: only the request's own check is left.
+        world.Fixture.Streams.Changed += () => world.Fixture.Devices.Revoke(world.Phone.Device.Id);
+
+        await AssertErrorAsync(HttpStatusCode.Unauthorized, ApiErrorCode.Unauthorized, await world.StreamAsync());
+
+        Assert.Empty(world.Fixture.Streams.Current);
+    }
+
+    [Fact]
+    public async Task PasswordReset_WhileTheSessionOpens_401AndNoRow()
+    {
+        await using var world = await World.OnTestHostAsync();
+        world.Fixture.Streams.Changed += () => world.Fixture.Devices.RevokeAll(world.Sam.Id);
+
+        await AssertErrorAsync(HttpStatusCode.Unauthorized, ApiErrorCode.Unauthorized, await world.StreamAsync());
+
+        Assert.Empty(world.Fixture.Streams.Current);
     }
 
     [Fact]
