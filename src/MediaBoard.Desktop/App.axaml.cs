@@ -129,7 +129,7 @@ public partial class App : Application
         var connect = new ConnectViewModel(settings, Environment.MachineName, AppRestart.For(desktop).Run, saved);
         var actions = new StartActions(
             () => RunLocal(desktop, paths),
-            () => TryAgain(desktop, settings),
+            () => Start(desktop),
             () => desktop.Shutdown());
         var previous = _startWindow;
         _startWindow = new FirstRunWindow { DataContext = new FirstRunViewModel(settings, connect, step, paths.Settings, actions) };
@@ -138,11 +138,6 @@ public partial class App : Application
 
         _startWindow.Show();
         previous.Close();
-    }
-
-    private void TryAgain(IClassicDesktopStyleApplicationLifetime desktop, SettingsStore settings)
-    {
-        if (settings.TryLoad() is not SettingsReadResult.Unreadable) Start(desktop);
     }
 
     private void BringToFront()

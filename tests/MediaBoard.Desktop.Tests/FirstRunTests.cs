@@ -118,6 +118,25 @@ public sealed class FirstRunTests : IDisposable
         Assert.Equal(1, _quit);
     }
 
+    [Fact]
+    public void SettingsProblem_FileStillHeld_SaysSo()
+    {
+        new SettingsStore(SettingsPath).Save(new AppSettings());
+        var model = Model(StartStep.SettingsProblem);
+
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Delete))
+        {
+            model.TryAgainCommand.Execute(null);
+        }
+
+        Assert.Equal(0, _triedAgain);
+        Assert.NotNull(model.ProblemMessage);
+
+        model.TryAgainCommand.Execute(null);
+
+        Assert.Equal(1, _triedAgain);
+    }
+
     // No mode is saved until someone chooses, so closing the window asks again next time.
     [Fact]
     public void ClosedWithoutChoosing_SavesNothing()

@@ -65,6 +65,8 @@
                     <TextBlock Classes="muted" Text="Another program may have this file open. Close it and try again." TextWrapping="Wrap" />
                 </StackPanel>
                 <SelectableTextBlock Text="{Binding SettingsPath}" TextWrapping="Wrap" IsTabStop="False" FontSize="{DynamicResource SmallFontSize}" />
+                <TextBlock Text="{Binding ProblemMessage}" TextWrapping="Wrap" Foreground="{DynamicResource ErrorTextBrush}"
+                           IsVisible="{Binding ProblemMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                     <Button Content="Quit" MinWidth="88" IsCancel="True" HorizontalContentAlignment="Center" Command="{Binding QuitCommand}" />
                     <Button x:Name="TryAgainButton" Content="Try again" MinWidth="88" Classes="accent" IsDefault="True" HorizontalContentAlignment="Center" Command="{Binding TryAgainCommand}" />

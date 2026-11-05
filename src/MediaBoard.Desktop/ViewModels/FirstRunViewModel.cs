@@ -43,6 +43,10 @@ public sealed partial class FirstRunViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsChoice), nameof(IsConnect), nameof(IsSettingsProblem))]
     public partial StartStep Step { get; private set; }
 
+    /// <summary>Set when Try again found the file still held, so the press shows an answer.</summary>
+    [ObservableProperty]
+    public partial string? ProblemMessage { get; private set; }
+
     public bool IsChoice => Step == StartStep.Choice;
 
     public bool IsConnect => Step == StartStep.Connect;
@@ -75,7 +79,11 @@ public sealed partial class FirstRunViewModel : ObservableObject, IDisposable
     private void ConnectToServer() => Step = StartStep.Connect;
 
     [RelayCommand]
-    private void TryAgain() => _actions.TryAgain();
+    private void TryAgain()
+    {
+        if (_settings.TryLoad() is SettingsReadResult.Unreadable) ProblemMessage = "Still can't read it.";
+        else _actions.TryAgain();
+    }
 
     [RelayCommand]
     private void Quit() => _actions.Quit();
