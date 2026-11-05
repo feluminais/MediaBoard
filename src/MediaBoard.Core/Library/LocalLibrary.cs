@@ -90,14 +90,32 @@ public sealed partial class LocalLibrary : ILibrary
         return new LocalLibrary(this, viewer);
     }
 
+    /// <summary>Something this PC's pages show changed: the library, or the owner's own progress.</summary>
     public event Action? Changed
     {
         add => _shared.Changed += value;
         remove => _shared.Changed -= value;
     }
 
+    /// <summary>The library that every viewer shares changed. Progress doesn't count: that belongs to one account.</summary>
+    public event Action? ContentChanged
+    {
+        add => _shared.ContentChanged += value;
+        remove => _shared.ContentChanged -= value;
+    }
+
+    /// <summary>Raised with the account whose watched marks, positions or dismissals changed.</summary>
+    public event Action<int>? ProgressChanged
+    {
+        add => _shared.ProgressChanged += value;
+        remove => _shared.ProgressChanged -= value;
+    }
+
     /// <summary>Tells the library its data changed underneath it (after a scan or an identification run).</summary>
     public void NotifyChanged() => RaiseChanged();
+
+    /// <summary>Tells the library this viewer's progress changed underneath it. The library itself is as it was.</summary>
+    public void NotifyProgressChanged() => _shared.RaiseProgress(_viewer.UserId);
 
     /// <summary>
     /// Keeps what a scan found that the database does not: the non-media folders it skipped and whether the folder
@@ -133,7 +151,7 @@ public sealed partial class LocalLibrary : ILibrary
     {
         RequireFile(fileId);
         _progress.SetWatched(_viewer.UserId, fileId, watched);
-        RaiseChanged();
+        NotifyProgressChanged();
     }
 
     public void MarkNotMedia(int fileId)
@@ -359,6 +377,10 @@ public sealed partial class LocalLibrary : ILibrary
 
         public event Action? Changed;
 
+        public event Action? ContentChanged;
+
+        public event Action<int>? ProgressChanged;
+
         public int Version => Volatile.Read(ref _version);
 
         public void Raise()
@@ -367,6 +389,20 @@ public sealed partial class LocalLibrary : ILibrary
             Base?.Invalidate();
             Interlocked.Increment(ref _version);
             Changed?.Invoke();
+            ContentChanged?.Invoke();
+        }
+
+        // The base holds no progress, so it stays, and a viewer's edit is nothing to this PC's pages: left to reload here,
+        // one viewer's clicks would cost every other viewer a full read of the library.
+        public void RaiseProgress(int userId)
+        {
+            if (userId == LibraryDatabase.OwnerId)
+            {
+                Interlocked.Increment(ref _version);
+                Changed?.Invoke();
+            }
+
+            ProgressChanged?.Invoke(userId);
         }
     }
 

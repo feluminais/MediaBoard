@@ -16,7 +16,7 @@ internal sealed class StreamWatch(
         service.AccountClosed += streams.CloseAccount;
         service.DeviceSignedOut += streams.CloseDevice;
         service.AccessChanged += OnAccessChanged;
-        library.Owner.Changed += RecheckSoon;
+        library.Owner.ContentChanged += RecheckSoon;
     }
 
     public void Dispose()
@@ -24,7 +24,7 @@ internal sealed class StreamWatch(
         service.AccountClosed -= streams.CloseAccount;
         service.DeviceSignedOut -= streams.CloseDevice;
         service.AccessChanged -= OnAccessChanged;
-        library.Owner.Changed -= RecheckSoon;
+        library.Owner.ContentChanged -= RecheckSoon;
         // Nothing reads the kept part of the library once the server stops.
         library.Owner.ForgetSnapshot();
     }

@@ -24,7 +24,7 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
 
     private readonly Lock _gate = new();
     private readonly HashSet<Listener> _listeners = [];
-    private readonly HashSet<int> _foldersChanged = [];
+    private readonly HashSet<int> _accountsChanged = [];
     private ITimer? _keepAlive;
     private ITimer? _libraryChanged;
     private bool _everyoneChanged;
@@ -33,9 +33,10 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
     {
         service.AccountClosed += OnAccountClosed;
         service.DeviceSignedOut += OnDeviceSignedOut;
-        service.AccessChanged += OnAccessChanged;
+        service.AccessChanged += OnAccountChanged;
         streams.Stopped += OnStreamStopped;
-        library.Changed += OnLibraryChanged;
+        library.ContentChanged += OnLibraryChanged;
+        library.ProgressChanged += OnAccountChanged;
         _keepAlive = time.CreateTimer(_ => Send(KeepAlive), null, KeepAliveEvery, KeepAliveEvery);
     }
 
@@ -43,9 +44,10 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
     {
         service.AccountClosed -= OnAccountClosed;
         service.DeviceSignedOut -= OnDeviceSignedOut;
-        service.AccessChanged -= OnAccessChanged;
+        service.AccessChanged -= OnAccountChanged;
         streams.Stopped -= OnStreamStopped;
-        library.Changed -= OnLibraryChanged;
+        library.ContentChanged -= OnLibraryChanged;
+        library.ProgressChanged -= OnAccountChanged;
 
         lock (_gate)
         {
@@ -91,12 +93,12 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
         }
     }
 
-    // A change of folders alters only that account's lists, which is why it isn't a plain library change.
-    private void OnAccessChanged(int userId)
+    // Folders or progress: only that account's lists alter, so nobody else reloads.
+    private void OnAccountChanged(int userId)
     {
         lock (_gate)
         {
-            _foldersChanged.Add(userId);
+            _accountsChanged.Add(userId);
             ArmLibraryChanged();
         }
     }
@@ -113,10 +115,10 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
             _libraryChanged?.Dispose();
             _libraryChanged = null;
 
-            foreach (var listener in _listeners.Where(l => _everyoneChanged || _foldersChanged.Contains(l.UserId))) listener.Send(LibraryChanged);
+            foreach (var listener in _listeners.Where(l => _everyoneChanged || _accountsChanged.Contains(l.UserId))) listener.Send(LibraryChanged);
 
             _everyoneChanged = false;
-            _foldersChanged.Clear();
+            _accountsChanged.Clear();
         }
     }
 

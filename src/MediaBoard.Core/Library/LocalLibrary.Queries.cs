@@ -42,7 +42,7 @@ public sealed partial class LocalLibrary
         if (ResumePoint(title, snapshot.FilesByTitle[titleId]) is not { } point) return;
 
         _progress.DismissContinue(_viewer.UserId, titleId, point.LastPlayed);
-        RaiseChanged();
+        NotifyProgressChanged();
     }
 
     public IReadOnlyList<TitleCard> RecentlyAdded(int limit)

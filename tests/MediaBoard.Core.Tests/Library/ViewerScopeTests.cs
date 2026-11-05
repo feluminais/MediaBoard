@@ -247,11 +247,11 @@ public sealed class ViewerScopeTests : IDisposable
     public async Task Changed_ReachesListenersOfTheOriginalLibrary()
     {
         var heat = Movie("Heat");
-        var file = await FileIn(_folderA, _rootA, "Heat (1995).mkv", heat);
+        await FileIn(_folderA, _rootA, "Heat (1995).mkv", heat);
         var raised = 0;
         _owner.Changed += () => raised++;
 
-        As(_samEverywhere).SetWatched(file, true);
+        As(_samEverywhere).Rename(TargetKind.Title, heat, "The Heat");
 
         Assert.Equal(1, raised);
     }

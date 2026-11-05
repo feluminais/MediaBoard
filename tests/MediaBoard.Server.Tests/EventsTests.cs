@@ -113,6 +113,24 @@ public sealed class EventsTests
     }
 
     [Fact]
+    public async Task Events_OneAccountsProgress_ReachesOnlyThatAccount()
+    {
+        await using var world = await World.StartAsync();
+        var other = world.Fixture.NewPerson("Ann");
+        var theirs = await world.ListenAsync(world.Fixture.Devices.Issue(other.Id, "Tablet", "198.51.100.2").Token);
+        var own = await world.ListenAsync(world.Phone.Token);
+
+        world.Fixture.Owner.ForViewer(world.Fixture.Accounts.ViewerOf(world.Sam)).NotifyProgressChanged();
+        world.Clock.Advance(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(LibraryChanged, await NextAsync(own));
+
+        // The next frame the other account gets is the keep-alive, so the change never reached it.
+        world.Clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.Equal(KeepAlive, await NextAsync(theirs));
+    }
+
+    [Fact]
     public async Task Events_LibraryChanged_NotBefore5s()
     {
         await using var world = await World.StartAsync();

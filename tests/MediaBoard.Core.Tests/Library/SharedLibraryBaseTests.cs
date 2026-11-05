@@ -107,6 +107,48 @@ public sealed class SharedLibraryBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task AViewersProgress_LeavesTheBase_AndTellsOnlyThatAccount()
+    {
+        var (title, heat) = await MovieAsync("Heat");
+        _progress.Save(_sam.UserId, heat, 600, 6000);
+        var viewer = _owner.ForViewer(_sam);
+        viewer.ContinueWatching(10);
+        var kept = _owner.SharedBase!.Get();
+        var changed = 0;
+        var content = 0;
+        var accounts = new List<int>();
+        _owner.Changed += () => changed++;
+        _owner.ContentChanged += () => content++;
+        _owner.ProgressChanged += accounts.Add;
+
+        viewer.DismissContinue(title);
+        viewer.SetWatched(heat, watched: true);
+
+        Assert.Same(kept, _owner.SharedBase.Get());
+        Assert.Equal(0, changed);
+        Assert.Equal(0, content);
+        Assert.Equal([_sam.UserId, _sam.UserId], accounts);
+    }
+
+    [Fact]
+    public async Task TheOwnersProgress_RefreshesThisPc_AndLeavesTheBase()
+    {
+        var (_, heat) = await MovieAsync("Heat");
+        _owner.ForViewer(_sam).ContinueWatching(10);
+        var kept = _owner.SharedBase!.Get();
+        var changed = 0;
+        var content = 0;
+        _owner.Changed += () => changed++;
+        _owner.ContentChanged += () => content++;
+
+        _owner.SetWatched(heat, watched: true);
+
+        Assert.Equal(1, changed);
+        Assert.Equal(0, content);
+        Assert.Same(kept, _owner.SharedBase.Get());
+    }
+
+    [Fact]
     public async Task AChangeTheLibraryReports_IsSeenAtOnce()
     {
         var (title, _) = await MovieAsync("Heat");

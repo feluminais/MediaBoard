@@ -336,7 +336,7 @@ public sealed class AppHost(
     }
 
     // Watched marks and resume positions show on Home, the grids and the title page.
-    private void OnProgressChanged() => library.NotifyChanged();
+    private void OnProgressChanged() => library.NotifyProgressChanged();
 
     // Identification also runs by itself when the connection returns or the key changes. When its queue empties,
     // the library has new matches to show.
