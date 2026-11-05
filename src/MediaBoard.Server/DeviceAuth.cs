@@ -12,9 +12,12 @@ public sealed record RequestViewer(Viewer Viewer, Account Account, Device Device
 /// Lets through only a live device token of an enabled account. Every protected route inherits this filter from one
 /// group, and it doubles as that group's metadata, which is how the access table tells a route is inside.
 /// </summary>
-internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts) : IEndpointFilter
+internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, TimeProvider time) : IEndpointFilter
 {
     private const string Scheme = "Bearer ";
+
+    // A playing client reports every 10 s, and the Sharing page needs nothing finer than this.
+    private static readonly TimeSpan NoteSeenEvery = TimeSpan.FromMinutes(1);
 
     public static RequestViewer Viewer(HttpContext context) => (RequestViewer)context.Items[typeof(RequestViewer)]!;
 
@@ -23,8 +26,17 @@ internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts) : I
         if (Identify(context.HttpContext) is not { } viewer)
             return ValueTask.FromResult<object?>(ApiResults.Error(ApiErrorCode.Unauthorized));
 
+        NoteSeen(viewer, context.HttpContext);
         context.HttpContext.Items[typeof(RequestViewer)] = viewer;
         return next(context);
+    }
+
+    private void NoteSeen(RequestViewer viewer, HttpContext context)
+    {
+        if (time.GetUtcNow().UtcDateTime - viewer.Device.LastSeen < NoteSeenEvery) return;
+
+        devices.Touch(viewer.Device.Id, ClientAddress.Of(context));
+        accounts.Touch(viewer.Account.Id);
     }
 
     private RequestViewer? Identify(HttpContext context)

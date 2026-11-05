@@ -30,19 +30,22 @@ public sealed class ServerFixture : IAsyncDisposable
     private readonly List<IDisposable> _disposables = [];
     private WebApplication? _app;
 
-    public ServerFixture(ILoggerProvider? logs = null)
+    /// <param name="logs">Where the host logs to, or null for nowhere.</param>
+    /// <param name="time">The clock of everything that stamps a time or arms a timer, or null for the real one.</param>
+    public ServerFixture(ILoggerProvider? logs = null, TimeProvider? time = null)
     {
+        time ??= TimeProvider.System;
         Db = new LibraryDatabase(Path.Combine(_dir, "library.db"));
-        Accounts = new AccountStore(Db);
-        Devices = new DeviceStore(Db);
+        Accounts = new AccountStore(Db, time);
+        Devices = new DeviceStore(Db, time);
         Invites = new InviteStore(Db);
-        Guard = new SignInGuard(TimeProvider.System);
+        Guard = new SignInGuard(time);
         Service = new AccountService(Db, Accounts, Devices, Invites, Guard, new SharingLog(Db));
 
         Folders = new FolderStore(Db);
         Titles = new TitleStore(Db);
         Matches = new MatchStore(Db);
-        Progress = new ProgressStore(Db);
+        Progress = new ProgressStore(Db, time);
         Files = new FileStore(Db);
         Provider = new FakeMetadataProvider();
         // Never probes: a test flips it with ReportOffline.
@@ -60,8 +63,8 @@ public sealed class ServerFixture : IAsyncDisposable
             Progress,
             viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
             new ImageCache(http, Connectivity, ImagesDir));
-        Streams = new StreamRegistry(TimeProvider.System, new SleepRecorder(), logs?.CreateLogger("Streams"));
-        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, logs) { ServerName = ServerName };
+        Streams = new StreamRegistry(time, new SleepRecorder(), logs?.CreateLogger("Streams"));
+        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, logs, time) { ServerName = ServerName };
     }
 
     public LibraryDatabase Db { get; }
@@ -108,9 +111,9 @@ public sealed class ServerFixture : IAsyncDisposable
     public HttpClient Client { get; private set; } = null!;
 
     /// <summary>A fixture with the server mapped onto TestHost, with no socket.</summary>
-    public static async Task<ServerFixture> StartTestHostAsync()
+    public static async Task<ServerFixture> StartTestHostAsync(TimeProvider? time = null)
     {
-        var fixture = new ServerFixture();
+        var fixture = new ServerFixture(time: time);
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
         builder.Services.AddRoutingCore();
         builder.WebHost.UseTestServer();

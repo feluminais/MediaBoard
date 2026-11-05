@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using MediaBoard.Core.Remote;
 using Microsoft.AspNetCore.Http;
@@ -23,6 +24,8 @@ public sealed class AccessTableTests
     public static TheoryData<string, string> Protected => new()
     {
         { "GET", "/api/v1/me" },
+        { "POST", "/api/v1/sign-out" },
+        { "PUT", "/api/v1/me/password" },
         { "GET", "/api/v1/continue" },
         { "POST", "/api/v1/continue/{f}/dismiss" },
         { "GET", "/api/v1/recent" },
@@ -36,6 +39,9 @@ public sealed class AccessTableTests
         { "GET", "/api/v1/images/342/{f}.jpg" },
         { "GET", "/api/v1/files/{f}" },
         { "GET", "/api/v1/files/{f}/stream" },
+        { "PUT", "/api/v1/files/{f}/progress" },
+        { "PUT", "/api/v1/files/{f}/watched" },
+        { "GET", "/api/v1/events" },
     };
 
     [Theory, MemberData(nameof(Protected))]
@@ -73,6 +79,26 @@ public sealed class AccessTableTests
         fixture.FlagDisabled(person.Id);
 
         await AssertUnauthorized(fixture, m, r, issued.Token);
+    }
+
+    // A handler that bound its body would answer a stranger 415 or 400 before DeviceAuth ran.
+    [Theory]
+    [InlineData("PUT", "/api/v1/files/1/progress", "text/plain", "not json")]
+    [InlineData("PUT", "/api/v1/files/1/progress", "application/json", "{\"positionS\":-1}")]
+    [InlineData("PUT", "/api/v1/files/1/watched", "text/plain", "not json")]
+    [InlineData("PUT", "/api/v1/me/password", "text/plain", "not json")]
+    [InlineData("PUT", "/api/v1/me/password", "application/json", "{")]
+    [InlineData("POST", "/api/v1/sign-out", "text/plain", "not json")]
+    public async Task NoToken_WithABody_401(string m, string r, string type, string body)
+    {
+        await using var fixture = await ServerFixture.StartTestHostAsync();
+        using var request = fixture.Request(m, r);
+        request.Content = new StringContent(body, Encoding.UTF8, type);
+
+        var response = await fixture.Client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(ApiErrorCode.Unauthorized, await ServerFixture.CodeOf(response));
     }
 
     [Theory]

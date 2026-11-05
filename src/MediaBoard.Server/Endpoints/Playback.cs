@@ -1,12 +1,17 @@
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Remote;
+using MediaBoard.Core.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 namespace MediaBoard.Server.Endpoints;
 
-/// <summary>A file's details and its bytes. Both take an id, and an id the viewer can't reach is simply not found.</summary>
+/// <summary>
+/// A file's details, its bytes and where the viewer got to. All take an id, and an id the viewer can't reach is simply
+/// not found. A body is read inside its handler, after <see cref="DeviceAuth"/>: bound as a parameter, it would be
+/// refused with a 415 or a 400 before a stranger reached the token check.
+/// </summary>
 internal static class Playback
 {
     public static void Map(IEndpointRouteBuilder api, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
@@ -26,7 +31,53 @@ internal static class Playback
         {
             return Stream(context, id, shared, streams, watch);
         });
+
+        api.MapPut("files/{id:int}/progress", async (HttpContext context, int id) =>
+        {
+            var who = DeviceAuth.Viewer(context);
+            if (shared.Access.File(who.Viewer, id) is null) return ApiResults.Error(ApiErrorCode.NotFound);
+
+            var entry = await ApiResults.ReadJson<ProgressEntry>(context);
+            if (entry is null || !IsSound(entry)) return ApiResults.Error(ApiErrorCode.BadRequest);
+
+            // Whether or not the entry is kept: a device whose clock runs slow is still playing, and a pause sends only this.
+            streams.Heartbeat(who.Device.Id, id, entry.PositionS, entry.DurationS);
+            try
+            {
+                shared.Progress.SaveIfNewer(who.Account.Id, id, entry);
+                return Results.NoContent();
+            }
+            catch (ArgumentException)
+            {
+                return ApiResults.Error(ApiErrorCode.NotFound);
+            }
+        });
+
+        api.MapPut("files/{id:int}/watched", async (HttpContext context, int id) =>
+        {
+            var viewer = DeviceAuth.Viewer(context).Viewer;
+            if (shared.Access.File(viewer, id) is null) return ApiResults.Error(ApiErrorCode.NotFound);
+
+            var body = await ApiResults.ReadJson<WatchedRequest>(context);
+            if (body is not { Watched: { } watched }) return ApiResults.Error(ApiErrorCode.BadRequest);
+
+            try
+            {
+                shared.Owner.ForViewer(viewer).SetWatched(id, watched);
+                return Results.NoContent();
+            }
+            catch (ArgumentException)
+            {
+                return ApiResults.Error(ApiErrorCode.NotFound);
+            }
+        });
     }
+
+    // A time nobody sent would sort as the oldest there is, which reads as a report from long ago rather than a bad one.
+    private static bool IsSound(ProgressEntry entry) =>
+        double.IsFinite(entry.PositionS) && entry.PositionS >= 0
+        && double.IsFinite(entry.DurationS) && entry.DurationS >= 0
+        && entry.At != default;
 
     private static IResult Stream(HttpContext context, int id, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
     {

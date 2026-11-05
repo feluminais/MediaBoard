@@ -97,6 +97,140 @@ public sealed class ProgressStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveIfNewer_NoRow_Stores()
+    {
+        var at = _clock.GetUtcNow().AddMinutes(-1);
+
+        Assert.True(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 3000, true, at)));
+
+        Assert.Equal(new Progress(_fileId, 120, 3000, true, at.UtcDateTime), _store.Get(Owner, _fileId));
+    }
+
+    [Fact]
+    public void SaveIfNewer_NoWordOnWatched_NoRow_IsNotWatched()
+    {
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 3000, null, _clock.GetUtcNow()));
+
+        Assert.False(_store.Get(Owner, _fileId)!.Watched);
+    }
+
+    [Fact]
+    public void SaveIfNewer_NewerEntry_Replaces()
+    {
+        var at = _clock.GetUtcNow().AddMinutes(-2);
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 3000, null, at));
+
+        Assert.True(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, null, at.AddMinutes(1))));
+
+        Assert.Equal(240, _store.Get(Owner, _fileId)!.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_OlderEntry_ChangesNothing()
+    {
+        var at = _clock.GetUtcNow().AddMinutes(-1);
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, false, at));
+        var before = _store.Get(Owner, _fileId);
+
+        Assert.False(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 1000, true, at.AddTicks(-1))));
+
+        Assert.Equal(before, _store.Get(Owner, _fileId));
+    }
+
+    // A phone ahead of the server gets the same now twice when its reports land inside one tick of the clock.
+    [Fact]
+    public void SaveIfNewer_SameTime_TheLaterArrivalWins()
+    {
+        var at = _clock.GetUtcNow();
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 3000, null, at));
+
+        Assert.True(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, null, at)));
+
+        Assert.Equal(240, _store.Get(Owner, _fileId)!.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_FutureEntry_StampedNow_AndTheNextHonestEntryBeatsIt()
+    {
+        var now = _clock.GetUtcNow();
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(1000, 3000, null, now.AddHours(1)));
+
+        Assert.Equal(now.UtcDateTime, _store.Get(Owner, _fileId)!.LastPlayed);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(50, 3000, null, _clock.GetUtcNow())));
+        Assert.Equal(50, _store.Get(Owner, _fileId)!.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_OffsetTimes_CompareAsInstants()
+    {
+        var now = _clock.GetUtcNow();
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, null, now.AddMinutes(-1)));
+
+        // Its wall clock reads later than the saved one, but the moment is earlier.
+        var earlier = now.AddMinutes(-2).ToOffset(TimeSpan.FromHours(5));
+
+        Assert.False(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(120, 3000, null, earlier)));
+        Assert.Equal(now.AddMinutes(-1).UtcDateTime, _store.Get(Owner, _fileId)!.LastPlayed);
+    }
+
+    [Fact]
+    public void SaveIfNewer_KeepsWhatTheEntryDoesNotSay()
+    {
+        _store.Save(Owner, _fileId, 120, 3000);
+        _store.SetWatched(Owner, _fileId, true);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 0, null, _clock.GetUtcNow()));
+
+        var saved = _store.Get(Owner, _fileId)!;
+        Assert.Equal(3000, saved.DurationS);
+        Assert.True(saved.Watched);
+        Assert.Equal(240, saved.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_RowWithNoTime_Replaced()
+    {
+        using (var connection = _db.Open())
+        {
+            connection.Execute(
+                "INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played) VALUES (@Owner, @fileId, 5, 10, 0, NULL)",
+                new { Owner, fileId = _fileId });
+        }
+
+        Assert.True(_store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, null, _clock.GetUtcNow())));
+
+        Assert.Equal(240, _store.Get(Owner, _fileId)!.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_IsPerUser()
+    {
+        using (var connection = _db.Open())
+        {
+            connection.Execute("INSERT INTO users(id, name, role, all_folders, created_at) VALUES (2, 'Sam', 'viewer', 1, '2026-01-01')");
+        }
+
+        var at = _clock.GetUtcNow();
+        _store.SaveIfNewer(Owner, _fileId, new ProgressEntry(240, 3000, null, at));
+
+        Assert.True(_store.SaveIfNewer(2, _fileId, new ProgressEntry(120, 3000, null, at.AddMinutes(-1))));
+
+        Assert.Equal(240, _store.Get(Owner, _fileId)!.PositionS);
+        Assert.Equal(120, _store.Get(2, _fileId)!.PositionS);
+    }
+
+    [Fact]
+    public void SaveIfNewer_UnknownFile_ThrowsArgumentException() =>
+        Assert.Throws<ArgumentException>(() => _store.SaveIfNewer(Owner, 99999, new ProgressEntry(1, 2, null, _clock.GetUtcNow())));
+
+    [Fact]
+    public void SetWatched_UnknownFile_ThrowsArgumentException() =>
+        Assert.Throws<ArgumentException>(() => _store.SetWatched(Owner, 99999, true));
+
+    [Fact]
     public void WatchedEpisodeIds_ListsEpisodesOfWatchedFilesOnly()
     {
         using (var connection = _db.Open())

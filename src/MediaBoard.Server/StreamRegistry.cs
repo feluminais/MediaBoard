@@ -51,6 +51,9 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
     /// <summary>Raised off the lock when a row appears, goes or gets a new position. Rates move without it.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised off the lock with the device whose stream the owner stopped.</summary>
+    public event Action<int>? Stopped;
+
     public IReadOnlyList<StreamSession> Current
     {
         get
@@ -149,6 +152,7 @@ public sealed partial class StreamRegistry(TimeProvider time, ISleepBlocker slee
         }
 
         End([stopped]);
+        Stopped?.Invoke(stopped.DeviceId);
     }
 
     /// <summary>Ends a session with no block on opening it again.</summary>

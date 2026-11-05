@@ -5,6 +5,9 @@ namespace MediaBoard.Core.Remote;
 /// <param name="FileId">The file Play or Resume starts; null when nothing can be played.</param>
 public sealed record NextReply(int? FileId);
 
+/// <param name="Watched">Null only in a body that left it out, which is refused.</param>
+public sealed record WatchedRequest(bool? Watched);
+
 /// <summary>What a viewer's app needs to play a file. It carries no path: <see cref="FileName"/> is the name alone.</summary>
 /// <param name="DurationS">Null until the file has been played or probed.</param>
 /// <param name="Saved">This account's progress; null when it hasn't played the file.</param>

@@ -26,8 +26,10 @@ public sealed class PortInUseException(int port, Exception innerException) : Exc
 /// The HTTPS server inside the desktop app. It listens only between <see cref="StartAsync"/> and <see cref="StopAsync"/>.
 /// </summary>
 /// <param name="logs">Where the host's warnings and errors go, or null for nowhere.</param>
+/// <param name="time">The clock, or null for the real one.</param>
 public sealed class SharingServer(
-    AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, StreamRegistry streams, ILoggerProvider? logs = null)
+    AccountService service, AccountStore accounts, DeviceStore devices, SharedLibrary library, StreamRegistry streams,
+    ILoggerProvider? logs = null, TimeProvider? time = null)
 {
     private const int MaxBodyBytes = 64 * 1024;
     private const int MaxConnections = 256;
@@ -36,6 +38,7 @@ public sealed class SharingServer(
     // Kestrel cuts whatever is still open after this, so a stuck client can't hold up closing the app.
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private WebApplication? _app;
 
@@ -108,20 +111,27 @@ public sealed class SharingServer(
 
         Public.Map(app.MapGroup(Api), this, service);
 
-        var auth = new DeviceAuth(devices, accounts);
+        var auth = new DeviceAuth(devices, accounts, _time);
         var authenticated = app.MapGroup("").AddEndpointFilter(auth).WithMetadata(auth);
         var api = authenticated.MapGroup(Api);
-        Session.Map(api);
+        Session.Map(api, service);
         Library.Map(api, library);
         Search.Map(api, library);
 
         var watch = new StreamWatch(streams, service, accounts, devices, library);
         Playback.Map(api, library, streams, watch);
-        // Not started by hand here: a start that fails on the port would leave this listening to the events for good.
-        app.Lifetime.ApplicationStarted.Register(watch.Start);
+        var events = new EventHub(service, streams, library.Owner, _time);
+        Events.Map(api, events, watch, app.Lifetime.ApplicationStopping);
+        // Not started by hand here: a start that fails on the port would leave these listening to the events for good.
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            watch.Start();
+            events.Start();
+        });
         // Kestrel waits for open requests while it stops, and a stream would use up the whole timeout.
         app.Lifetime.ApplicationStopping.Register(() =>
         {
+            events.Dispose();
             watch.Dispose();
             streams.CloseAll();
         });

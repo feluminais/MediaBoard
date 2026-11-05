@@ -39,12 +39,7 @@ internal static class Public
         });
     }
 
-    private static bool IsDeviceName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= MaxDeviceName;
-
-    private static IResult Answer(IssuedDevice? issued, RedeemFailure? failure) =>
-        issued is not null ? ApiResults.Ok(new SessionReply { Token = issued.Token }) : ApiResults.Error(CodeOf(failure!.Value));
-
-    private static ApiErrorCode CodeOf(RedeemFailure failure) => failure switch
+    public static ApiErrorCode CodeOf(RedeemFailure failure) => failure switch
     {
         RedeemFailure.InviteDead => ApiErrorCode.InviteDead,
         RedeemFailure.PasswordTooShort => ApiErrorCode.PasswordTooShort,
@@ -52,4 +47,9 @@ internal static class Public
         RedeemFailure.AccountDisabled => ApiErrorCode.Disabled,
         _ => ApiErrorCode.WrongPassword,
     };
+
+    private static bool IsDeviceName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= MaxDeviceName;
+
+    private static IResult Answer(IssuedDevice? issued, RedeemFailure? failure) =>
+        issued is not null ? ApiResults.Ok(new SessionReply { Token = issued.Token }) : ApiResults.Error(CodeOf(failure!.Value));
 }
