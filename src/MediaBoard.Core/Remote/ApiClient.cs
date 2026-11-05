@@ -74,12 +74,45 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         using var response = await ExchangeAsync(root => Request(method, root + route, body), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
     }
 
-    /// <summary>For a body that isn't JSON, such as an image. It is read whole, so it is for small ones.</summary>
+    /// <summary>
+    /// For a body that isn't JSON, such as an image, read whole. The server's route sends no length, so the limit is
+    /// checked as the bytes arrive, and the whole read has one deadline: <see cref="ExchangeAsync"/>'s timeout ends with the headers.
+    /// </summary>
+    /// <param name="route">The route.</param>
+    /// <param name="maxBytes">The most to accept. A longer body is a server that isn't one of ours, or is broken.</param>
+    /// <param name="ct">Stops the read.</param>
+    /// <exception cref="ServerUnreachableException">The body was longer than <paramref name="maxBytes"/>, broke off, or didn't finish in time.</exception>
     /// <inheritdoc cref="Get{T}"/>
-    public async Task<byte[]> GetBytesAsync(string route, CancellationToken ct)
+    public async Task<byte[]> GetBytesAsync(string route, int maxBytes, CancellationToken ct)
     {
-        using var response = await ExchangeAsync(root => Request(HttpMethod.Get, root + route), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
-        return await response.Content.ReadAsByteArrayAsync(ct);
+        using var deadline = new CancellationTokenSource(RequestTimeout, _time);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
+        try
+        {
+            using var response = await ExchangeAsync(root => Request(HttpMethod.Get, root + route), HttpCompletionOption.ResponseHeadersRead, blocking: false, limit.Token);
+            if (response.Content.Headers.ContentLength > maxBytes) throw new ServerUnreachableException();
+
+            await using var body = await response.Content.ReadAsStreamAsync(limit.Token);
+            using var all = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            int read;
+            while ((read = await body.ReadAsync(chunk, limit.Token)) > 0)
+            {
+                if (all.Length + read > maxBytes) throw new ServerUnreachableException();
+
+                all.Write(chunk, 0, read);
+            }
+
+            return all.ToArray();
+        }
+        catch (OperationCanceledException e) when (!ct.IsCancellationRequested)
+        {
+            throw new ServerUnreachableException(e);
+        }
+        catch (Exception e) when (e is IOException or HttpRequestException)
+        {
+            throw new ServerUnreachableException(e);
+        }
     }
 
     /// <summary>For a request whose answer matters, such as the <see cref="SessionReply"/> of <c>sign-in</c>.</summary>

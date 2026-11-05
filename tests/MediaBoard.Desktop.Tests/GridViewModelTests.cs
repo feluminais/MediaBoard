@@ -205,6 +205,19 @@ public class GridViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task List_ContinueWatching_Remove_Failure_IsLogged()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
+        _library.DismissFailure = new InvalidOperationException("The server can't be reached.");
+        var list = new ListViewModel(ListKind.ContinueWatching, _library, _hub, Posters.None(), new PageActions(_ => { }, _ => { }, _ => { }));
+        await list.RefreshAsync();
+
+        list.Items.Single().RemoveCommand.Execute(null);
+
+        await Ui.WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error && e.Message.Contains("The server can't be reached.", StringComparison.Ordinal)));
+    }
+
+    [AvaloniaFact]
     public async Task Grid_ClickingACard_OpensTheTitle()
     {
         _library.TitleCards.Add(FakeLibrary.Card(9, "Coco"));

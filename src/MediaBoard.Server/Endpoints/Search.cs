@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Remote;
@@ -12,7 +11,7 @@ namespace MediaBoard.Server.Endpoints;
 /// Search, TMDB details and posters. TMDB is asked with the owner's key on the viewer's behalf: the key stays in
 /// <see cref="SharedLibrary.SearchFor"/>'s provider and no reply carries it.
 /// </summary>
-internal static partial class Search
+internal static class Search
 {
     public static void Map(IEndpointRouteBuilder api, SharedLibrary shared)
     {
@@ -43,7 +42,7 @@ internal static partial class Search
         api.MapGet("images/{width:int}/{name}", async (HttpContext context, int width, string name) =>
         {
             // Only a TMDB file name and a width the cache keeps. The cache turns the name into a path of its own.
-            if (width is not (300 or 342 or 780) || !TmdbFileName().IsMatch(name)) return ApiResults.Error(ApiErrorCode.NotFound);
+            if (width is not (300 or 342 or 780) || !TmdbImageName.IsValid(name)) return ApiResults.Error(ApiErrorCode.NotFound);
 
             if (await shared.Images.GetAsync("/" + name, width, context.RequestAborted) is not { } path) return ApiResults.Error(ApiErrorCode.NotFound);
 
@@ -70,7 +69,4 @@ internal static partial class Search
         _ => null,
     };
 
-    // \z, not $: a trailing newline would pass $.
-    [GeneratedRegex(@"^[A-Za-z0-9]+\.(?:jpg|png)\z", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex TmdbFileName();
 }

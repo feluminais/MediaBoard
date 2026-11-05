@@ -4,6 +4,7 @@ using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Settings;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Time.Testing;
 
 namespace MediaBoard.Server.Tests.ClientTests;
@@ -52,6 +53,8 @@ public sealed class RemoteLibraryTests
 
         public int Up { get; private set; }
 
+        public int UpFile { get; private set; }
+
         public ConnectionMonitor Monitor { get; private set; } = null!;
 
         public ApiClient Client { get; private set; } = null!;
@@ -73,7 +76,7 @@ public sealed class RemoteLibraryTests
             world.Heat = fixture.Movie("Heat", 101);
             world.Up = fixture.Movie("Up", 102);
             world.HeatFile = await fixture.AddFileAsync(folder, @"Sub\Heat (1995).mkv", world.Heat);
-            await fixture.AddFileAsync(folder, "Up (2009).mkv", world.Up);
+            world.UpFile = await fixture.AddFileAsync(folder, "Up (2009).mkv", world.Up);
             world.Sam = fixture.NewPerson("Sam");
             world.Phone = fixture.Join(world.Sam);
 
@@ -89,7 +92,10 @@ public sealed class RemoteLibraryTests
             return world;
         }
 
-        public RemoteImages NewImages() => new(Client, _imagesDir);
+        public RemoteImages NewImages(TimeProvider? time = null) => new(Client, _imagesDir, time);
+
+        public Task StartAgainAsync() =>
+            Fixture.Server.StartAsync(new SharingOptions(Port, ServerFixture.ServerName, Fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
 
         /// <summary>A client for a port nothing listens on.</summary>
         public ApiClient DeadClient()
@@ -150,6 +156,12 @@ public sealed class RemoteLibraryTests
         }
     }
 
+    private static ApiClient ClientOf(FakeApi api, ServerFixture fixture, TimeProvider? time = null)
+    {
+        var endpoint = new ServerEndpoint("Fake", [api.Address], CertificateStore.Fingerprint(fixture.NewCertificate()));
+        return new ApiClient(endpoint, () => "token", _ => { }, time);
+    }
+
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, ApiJson.Options);
 
     [Fact]
@@ -174,8 +186,13 @@ public sealed class RemoteLibraryTests
     {
         await using var world = await World.StartAsync();
 
+        world.Fixture.Progress.Save(world.Sam.Id, world.HeatFile, 60, 6000);
+        world.Fixture.Progress.Save(world.Sam.Id, world.UpFile, 60, 6000);
+
         Assert.Single(world.Library.RecentlyAdded(1));
         Assert.Equal(2, world.Library.RecentlyAdded(int.MaxValue).Count);
+        Assert.Single(world.Library.ContinueWatching(1));
+        Assert.Equal(2, world.Library.ContinueWatching(int.MaxValue).Count);
     }
 
     [Fact]
@@ -213,8 +230,9 @@ public sealed class RemoteLibraryTests
 
         world.Library.SetWatched(world.HeatFile, true);
 
+        // The page that made the edit refreshes itself, and a show sends one of these per file.
         Assert.True(world.Fixture.Progress.Get(world.Sam.Id, world.HeatFile)!.Watched);
-        Assert.Equal(1, changed);
+        Assert.Equal(0, changed);
         world.Library.SetWatched(world.HeatFile, false);
         Assert.False(world.Fixture.Progress.Get(world.Sam.Id, world.HeatFile)!.Watched);
     }
@@ -293,6 +311,14 @@ public sealed class RemoteLibraryTests
         world.Library.Changed += () => heard.TrySetResult();
 
         await using var running = await world.RunMonitorAsync();
+        await heard.Task.WaitAsync(Within, Ct);
+
+        // The link drops and comes back: what changed meanwhile was never heard.
+        heard = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await world.Fixture.Server.StopAsync();
+        await world.ReachAsync(ConnectionState.Unreachable);
+        Assert.False(heard.Task.IsCompleted);
+        await world.StartAgainAsync();
 
         await heard.Task.WaitAsync(Within, Ct);
     }
@@ -314,7 +340,7 @@ public sealed class RemoteLibraryTests
     }
 
     [Fact]
-    public async Task Search_TooShort_AsksNoOnlineGroup_AndServerGone_KeepsTheLibrary()
+    public async Task Search_ShortOrEmptyQuery_SkipsTheOnlineGroup_AndCancelThrows()
     {
         await using var world = await World.StartAsync();
         var search = new RemoteSearchService(world.Client);
@@ -325,6 +351,27 @@ public sealed class RemoteLibraryTests
 
         Assert.Empty((await search.SearchAsync("", Ct)).Library);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => search.SearchAsync("heat", new CancellationToken(canceled: true)));
+    }
+
+    [Fact]
+    public async Task Search_OnlineLegFails_KeepsTheLibraryHits_AndSaysOffline()
+    {
+        await using var fixture = new ServerFixture();
+        var heat = new TitleCard(1, TitleKind.Movie, "Heat", 1995, null, null, null, false, false, false, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
+        {
+            if (context.Request.Path.Value!.EndsWith("/search/local", StringComparison.Ordinal)) return Results.Json(new[] { heat }, ApiJson.Options).ExecuteAsync(context);
+
+            context.Response.StatusCode = 500;
+            return Task.CompletedTask;
+        });
+        using var client = ClientOf(api, fixture);
+
+        var results = await new RemoteSearchService(client).SearchAsync("heat", Ct);
+
+        Assert.Equal(OnlineState.Offline, results.State);
+        Assert.Empty(results.Online);
+        Assert.Equal(["Heat"], results.Library.Select(c => c.Name));
     }
 
     [Fact]
@@ -387,6 +434,80 @@ public sealed class RemoteLibraryTests
         Assert.Null(await images.GetAsync("/other.jpg", 342, Ct));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => images.GetAsync("/third.jpg", 342, new CancellationToken(canceled: true)));
         Assert.False(Directory.Exists(Path.Combine(world.ImagesDir, "remote")) && Directory.GetFiles(Path.Combine(world.ImagesDir, "remote")).Length > 0);
+    }
+
+    [Fact]
+    public async Task Images_NotFound_IsAskedAgainAfterFiveMinutes()
+    {
+        await using var world = await World.StartAsync();
+        var clock = new FakeTimeProvider();
+        var images = world.NewImages(clock);
+
+        Assert.Null(await images.GetAsync("/late.jpg", 342, Ct));
+
+        // The server answers 404 for "TMDB is down" too, so the miss is not kept for good.
+        Directory.CreateDirectory(world.Fixture.ImagesDir);
+        await File.WriteAllBytesAsync(Path.Combine(world.Fixture.ImagesDir, "w342late.jpg"), [9], Ct);
+        clock.Advance(TimeSpan.FromMinutes(4));
+        Assert.Null(await images.GetAsync("/late.jpg", 342, Ct));
+        clock.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.NotNull(await images.GetAsync("/late.jpg", 342, Ct));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Images_BodyOverTheLimit_IsNull_AndLeavesNoFile(bool declareLength)
+    {
+        await using var fixture = new ServerFixture();
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), async context =>
+        {
+            const int chunks = 200;
+            var chunk = new byte[64 * 1024];
+            if (declareLength) context.Response.ContentLength = chunk.Length * chunks;
+            try
+            {
+                for (var i = 0; i < chunks; i++) await context.Response.Body.WriteAsync(chunk, context.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                // The client stopped reading, as it should.
+            }
+        });
+        using var client = ClientOf(api, fixture);
+        var dir = Path.Combine(Path.GetTempPath(), "mediaboard-remote-images-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Assert.Null(await new RemoteImages(client, dir).GetAsync("/huge.jpg", 342, Ct));
+            Assert.Empty(Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories));
+            await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetBytesAsync("images/342/huge.jpg", 1024, Ct));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Images_BodyThatStalls_StopsAtTheDeadline()
+    {
+        await using var fixture = new ServerFixture();
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), async context =>
+        {
+            await context.Response.Body.WriteAsync(new byte[10], context.RequestAborted);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+            await FakeApi.HangAsync(context);
+        });
+        var clock = new FakeTimeProvider();
+        using var client = ClientOf(api, fixture, clock);
+
+        var read = client.GetBytesAsync("images/342/slow.jpg", 1024 * 1024, Ct);
+        while (api.Urls.IsEmpty) await Task.Delay(10, Ct);
+        await Task.Delay(500, Ct);
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        await Assert.ThrowsAsync<ServerUnreachableException>(() => read.WaitAsync(Within, Ct));
     }
 
     [Theory]

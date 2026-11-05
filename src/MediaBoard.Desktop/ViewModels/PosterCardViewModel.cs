@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 
 namespace MediaBoard.Desktop.ViewModels;
@@ -176,10 +176,9 @@ internal static class PosterCards
 {
     /// <summary>
     /// Runs on the thread pool because a viewer's library waits for the server, and this is called from a click. The list
-    /// refreshes from the library's <c>Changed</c>, so nothing waits for the result; a failure is traced, and the
-    /// connection state already says what is wrong.
+    /// refreshes from the library's <c>Changed</c>, so nothing waits for the result; a failure goes to the activity log.
     /// </summary>
-    public static void Dismiss(ILibrary library, int titleId) => _ = Task.Run(() =>
+    public static void Dismiss(ILibrary library, ActivityHub hub, int titleId) => _ = Task.Run(() =>
     {
         try
         {
@@ -187,7 +186,7 @@ internal static class PosterCards
         }
         catch (Exception e)
         {
-            Trace.TraceWarning($"Removing from Continue watching failed: {e.GetType().Name}");
+            hub.Log(ActivityLevel.Error, $"Couldn't remove it from Continue watching: {e.Message}");
         }
     });
 

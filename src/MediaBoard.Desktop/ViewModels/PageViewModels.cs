@@ -56,12 +56,14 @@ public sealed partial class HomeViewModel : PageViewModel
     private readonly Action _addFolder;
     private readonly Action _addKey;
     private readonly BackgroundQuery _query;
+    private readonly ActivityHub _hub;
     private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
 
     public HomeViewModel(ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions, Action addFolder, Action addKey)
         : base("Home")
     {
         _library = library;
+        _hub = hub;
         _posters = posters;
         _actions = actions;
         _addFolder = addFolder;
@@ -169,7 +171,7 @@ public sealed partial class HomeViewModel : PageViewModel
 
         var playing = PosterCards.Build(_library.ContinueWatching(RowLimit), known,
             item => PosterCardViewModel.For(item, _posters, card => _actions.PlayFile(card.FileId!.Value),
-                card => PosterCards.Dismiss(_library, card.TitleId), card => _actions.OpenTitle(card.TitleId)));
+                card => PosterCards.Dismiss(_library, _hub, card.TitleId), card => _actions.OpenTitle(card.TitleId)));
         var added = PosterCards.Build(_library.RecentlyAdded(RowLimit), known,
             card => PosterCardViewModel.For(card, _posters, c => _actions.OpenTitle(c.TitleId)));
         return new HomeData(false, playing, added);

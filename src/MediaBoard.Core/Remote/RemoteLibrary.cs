@@ -94,8 +94,8 @@ public sealed class RemoteLibrary : ILibrary, IDisposable
 
     public void SetWatched(int fileId, bool watched)
     {
+        // No Changed: a show sends one of these per file, and the page that edits refreshes itself afterwards.
         _client.Send(HttpMethod.Put, Route("files/{0}/watched", fileId), new WatchedRequest(watched));
-        Changed?.Invoke();
     }
 
     public Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct) => throw new NotSupportedException();

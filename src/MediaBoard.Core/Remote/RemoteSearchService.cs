@@ -25,7 +25,6 @@ public sealed class RemoteSearchService(ApiClient client) : ISearchService
         ct.ThrowIfCancellationRequested();
         var text = query.Trim();
 
-        // Local first, as the local service does: the palette shows these while TMDB is still thinking.
         IReadOnlyList<TitleCard> local = text.Length == 0
             ? []
             : await client.GetAsync<List<TitleCard>>(LocalRoute(text, SearchService.MaxLibraryResults), ct);
@@ -69,16 +68,7 @@ public sealed class RemoteSearchService(ApiClient client) : ISearchService
         return details;
     }
 
-    public IReadOnlyList<PaletteCommand> Commands(string filter)
-    {
-        var prefix = filter.Trim();
-        if (prefix.Length == 0) return AllCommands;
-
-        return AllCommands
-            .Where(c => c.Label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                        || c.Label.Split(' ').Any(w => w.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-    }
+    public IReadOnlyList<PaletteCommand> Commands(string filter) => PaletteCommands.Filter(AllCommands, filter);
 
     // Null is what the local service gives when TMDB can't answer; the caller can't tell a refusal from a dead link.
     private static async Task<T?> TryAsync<T>(Func<Task<T>> ask)

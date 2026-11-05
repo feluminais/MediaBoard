@@ -26,6 +26,9 @@ internal sealed class FakeLibrary : ILibrary
     /// <summary>Runs on the querying thread at the start of each read query, with its name: a test can block or throw.</summary>
     public Action<string>? OnQuery { get; set; }
 
+    /// <summary>Thrown by <see cref="DismissContinue"/>, as a viewer's library does when the server doesn't answer.</summary>
+    public Exception? DismissFailure { get; set; }
+
     public event Action? Changed;
 
     public void RaiseChanged() => Changed?.Invoke();
@@ -52,6 +55,8 @@ internal sealed class FakeLibrary : ILibrary
     /// <summary>Removes the title's entry from <see cref="Continue"/> and raises <see cref="Changed"/>, as the real library does.</summary>
     public void DismissContinue(int titleId)
     {
+        if (DismissFailure is { } failure) throw failure;
+
         lock (Edits) Edits.Add($"dismiss:{titleId}");
         Continue.RemoveAll(i => i.TitleId == titleId);
         RaiseChanged();

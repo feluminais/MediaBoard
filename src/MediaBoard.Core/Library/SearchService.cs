@@ -103,16 +103,7 @@ public sealed class SearchService(
         }
     }
 
-    public IReadOnlyList<PaletteCommand> Commands(string filter)
-    {
-        var prefix = filter.Trim();
-        if (prefix.Length == 0) return AllCommands;
-
-        return AllCommands
-            .Where(c => c.Label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                        || c.Label.Split(' ').Any(w => w.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-    }
+    public IReadOnlyList<PaletteCommand> Commands(string filter) => PaletteCommands.Filter(AllCommands, filter);
 
     private OnlineState StateOf(UnavailableReason reason)
     {

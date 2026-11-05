@@ -98,6 +98,19 @@ public class HomeViewModelTests : IDisposable
         Assert.Single(home.RecentlyAdded);
     }
 
+    [AvaloniaFact]
+    public async Task ContinueCard_Remove_Failure_IsLogged()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
+        _library.DismissFailure = new InvalidOperationException("The server can't be reached.");
+        var (_, home) = await LoadedHome();
+
+        home.ContinueWatching.Single().RemoveCommand.Execute(null);
+
+        await Ui.WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error && e.Message.Contains("The server can't be reached.", StringComparison.Ordinal)));
+        Assert.Single(home.ContinueWatching);
+    }
+
     [AvaloniaTheory]
     [InlineData(true)]
     [InlineData(false)]
