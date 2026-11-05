@@ -1,7 +1,9 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
+using MediaBoard.Core.Storage;
 using Microsoft.Extensions.Time.Testing;
 
 namespace MediaBoard.Server.Tests;
@@ -51,6 +53,16 @@ public sealed class SessionEndpointTests
             Fixture.Service.SignIn(Sam.Name, password, "Tablet", "198.51.100.1").Issued is not null;
 
         public ValueTask DisposeAsync() => Fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Me_NamesTheAccountAndTheOwner()
+    {
+        await using var world = await World.StartAsync();
+
+        var reply = await (await world.GetMeAsync(world.Phone.Token)).Content.ReadFromJsonAsync<MeReply>(ApiJson.Options, Ct);
+
+        Assert.Equal(new MeReply("Sam", world.Fixture.Accounts.Get(LibraryDatabase.OwnerId)!.Name), reply);
     }
 
     [Fact]

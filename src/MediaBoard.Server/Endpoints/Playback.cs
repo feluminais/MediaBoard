@@ -66,18 +66,16 @@ internal static class Playback
                 shared.Owner.ForViewer(viewer).SetWatched(id, watched);
                 return Results.NoContent();
             }
-            catch (ArgumentException)
+            catch (Exception e) when (e is ArgumentException || ProgressStore.IsUnknownFile(e))
             {
                 return ApiResults.Error(ApiErrorCode.NotFound);
             }
         });
     }
 
-    // A time nobody sent would sort as the oldest there is, which reads as a report from long ago rather than a bad one.
     private static bool IsSound(ProgressEntry entry) =>
         double.IsFinite(entry.PositionS) && entry.PositionS >= 0
-        && double.IsFinite(entry.DurationS) && entry.DurationS >= 0
-        && entry.At != default;
+        && double.IsFinite(entry.DurationS) && entry.DurationS >= 0;
 
     private static IResult Stream(HttpContext context, int id, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
     {

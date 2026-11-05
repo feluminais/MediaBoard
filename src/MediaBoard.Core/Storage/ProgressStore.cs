@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Dapper;
 using Microsoft.Data.Sqlite;
 
@@ -11,7 +12,12 @@ public sealed record Progress(int FileId, double PositionS, double DurationS, bo
 /// <param name="DurationS">0 means "unknown" and keeps the stored one.</param>
 /// <param name="Watched">Null keeps the stored flag.</param>
 /// <param name="At">When the report was made, by the reporting device's clock.</param>
-public sealed record ProgressEntry(double PositionS, double DurationS, bool? Watched, DateTimeOffset At);
+/// <remarks>Only <see cref="Watched"/> may be left out of the JSON: a position left out would bind to 0 and clear the saved one.</remarks>
+public sealed record ProgressEntry(
+    [property: JsonRequired] double PositionS,
+    [property: JsonRequired] double DurationS,
+    bool? Watched,
+    [property: JsonRequired] DateTimeOffset At);
 
 /// <summary>
 /// Where each file was left and whether it counts as watched. Writes are single upserts, so any thread may call them.
@@ -54,13 +60,12 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
     /// Marks the file watched, keeping its position. Marking it unwatched also forgets the position, so the next play
     /// starts at the beginning instead of the end.
     /// </summary>
-    /// <exception cref="ArgumentException">The file or the user doesn't exist.</exception>
     public void SetWatched(int userId, int fileId, bool watched)
     {
+        using var connection = db.Open();
         if (watched)
         {
-            Upsert(
-                fileId,
+            connection.Execute(
                 """
                 INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
                 VALUES (@userId, @fileId, 0, 0, 1, @now)
@@ -70,7 +75,6 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         }
         else
         {
-            using var connection = db.Open();
             connection.Execute(
                 "UPDATE progress SET watched = 0, position_s = 0 WHERE user_id = @userId AND file_id = @fileId",
                 new { userId, fileId });
@@ -89,28 +93,42 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         ArgumentNullException.ThrowIfNull(entry);
 
         var now = _time.GetUtcNow();
-        return Upsert(
-            fileId,
-            """
-            INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
-            VALUES (@userId, @fileId, @positionS, @durationS, COALESCE(@watched, 0), @at)
-            ON CONFLICT(user_id, file_id) DO UPDATE SET
-                position_s = excluded.position_s,
-                duration_s = CASE WHEN excluded.duration_s > 0 THEN excluded.duration_s ELSE progress.duration_s END,
-                watched = COALESCE(@watched, progress.watched),
-                last_played = excluded.last_played
-            WHERE progress.last_played IS NULL OR excluded.last_played >= progress.last_played
-            """,
-            new
-            {
-                userId,
-                fileId,
-                positionS = entry.PositionS,
-                durationS = entry.DurationS,
-                watched = entry.Watched,
-                at = FileStore.FormatTime(entry.At < now ? entry.At : now),
-            }) > 0;
+        using var connection = db.Open();
+        try
+        {
+            return connection.Execute(
+                """
+                INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
+                VALUES (@userId, @fileId, @positionS, @durationS, COALESCE(@watched, 0), @at)
+                ON CONFLICT(user_id, file_id) DO UPDATE SET
+                    position_s = excluded.position_s,
+                    duration_s = CASE WHEN excluded.duration_s > 0 THEN excluded.duration_s ELSE progress.duration_s END,
+                    watched = COALESCE(@watched, progress.watched),
+                    last_played = excluded.last_played
+                WHERE progress.last_played IS NULL OR excluded.last_played >= progress.last_played
+                """,
+                new
+                {
+                    userId,
+                    fileId,
+                    positionS = entry.PositionS,
+                    durationS = entry.DurationS,
+                    watched = entry.Watched,
+                    at = FileStore.FormatTime(entry.At < now ? entry.At : now),
+                }) > 0;
+        }
+        catch (Exception e) when (IsUnknownFile(e))
+        {
+            throw new ArgumentException($"There is no file {fileId} for this user to save.", nameof(fileId), e);
+        }
     }
+
+    /// <summary>
+    /// Whether a save failed because its file or user has gone, which only the write can find out when it goes at the
+    /// moment a request gets here. <see cref="SetWatched"/> lets this exception through for callers that handle every
+    /// database failure alike.
+    /// </summary>
+    public static bool IsUnknownFile(Exception exception) => exception is SqliteException { SqliteExtendedErrorCode: SqliteConstraintForeignKey };
 
     /// <summary>
     /// Takes the title off Continue watching until something of it is played after <paramref name="playedAt"/>. The
@@ -135,20 +153,6 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
             "SELECT DISTINCT fe.episode_id FROM file_episodes fe " +
             "JOIN progress p ON p.file_id = fe.file_id WHERE p.user_id = @userId AND p.watched = 1 ORDER BY fe.episode_id",
             new { userId }).ToList();
-    }
-
-    // A file can go while a request is on its way here, and only the write finds that out.
-    private int Upsert(int fileId, string sql, object parameters)
-    {
-        using var connection = db.Open();
-        try
-        {
-            return connection.Execute(sql, parameters);
-        }
-        catch (SqliteException e) when (e.SqliteExtendedErrorCode == SqliteConstraintForeignKey)
-        {
-            throw new ArgumentException($"There is no file {fileId} for this user to save.", nameof(fileId), e);
-        }
     }
 
     private string Now() => FileStore.FormatTime(_time.GetUtcNow());

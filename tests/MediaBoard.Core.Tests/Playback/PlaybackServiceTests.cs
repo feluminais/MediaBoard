@@ -135,6 +135,21 @@ public sealed class PlaybackServiceTests : IDisposable
         Assert.True(_progress.Get(Owner, id)!.Watched);
     }
 
+    // A scan can drop the row while the player runs. The owner gets a message, and the player's event thread carries on.
+    [Fact]
+    public async Task Ended_OnADeletedFile_SaysProgressWasNotSaved()
+    {
+        var id = await Play("Movie (2020).mkv");
+        using (var connection = _db.Open())
+        {
+            connection.Execute("DELETE FROM files WHERE id = @id", new { id });
+        }
+
+        Session.Raise(new PlaybackEvent.Ended());
+
+        Assert.Single(_hub.Recent, e => e.Message == "Couldn't save progress");
+    }
+
     [Fact]
     public async Task Ended_WithoutKnownPosition_MarksWatched()
     {

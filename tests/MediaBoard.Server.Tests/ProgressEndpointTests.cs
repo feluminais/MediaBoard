@@ -319,6 +319,9 @@ public sealed class ProgressEndpointTests
     [InlineData("{\"positionS\":1e999,\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"durationS\":1e999,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"durationS\":3000}")]
+    [InlineData("{\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
+    [InlineData("{\"positionS\":1,\"at\":\"2026-11-05T12:00:00Z\"}")]
+    [InlineData("{\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"durationS\":3000,\"at\":\"yesterday\"}")]
     [InlineData("null")]
     [InlineData("not json")]
@@ -331,6 +334,27 @@ public sealed class ProgressEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(ApiErrorCode.BadRequest, await ServerFixture.CodeOf(response));
         Assert.Null(world.Saved);
+    }
+
+    [Fact]
+    public async Task Progress_NoPosition_KeepsTheSavedOne()
+    {
+        await using var world = await World.StartAsync();
+        await world.PutProgressAsync(Entry(500, Start));
+
+        await world.PutRawProgressAsync("{\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}");
+
+        Assert.Equal(500, world.Saved!.PositionS);
+    }
+
+    [Fact]
+    public async Task Progress_NoWordOnWatched_IsFine()
+    {
+        await using var world = await World.StartAsync();
+
+        var response = await world.PutRawProgressAsync("{\"positionS\":1,\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
     [Fact]

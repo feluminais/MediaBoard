@@ -24,13 +24,16 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
 
     private readonly Lock _gate = new();
     private readonly HashSet<Listener> _listeners = [];
+    private readonly HashSet<int> _foldersChanged = [];
     private ITimer? _keepAlive;
     private ITimer? _libraryChanged;
+    private bool _everyoneChanged;
 
     public void Start()
     {
         service.AccountClosed += OnAccountClosed;
         service.DeviceSignedOut += OnDeviceSignedOut;
+        service.AccessChanged += OnAccessChanged;
         streams.Stopped += OnStreamStopped;
         library.Changed += OnLibraryChanged;
         _keepAlive = time.CreateTimer(_ => Send(KeepAlive), null, KeepAliveEvery, KeepAliveEvery);
@@ -40,6 +43,7 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
     {
         service.AccountClosed -= OnAccountClosed;
         service.DeviceSignedOut -= OnDeviceSignedOut;
+        service.AccessChanged -= OnAccessChanged;
         streams.Stopped -= OnStreamStopped;
         library.Changed -= OnLibraryChanged;
 
@@ -50,11 +54,20 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
         }
     }
 
-    /// <summary>Starts queueing frames for this device. Disposing the listener stops it.</summary>
+    /// <summary>
+    /// Starts queueing frames for this device. Disposing the listener stops it. A device needs one connection, so an
+    /// older one ends here: a token alone could otherwise fill every connection the server allows.
+    /// </summary>
     public Listener Join(RequestViewer who)
     {
         var listener = new Listener(this, who.Account.Id, who.Device.Id);
-        lock (_gate) _listeners.Add(listener);
+        lock (_gate)
+        {
+            foreach (var older in _listeners.Where(other => other.DeviceId == who.Device.Id)) older.End();
+            _listeners.RemoveWhere(other => other.DeviceId == who.Device.Id);
+            _listeners.Add(listener);
+        }
+
         return listener;
     }
 
@@ -69,12 +82,29 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
 
     private void OnStreamStopped(int deviceId) => Send(StreamStopped, listener => listener.DeviceId == deviceId);
 
-    // The first change arms the timer and the ones after it land under the same frame, which goes out when a burst has
-    // had time to settle.
     private void OnLibraryChanged()
     {
-        lock (_gate) _libraryChanged ??= time.CreateTimer(_ => SendLibraryChanged(), null, LibraryChangedGap, Timeout.InfiniteTimeSpan);
+        lock (_gate)
+        {
+            _everyoneChanged = true;
+            ArmLibraryChanged();
+        }
     }
+
+    // A change of folders alters only that account's lists, which is why it isn't a plain library change.
+    private void OnAccessChanged(int userId)
+    {
+        lock (_gate)
+        {
+            _foldersChanged.Add(userId);
+            ArmLibraryChanged();
+        }
+    }
+
+    // Called with _gate held. The first change arms the timer and the ones after it land under the same frame, which
+    // goes out when a burst has had time to settle.
+    private void ArmLibraryChanged() =>
+        _libraryChanged ??= time.CreateTimer(_ => SendLibraryChanged(), null, LibraryChangedGap, Timeout.InfiniteTimeSpan);
 
     private void SendLibraryChanged()
     {
@@ -82,9 +112,12 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
         {
             _libraryChanged?.Dispose();
             _libraryChanged = null;
-        }
 
-        Send(LibraryChanged);
+            foreach (var listener in _listeners.Where(l => _everyoneChanged || _foldersChanged.Contains(l.UserId))) listener.Send(LibraryChanged);
+
+            _everyoneChanged = false;
+            _foldersChanged.Clear();
+        }
     }
 
     private void SignOut(Func<Listener, bool> which)
@@ -103,7 +136,7 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
         }
     }
 
-    /// <summary>One open connection's queue. <see cref="Frames"/> ends after a frame sent with <see cref="SendLast"/>.</summary>
+    /// <summary>One open connection's queue. <see cref="Frames"/> ends on <see cref="End"/>, and after <see cref="SendLast"/>'s frame.</summary>
     internal sealed class Listener(EventHub hub, int userId, int deviceId) : IDisposable
     {
         private readonly Channel<string> _queue = Channel.CreateBounded<string>(
@@ -120,8 +153,10 @@ internal sealed class EventHub(AccountService service, StreamRegistry streams, L
         public void SendLast(string frame)
         {
             Send(frame);
-            _queue.Writer.TryComplete();
+            End();
         }
+
+        public void End() => _queue.Writer.TryComplete();
 
         public void Dispose() => hub.Leave(this);
     }

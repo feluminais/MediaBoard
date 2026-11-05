@@ -1,5 +1,6 @@
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
+using MediaBoard.Core.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -9,13 +10,14 @@ namespace MediaBoard.Server.Endpoints;
 /// <summary>The signed-in device's own session.</summary>
 internal static class Session
 {
-    public static void Map(IEndpointRouteBuilder api, AccountService accounts)
+    public static void Map(IEndpointRouteBuilder api, AccountService service, AccountStore accounts)
     {
-        api.MapGet("me", (HttpContext context) => ApiResults.Ok(new MeReply(DeviceAuth.Viewer(context).Account.Name)));
+        api.MapGet("me", (HttpContext context) =>
+            ApiResults.Ok(new MeReply(DeviceAuth.Viewer(context).Account.Name, accounts.Get(LibraryDatabase.OwnerId)!.Name)));
 
         api.MapPost("sign-out", (HttpContext context) =>
         {
-            accounts.SignOutDevice(DeviceAuth.Viewer(context).Device.Id);
+            service.SignOutDevice(DeviceAuth.Viewer(context).Device.Id);
             return Results.NoContent();
         });
 
@@ -28,7 +30,7 @@ internal static class Session
             try
             {
                 // A check waits in a gate and then hashes for a while, which mustn't hold a request thread.
-                await Task.Run(() => accounts.ChangePassword(userId, current, next));
+                await Task.Run(() => service.ChangePassword(userId, current, next));
                 return Results.NoContent();
             }
             catch (PasswordRefusedException e)

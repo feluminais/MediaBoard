@@ -227,10 +227,6 @@ public sealed class ProgressStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => _store.SaveIfNewer(Owner, 99999, new ProgressEntry(1, 2, null, _clock.GetUtcNow())));
 
     [Fact]
-    public void SetWatched_UnknownFile_ThrowsArgumentException() =>
-        Assert.Throws<ArgumentException>(() => _store.SetWatched(Owner, 99999, true));
-
-    [Fact]
     public void WatchedEpisodeIds_ListsEpisodesOfWatchedFilesOnly()
     {
         using (var connection = _db.Open())

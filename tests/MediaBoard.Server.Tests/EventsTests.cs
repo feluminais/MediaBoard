@@ -158,6 +158,94 @@ public sealed class EventsTests
     }
 
     [Fact]
+    public async Task Events_FolderChange_ReachesThatAccountOnly_Coalesced()
+    {
+        await using var world = await World.StartAsync();
+        var anna = world.Fixture.Devices.Issue(world.Fixture.NewPerson("Anna").Id, "Phone", "198.51.100.2");
+        var annas = await world.ListenAsync(anna.Token);
+        var sams = await world.ListenAsync(world.Phone.Token);
+
+        world.Fixture.Service.SetFolders(world.Sam.Id, []);
+        world.Clock.Advance(TimeSpan.FromSeconds(4));
+        world.Fixture.Service.SetFolders(world.Sam.Id, null);
+        world.Clock.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(LibraryChanged, await NextAsync(sams));
+        world.Clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.Equal(KeepAlive, await NextAsync(sams));
+        Assert.Equal(KeepAlive, await NextAsync(annas));
+    }
+
+    [Fact]
+    public async Task Events_FolderChange_AndLibraryChange_ShareOneFrame()
+    {
+        await using var world = await World.StartAsync();
+        var anna = world.Fixture.Devices.Issue(world.Fixture.NewPerson("Anna").Id, "Phone", "198.51.100.2");
+        var annas = await world.ListenAsync(anna.Token);
+        var sams = await world.ListenAsync(world.Phone.Token);
+
+        world.Fixture.Service.SetFolders(world.Sam.Id, []);
+        world.Fixture.Owner.NotifyChanged();
+        world.Clock.Advance(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(LibraryChanged, await NextAsync(sams));
+        Assert.Equal(LibraryChanged, await NextAsync(annas));
+        world.Clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.Equal(KeepAlive, await NextAsync(sams));
+        Assert.Equal(KeepAlive, await NextAsync(annas));
+    }
+
+    [Fact]
+    public async Task Events_FolderChange_DoesNotCarryOverToTheNextChange()
+    {
+        await using var world = await World.StartAsync();
+        var anna = world.Fixture.NewPerson("Anna");
+        var annas = await world.ListenAsync(world.Fixture.Devices.Issue(anna.Id, "Phone", "198.51.100.2").Token);
+        var sams = await world.ListenAsync(world.Phone.Token);
+
+        world.Fixture.Service.SetFolders(world.Sam.Id, []);
+        world.Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(LibraryChanged, await NextAsync(sams));
+
+        world.Fixture.Service.SetFolders(anna.Id, []);
+        world.Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(LibraryChanged, await NextAsync(annas));
+
+        world.Clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(KeepAlive, await NextAsync(sams));
+    }
+
+    [Fact]
+    public async Task Events_NewConnection_EndsTheDevicesOlderOne()
+    {
+        await using var world = await World.StartAsync();
+        var laptop = await world.ListenAsync(world.Laptop.Token);
+        var first = await world.ListenAsync(world.Phone.Token);
+        var second = await world.ListenAsync(world.Phone.Token);
+        var third = await world.ListenAsync(world.Phone.Token);
+
+        await AssertEndedAsync(first);
+        await AssertEndedAsync(second);
+
+        world.Clock.Advance(KeepAliveEvery);
+        Assert.Equal(KeepAlive, await NextAsync(third));
+        Assert.Equal(KeepAlive, await NextAsync(laptop));
+    }
+
+    [Fact]
+    public async Task Events_NewConnection_StillGetsWhatTheDeviceIsOwed()
+    {
+        await using var world = await World.StartAsync();
+        await world.ListenAsync(world.Phone.Token);
+        var second = await world.ListenAsync(world.Phone.Token);
+
+        world.Fixture.Service.SignOutDevice(world.Phone.Device.Id);
+
+        Assert.Equal(SignedOut, await NextAsync(second));
+        await AssertEndedAsync(second);
+    }
+
+    [Fact]
     public async Task Events_SignedOut_OnDisable()
     {
         await using var world = await World.StartAsync();

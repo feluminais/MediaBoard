@@ -36,4 +36,6 @@ public sealed class SessionReply
     public required string Token { get; init; }
 }
 
-public sealed record MeReply(string Name);
+/// <param name="Name">This account's name.</param>
+/// <param name="OwnerName">The owner's account name, which is who a viewer is told stopped a stream.</param>
+public sealed record MeReply(string Name, string OwnerName);
