@@ -12,6 +12,8 @@ public sealed class FakeClock : TimeProvider
 
     public List<TimeSpan> Delays { get; } = [];
 
+    public void Advance(TimeSpan by) => _now += by;
+
     public override DateTimeOffset GetUtcNow() => _now;
 
     public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
