@@ -18,8 +18,9 @@ MediaBoard finds the movies and series in your folders, fetches descriptions, po
 where you stopped. You play in the player you already use (MPC-HC, MPC-BE, mpv, VLC or any program), and it keeps your
 progress from that player, even when you opened the player yourself.
 
-Everything runs in one desktop app, with no background service. Renames, hidden titles and fixed
-matches live in MediaBoard's own database, so the files on disk keep their names and your torrent client keeps seeding them.
+Everything runs in one desktop app, with no background service. If you share your library (see [Sharing](#sharing)), the
+app has to stay running. Renames, hidden titles and fixed matches live in MediaBoard's own database, so the files on disk
+keep their names and your torrent client keeps seeding them.
 
 ## Features
 
@@ -95,14 +96,16 @@ Only files that belong to your library are recorded.
 
 ## Sharing
 
-You can let family watch your library from their own PC. It's off until you turn it on in **Settings**, and it works
-through the same MediaBoard app on both sides.
+You can let family watch your library from their own PC. Sharing is off until you turn it on in the **Sharing** page, and
+the app must stay running, in the tray at least, for people to connect. It works through MediaBoard on both sides.
 
-1. Turn sharing on. It listens on port `47880` over HTTPS. The first time, Windows asks about the firewall: allow
-   Private networks. To reach you from outside your home, forward that port on your router.
-2. Choose **Add person**, pick the folders they may see, and create an invite. Send them the invite and, if they aren't on
-   your network, your address.
-3. They unzip MediaBoard (built with `scripts/Publish.ps1`; it needs no .NET installed), choose **Connect to a server**,
+1. On the Sharing page, open **Connection**, enter your public address (a name or IP that reaches this PC) and, if you
+   want, a home address for people on your network, then save. An invite can't be made without an address.
+2. Turn sharing on. It listens on port `47880` over HTTPS. The first time, Windows asks about the firewall: allow Private
+   networks. To be reachable from outside your home, forward that port on your router.
+3. Choose **Add person**, pick the folders they may see, and create an invite. It already carries your addresses, so just
+   send it. An invite lasts 7 days and works once.
+4. They unzip MediaBoard (built with `scripts/Publish.ps1`; it needs no .NET installed), choose **Connect to a server**,
    paste the invite and pick a password.
 
 They browse, search and play from your library, and their progress is their own. The files stay on your PC and are never
@@ -139,7 +142,8 @@ into your media folders. Your TMDB key is stored in the settings file on your PC
 ## Development
 
 The solution has the app (`src/MediaBoard.Desktop`, Avalonia) and a UI-free core (`src/MediaBoard.Core`: scanning, parsing,
-identification, TMDB, storage, player adapters). The app reaches the library through an interface, so a shared library on another PC can stand in for the local one.
+identification, TMDB, storage, player adapters). The app reaches the library through an interface, so a shared library on another PC can
+stand in for the local one.
 
 ```bash
 dotnet build

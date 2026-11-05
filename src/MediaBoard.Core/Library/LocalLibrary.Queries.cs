@@ -13,6 +13,7 @@ public sealed partial class LocalLibrary
     private readonly object _indexGate = new();
     private SearchEntry[]? _searchIndex;
     private int _indexBuiltAt;
+    private LibraryBase? _indexSource;
 
     // ---- Home rows and grids ----
 
@@ -399,7 +400,9 @@ public sealed partial class LocalLibrary
         int version;
         lock (_indexGate)
         {
-            if (_searchIndex is { } cached && _indexBuiltAt == _shared.Version) return cached;
+            // Built from a shared base, it goes with that base: a write nobody reported shows up within the same bound.
+            if (_searchIndex is { } cached && _indexBuiltAt == _shared.Version
+                && (_indexSource is null || _shared.Base?.IsCurrent(_indexSource) == true)) return cached;
             version = _shared.Version;
         }
 
@@ -421,6 +424,7 @@ public sealed partial class LocalLibrary
             {
                 _searchIndex = built;
                 _indexBuiltAt = version;
+                _indexSource = _usesSharedBase ? snapshot.Library : null;
             }
         }
 

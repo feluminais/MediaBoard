@@ -69,7 +69,9 @@ public sealed class LoadMeasureTests
 
         // ---- 1. Home and a title page, 5 viewers at once ----
         var timings = new ConcurrentDictionary<string, ConcurrentBag<double>>(StringComparer.Ordinal);
-        await GetOkAsync(fixture, viewers[0].Token, "titles?kind=Movie");
+        // Once, so an empty 200 can't pass for a fast answer.
+        Assert.Equal(MovieCount, (await CardsAsync(fixture, viewers[0].Token, "titles?kind=Movie")).Count);
+        Assert.Equal(ShowCount, (await CardsAsync(fixture, viewers[0].Token, "titles?kind=Show")).Count);
         await GetOkAsync(fixture, viewers[0].Token, $"titles/{seeded.ShowTitleId}");
         await Task.WhenAll(viewers.Select(v => Task.Run(async () =>
         {
@@ -230,6 +232,13 @@ public sealed class LoadMeasureTests
         var path = Path.Combine(root, relPath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.Create(path).Dispose();
+    }
+
+    private static async Task<List<TitleCard>> CardsAsync(ServerFixture fixture, string token, string route)
+    {
+        using var response = await fixture.Client.SendAsync(fixture.Request("GET", "/api/v1/" + route, token), Ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<List<TitleCard>>(ApiJson.Options, Ct))!;
     }
 
     private static async Task GetOkAsync(ServerFixture fixture, string token, string route)

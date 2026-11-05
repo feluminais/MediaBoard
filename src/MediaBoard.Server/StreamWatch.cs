@@ -25,6 +25,8 @@ internal sealed class StreamWatch(
         service.DeviceSignedOut -= streams.CloseDevice;
         service.AccessChanged -= OnAccessChanged;
         library.Owner.Changed -= RecheckSoon;
+        // Nothing reads the kept part of the library once the server stops.
+        library.Owner.ForgetSnapshot();
     }
 
     /// <summary>Whether the device's row still exists. Every way of revoking a token deletes it.</summary>

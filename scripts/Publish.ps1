@@ -21,7 +21,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-Set-Location -LiteralPath $root
+Push-Location -LiteralPath $root
+try {
 
 $dirty = git status --porcelain --untracked-files=all
 if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
@@ -31,7 +32,9 @@ if (-not $Version) {
     $sha = (git rev-parse --short HEAD).Trim()
     $Version = "$(Get-Date -Format 'yyyy.MM.dd')-$sha"
 }
-if (-not $Output) { $Output = Join-Path $root 'artifacts' }
+if (-not $Output) { $Output = 'artifacts' }
+# A full path, from the repository root: the checks below cut the folder's path off each file's.
+$Output = [System.IO.Path]::GetFullPath($Output, $root)
 
 $name = "MediaBoard-$Version-win-x64"
 $folder = Join-Path $Output $name
@@ -54,7 +57,7 @@ Get-ChildItem -LiteralPath $folder -Recurse -Force -Filter *.pdb | Remove-Item -
 $unwanted = Get-ChildItem -LiteralPath $folder -Recurse -Force | ForEach-Object {
     $relative = $_.FullName.Substring($folder.Length).TrimStart([char]92)
     if ($_.Extension -in '.db', '.sqlite', '.pfx', '.bin' -or $_.Name -in 'settings.json', 'pending-progress.json' -or
-        $relative -match '^(\.claude|\.superpowers|docs)([\\/]|$)') { $relative }
+        $relative -match '(^|[\\/])(\.claude|\.superpowers|docs)([\\/]|$)') { $relative }
 }
 if ($unwanted) { throw "The published folder holds files that should not ship:`n$($unwanted -join "`n")" }
 
@@ -63,3 +66,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $megabytes = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
 Write-Host "Wrote $zip ($megabytes MB)"
+
+}
+finally {
+    Pop-Location
+}

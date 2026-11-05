@@ -344,6 +344,9 @@ public sealed partial class LocalLibrary : ILibrary
     /// </summary>
     internal LibrarySnapshot Snapshot() => LibrarySnapshot.Load(_db, _viewer, _usesSharedBase ? _shared.Base : null);
 
+    /// <summary>Lets go of what the sharing server kept, for when it stops listening.</summary>
+    public void ForgetSnapshot() => _shared.Base?.Invalidate();
+
     /// <summary>For <see cref="ViewerAccess"/>, so a check by id reads the same base the lists do.</summary>
     internal SharedLibraryBase? SharedBase => _shared.Base;
 
@@ -360,8 +363,9 @@ public sealed partial class LocalLibrary : ILibrary
 
         public void Raise()
         {
-            Interlocked.Increment(ref _version);
+            // The base goes first: a search that reads the new version must not be handed the old base.
             Base?.Invalidate();
+            Interlocked.Increment(ref _version);
             Changed?.Invoke();
         }
     }

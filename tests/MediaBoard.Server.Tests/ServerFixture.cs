@@ -33,7 +33,7 @@ public sealed class ServerFixture : IAsyncDisposable
     /// <param name="logs">Where the host logs to, or null for nowhere.</param>
     /// <param name="time">The clock of everything that stamps a time or arms a timer, or null for the real one.</param>
     /// <param name="shareSnapshots">Whether the library keeps the shared part of its snapshot, as the app does.</param>
-    public ServerFixture(ILoggerProvider? logs = null, TimeProvider? time = null, bool shareSnapshots = false)
+    public ServerFixture(ILoggerProvider? logs = null, TimeProvider? time = null, bool shareSnapshots = true)
     {
         time ??= TimeProvider.System;
         Db = new LibraryDatabase(Path.Combine(_dir, "library.db"));
@@ -115,7 +115,7 @@ public sealed class ServerFixture : IAsyncDisposable
     public HttpClient Client { get; private set; } = null!;
 
     /// <summary>A fixture with the server mapped onto TestHost, with no socket.</summary>
-    public static async Task<ServerFixture> StartTestHostAsync(TimeProvider? time = null, bool shareSnapshots = false)
+    public static async Task<ServerFixture> StartTestHostAsync(TimeProvider? time = null, bool shareSnapshots = true)
     {
         var fixture = new ServerFixture(time: time, shareSnapshots: shareSnapshots);
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
@@ -165,17 +165,26 @@ public sealed class ServerFixture : IAsyncDisposable
     {
         var path = Path.Combine(_dir, "library", name);
         Directory.CreateDirectory(path);
-        return Folders.Add(path);
+        var folder = Folders.Add(path);
+        Owner.ForgetSnapshot();
+        return folder;
     }
 
-    public int Movie(string name, int tmdbId) => Titles.Upsert(new TitleDetails(
-        tmdbId, TitleKind.Movie, name, 2020, null, $"About {name}.", 7.0, "/poster.jpg", 100, []));
+    // These write behind the library's back, as a scan does. The app tells the library after one; here only the kept part
+    // is dropped, so tests that count library-changed events see none they did not cause.
+    public int Movie(string name, int tmdbId)
+    {
+        var id = Titles.Upsert(new TitleDetails(tmdbId, TitleKind.Movie, name, 2020, null, $"About {name}.", 7.0, "/poster.jpg", 100, []));
+        Owner.ForgetSnapshot();
+        return id;
+    }
 
     public int Show(string name, int tmdbId, int episodes)
     {
         var id = Titles.Upsert(new TitleDetails(tmdbId, TitleKind.Show, name, 2015, null, "About.", 8.0, "/poster.jpg", 45, [1]));
         Titles.UpsertEpisodes(id, new SeasonDetails(
             1, Enumerable.Range(1, episodes).Select(n => new EpisodeDetails(1, n, $"{name} 1x{n}", 45, null)).ToList()));
+        Owner.ForgetSnapshot();
         return id;
     }
 
@@ -188,6 +197,7 @@ public sealed class ServerFixture : IAsyncDisposable
         await new LibraryScanner(Db, new ActivityHub()).ScanAsync(folder, TestContext.Current.CancellationToken);
         var file = new FileStore(Db).ByFolder(folder.Id).Single(r => r.RelPath == relPath);
         Assert.True(Matches.SetMatch(file.Id, titleId, Titles.EpisodeIds(titleId, episodes), 1.0, "auto"));
+        Owner.ForgetSnapshot();
         return file.Id;
     }
 

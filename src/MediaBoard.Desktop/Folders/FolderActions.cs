@@ -72,6 +72,8 @@ public sealed class FolderActions(
 
         // Switch it off and let the watcher drop it before the rows go: a rescan of a folder being deleted would fail.
         folders.SetEnabled(folderId, false);
+        // Before the watcher, which can wait for a running scan: a stream request must not pass for that long.
+        library.NotifyChanged();
         watcher.Refresh();
         folders.Remove(folderId);
         host.ForgetFolder(folderId);
@@ -94,6 +96,7 @@ public sealed class FolderActions(
 
         await StopScanAsync(folderId).ConfigureAwait(false);
         folders.SetEnabled(folderId, false);
+        library.NotifyChanged();
         watcher.Refresh();
         host.ForgetFolder(folderId);
         library.NotifyChanged();
