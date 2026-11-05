@@ -20,6 +20,9 @@ public enum ApiErrorCode
     TooLarge,
     VersionMismatch,
     BadRequest,
+
+    /// <summary>Never sent: what a viewer's proxy reports when a stream broke and no answer said why.</summary>
+    Unreachable,
 }
 
 /// <param name="Code">Required, because an enum left out would read as its first member.</param>

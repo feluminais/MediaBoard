@@ -2,6 +2,7 @@ using System.Diagnostics;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Players;
+using MediaBoard.Core.Remote;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
 using Microsoft.Data.Sqlite;
@@ -100,6 +101,16 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         try
         {
             await PlayCoreAsync(fileId, fromStart, ct).ConfigureAwait(false);
+        }
+        catch (ServerUnreachableException)
+        {
+            _hub.Log(ActivityLevel.Warning, "Can't reach the server", "Their PC may be off or asleep, or sharing is off");
+        }
+        catch (Exception e) when (e is ApiException or IdentityChangedException)
+        {
+            // Signed out and a new certificate each have their own panel. This is for whoever pressed Play.
+            Trace.TraceWarning($"Asking for a file failed: {e.GetType().Name}");
+            _hub.Log(ActivityLevel.Warning, "Couldn't open this file");
         }
         finally
         {
@@ -203,6 +214,34 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         {
             _playGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Ends the session on <paramref name="fileId"/> because its stream failed. A player left without its stream raises no
+    /// error: it plays out its buffer, then reports Ended and the file's full length. So from here nothing it says counts,
+    /// the position saved before the failure stands, and the player is closed. Doesn't wait for a Play in progress, so the
+    /// session stops listening at once; does nothing if that file isn't what's playing.
+    /// </summary>
+    /// <param name="fileId">The file whose stream failed.</param>
+    /// <param name="reason">What to tell the viewer.</param>
+    public async Task AbandonAsync(int fileId, string reason)
+    {
+        Playing? playing;
+        lock (_stateGate) playing = _current;
+        if (playing is null) return;
+
+        lock (playing.Gate)
+        {
+            if (playing.Final || playing.FileId != fileId) return;
+
+            playing.Final = true;
+            _progress.Finished(fileId);
+        }
+
+        ClearCurrent(playing);
+        _hub.Log(ActivityLevel.Warning, reason);
+        await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        ProgressChanged?.Invoke();
     }
 
     /// <summary>Saves the open session's position and closes its player.</summary>
@@ -385,6 +424,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
                 Trace.TraceWarning($"Could not save progress: {ex}");
             }
 
+            Finish(playing);
             Rebind(playing, next);
         }
 
@@ -424,6 +464,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
             case PlaybackEvent.Paused:
                 SaveLastPosition(playing);
+                if (playing.FileId is { } paused) _progress.Paused(paused);
                 break;
 
             case PlaybackEvent.Ended:
@@ -433,14 +474,25 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
                     MarkWatched(playing);
                 }
 
+                Finish(playing);
                 break;
 
             case PlaybackEvent.Closed:
                 SaveLastPosition(playing);
+                Finish(playing);
                 break;
 
-            // Failed: whatever the player reported before failing is not progress, so nothing is saved.
+            // Whatever the player reported before failing is not progress, so nothing is saved.
+            case PlaybackEvent.Failed:
+                Finish(playing);
+                break;
         }
+    }
+
+    // Called with playing.Gate held.
+    private void Finish(Playing playing)
+    {
+        if (playing.FileId is { } fileId) _progress.Finished(fileId);
     }
 
     private void SaveLastPosition(Playing playing)
@@ -523,6 +575,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
                 }
 
                 SaveLastPosition(playing);
+                if (final) Finish(playing);
             }
             catch (Exception ex) when (IsSaveFailure(ex))
             {
