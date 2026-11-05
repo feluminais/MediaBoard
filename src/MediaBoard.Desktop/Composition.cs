@@ -134,7 +134,8 @@ public static class Composition
         services.AddSingleton(sp => new LocalLibrary(
             sp.GetRequiredService<LibraryDatabase>(),
             sp.GetRequiredService<IMetadataProvider>(),
-            timeProvider: sp.GetRequiredService<TimeProvider>()));
+            timeProvider: sp.GetRequiredService<TimeProvider>(),
+            shareSnapshots: true));
         services.AddSingleton<ILibrary>(sp => sp.GetRequiredService<LocalLibrary>());
         services.AddSingleton<ISearchService>(sp => new SearchService(
             sp.GetRequiredService<ILibrary>(),
@@ -336,7 +337,7 @@ public static class Composition
 
         services.AddSingleton(_ => new CertificateStore(paths.Certificate));
         services.AddSingleton(sp => new StreamRegistry(sp.GetRequiredService<TimeProvider>(), new SleepBlocker()));
-        services.AddSingleton(sp => new ViewerAccess(sp.GetRequiredService<LibraryDatabase>()));
+        services.AddSingleton(sp => new ViewerAccess(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<LocalLibrary>()));
         services.AddSingleton(sp =>
         {
             var owner = sp.GetRequiredService<LocalLibrary>();

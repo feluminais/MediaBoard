@@ -17,13 +17,13 @@ public sealed record ReachableFile(
 /// off, a hide at any level (title, season, episode, file, folder), a file marked "not a movie or show". Callers
 /// answer an unreachable id exactly as they answer one that doesn't exist.
 /// </summary>
-public sealed class ViewerAccess(LibraryDatabase db)
+public sealed class ViewerAccess(LibraryDatabase db, LocalLibrary? owner = null)
 {
     public ReachableFile? File(Viewer viewer, int fileId)
     {
         ArgumentNullException.ThrowIfNull(viewer);
 
-        var snapshot = LibrarySnapshot.Load(db, viewer);
+        var snapshot = LibrarySnapshot.Load(db, viewer, owner?.SharedBase);
         if (!snapshot.FilesById.TryGetValue(fileId, out var file)) return null;
         if (file.TitleId is not { } titleId || !snapshot.Titles.TryGetValue(titleId, out var title)) return null;
 
@@ -40,6 +40,6 @@ public sealed class ViewerAccess(LibraryDatabase db)
     public bool CanReachTitle(Viewer viewer, int titleId)
     {
         ArgumentNullException.ThrowIfNull(viewer);
-        return LibrarySnapshot.Load(db, viewer).Titles.ContainsKey(titleId);
+        return LibrarySnapshot.Load(db, viewer, owner?.SharedBase).Titles.ContainsKey(titleId);
     }
 }

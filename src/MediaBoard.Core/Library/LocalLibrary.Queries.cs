@@ -20,7 +20,7 @@ public sealed partial class LocalLibrary
     {
         if (limit <= 0) return [];
 
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         var items = new List<ContinueItem>();
         foreach (var (titleId, title) in snapshot.Titles)
         {
@@ -36,7 +36,7 @@ public sealed partial class LocalLibrary
 
     public void DismissContinue(int titleId)
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         if (!snapshot.Titles.TryGetValue(titleId, out var title)) return;
         if (ResumePoint(title, snapshot.FilesByTitle[titleId]) is not { } point) return;
 
@@ -48,7 +48,7 @@ public sealed partial class LocalLibrary
     {
         if (limit <= 0) return [];
 
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         return Cards(snapshot, includeHidden: false)
             .OrderByDescending(c => c.DateAdded).ThenBy(c => SortKey(c.Name), StringComparer.Ordinal)
             .Take(limit).ToList();
@@ -56,7 +56,7 @@ public sealed partial class LocalLibrary
 
     public IReadOnlyList<TitleCard> Titles(TitleKind kind, TitleSort sort, bool includeHidden)
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         var cards = Cards(snapshot, includeHidden).Where(c => c.Kind == kind);
         return (sort switch
         {
@@ -70,7 +70,7 @@ public sealed partial class LocalLibrary
 
     public TitleDetailsView? Title(int titleId)
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         if (!snapshot.Titles.TryGetValue(titleId, out var title)) return null;
 
         var files = snapshot.FilesByTitle[titleId];
@@ -150,7 +150,7 @@ public sealed partial class LocalLibrary
 
     public IReadOnlyList<ReviewItem> NeedsReview()
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         var visible = snapshot.Files.Where(f => f.Status == "review" && !f.Hidden).ToDictionary(f => f.Id);
         if (visible.Count == 0) return [];
 
@@ -177,7 +177,7 @@ public sealed partial class LocalLibrary
 
     public IReadOnlyList<FolderRow> Folders()
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         var counts = snapshot.FileCountByFolder;
         return snapshot.Folders.Select(folder =>
         {
@@ -194,7 +194,7 @@ public sealed partial class LocalLibrary
 
     public int? NextEpisodeFileId(int titleId)
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         if (!snapshot.Titles.TryGetValue(titleId, out var title)) return null;
 
         var all = snapshot.FilesByTitle[titleId];
@@ -403,7 +403,7 @@ public sealed partial class LocalLibrary
             version = _shared.Version;
         }
 
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         var built = Cards(snapshot, includeHidden: false)
             .Select(card =>
             {

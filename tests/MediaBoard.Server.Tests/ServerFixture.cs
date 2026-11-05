@@ -32,7 +32,8 @@ public sealed class ServerFixture : IAsyncDisposable
 
     /// <param name="logs">Where the host logs to, or null for nowhere.</param>
     /// <param name="time">The clock of everything that stamps a time or arms a timer, or null for the real one.</param>
-    public ServerFixture(ILoggerProvider? logs = null, TimeProvider? time = null)
+    /// <param name="shareSnapshots">Whether the library keeps the shared part of its snapshot, as the app does.</param>
+    public ServerFixture(ILoggerProvider? logs = null, TimeProvider? time = null, bool shareSnapshots = false)
     {
         time ??= TimeProvider.System;
         Db = new LibraryDatabase(Path.Combine(_dir, "library.db"));
@@ -55,8 +56,8 @@ public sealed class ServerFixture : IAsyncDisposable
         var http = new HttpClient(new NotFoundHandler());
         _disposables.Add(http);
         ImagesDir = Path.Combine(_dir, "images");
-        Owner = new LocalLibrary(Db, Provider);
-        Access = new ViewerAccess(Db);
+        Owner = new LocalLibrary(Db, Provider, shareSnapshots: shareSnapshots);
+        Access = new ViewerAccess(Db, Owner);
         var shared = new SharedLibrary(
             Owner,
             Access,
@@ -114,9 +115,9 @@ public sealed class ServerFixture : IAsyncDisposable
     public HttpClient Client { get; private set; } = null!;
 
     /// <summary>A fixture with the server mapped onto TestHost, with no socket.</summary>
-    public static async Task<ServerFixture> StartTestHostAsync(TimeProvider? time = null)
+    public static async Task<ServerFixture> StartTestHostAsync(TimeProvider? time = null, bool shareSnapshots = false)
     {
-        var fixture = new ServerFixture(time: time);
+        var fixture = new ServerFixture(time: time, shareSnapshots: shareSnapshots);
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
         builder.Services.AddRoutingCore();
         builder.WebHost.UseTestServer();

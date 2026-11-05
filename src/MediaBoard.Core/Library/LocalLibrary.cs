@@ -36,13 +36,15 @@ public sealed partial class LocalLibrary : ILibrary
     private readonly ConcurrentDictionary<int, ScanInfo> _scans;
     private readonly Shared _shared;
     private readonly Viewer _viewer;
+    private readonly bool _usesSharedBase;
 
     public LocalLibrary(
         LibraryDatabase db,
         IMetadataProvider provider,
         Func<string, RecycleResult>? sendToRecycleBin = null,
         TimeProvider? timeProvider = null,
-        Func<string, DriveType>? driveTypeOf = null)
+        Func<string, DriveType>? driveTypeOf = null,
+        bool shareSnapshots = false)
     {
         _db = db;
         _provider = provider;
@@ -55,8 +57,9 @@ public sealed partial class LocalLibrary : ILibrary
         _progress = new ProgressStore(db, timeProvider);
         _overrides = new OverrideStore(db);
         _scans = new ConcurrentDictionary<int, ScanInfo>();
-        _shared = new Shared();
+        _shared = new Shared(shareSnapshots ? new SharedLibraryBase(db, timeProvider ?? TimeProvider.System) : null);
         _viewer = Viewer.Owner;
+        _usesSharedBase = false;
     }
 
     private LocalLibrary(LocalLibrary source, Viewer viewer)
@@ -74,6 +77,7 @@ public sealed partial class LocalLibrary : ILibrary
         _scans = source._scans;
         _shared = source._shared;
         _viewer = viewer;
+        _usesSharedBase = true;
     }
 
     /// <summary>
@@ -217,7 +221,7 @@ public sealed partial class LocalLibrary : ILibrary
 
     public DeletePreview PreviewDelete(int titleId)
     {
-        var snapshot = LibrarySnapshot.Load(_db, _viewer);
+        var snapshot = Snapshot();
         if (!snapshot.Titles.TryGetValue(titleId, out var title)) return new DeletePreview(titleId, "", []);
 
         var folders = snapshot.Folders.ToDictionary(f => f.Id, f => f.Path);
@@ -334,10 +338,21 @@ public sealed partial class LocalLibrary : ILibrary
 
     private void RaiseChanged() => _shared.Raise();
 
+    /// <summary>
+    /// Another viewer's copy reads the library part of the snapshot from the shared base when there is one (see
+    /// <c>shareSnapshots</c>). The owner's own instance never does: it is the one edits and tests write around.
+    /// </summary>
+    internal LibrarySnapshot Snapshot() => LibrarySnapshot.Load(_db, _viewer, _usesSharedBase ? _shared.Base : null);
+
+    /// <summary>For <see cref="ViewerAccess"/>, so a check by id reads the same base the lists do.</summary>
+    internal SharedLibraryBase? SharedBase => _shared.Base;
+
     /// <summary>What every viewer's copy of the library shares: the listeners and the count of changes that outdates a search index.</summary>
-    private sealed class Shared
+    private sealed class Shared(SharedLibraryBase? sharedBase)
     {
         private int _version;
+
+        public SharedLibraryBase? Base { get; } = sharedBase;
 
         public event Action? Changed;
 
@@ -346,6 +361,7 @@ public sealed partial class LocalLibrary : ILibrary
         public void Raise()
         {
             Interlocked.Increment(ref _version);
+            Base?.Invalidate();
             Changed?.Invoke();
         }
     }

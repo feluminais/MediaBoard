@@ -172,6 +172,8 @@ internal sealed class SharingWorld : IAsyncDisposable
         var titleId = titles.Upsert(new TitleDetails(1, TitleKind.Movie, "Movie", 2020, null, "About.", 7.0, "/poster.jpg", 100, []));
         var file = Services.GetRequiredService<FileStore>().ByFolder(folder.Id).Single();
         Assert.True(new MatchStore(Services.GetRequiredService<LibraryDatabase>()).SetMatch(file.Id, titleId, titles.EpisodeIds(titleId, []), 1.0, "auto"));
+        // As the app does after a scan: the sharing server keeps part of the library between requests until told.
+        Services.GetRequiredService<LocalLibrary>().NotifyChanged();
         return file.Id;
     }
 
