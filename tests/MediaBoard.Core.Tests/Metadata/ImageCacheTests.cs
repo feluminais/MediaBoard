@@ -42,7 +42,7 @@ public sealed class ImageCacheTests : IDisposable
     private ImageCache CacheWith(HttpMessageHandler handler)
     {
         _http = new HttpClient(handler);
-        return new ImageCache(_http, _connectivity, _dir);
+        return new ImageCache(_http, _connectivity, _dir, _clock);
     }
 
     private static StubHandler Serving(byte[] body) =>
@@ -161,6 +161,44 @@ public sealed class ImageCacheTests : IDisposable
         Assert.Equal(1, handler.Calls);
         Assert.True(_connectivity.IsOnline);
         Assert.Empty(FilesInCacheDir());
+    }
+
+    [Fact]
+    public async Task NotFound_IsAskedAgainAfterFiveMinutes()
+    {
+        var handler = StubHandler.Status(HttpStatusCode.NotFound);
+        var cache = CacheWith(handler);
+
+        await cache.GetAsync("/gone.jpg", 342, Ct);
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        await cache.GetAsync("/gone.jpg", 342, Ct);
+
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Failures_AreRememberedUpToALimit()
+    {
+        var handler = StubHandler.Status(HttpStatusCode.NotFound);
+        var cache = CacheWith(handler);
+
+        for (var name = 0; name <= 1_000; name++) await cache.GetAsync($"/n{name}.jpg", 342, Ct);
+
+        Assert.InRange(cache.RememberedFailures, 1, 1_000);
+    }
+
+    [Theory]
+    [InlineData("abc123.jpg", true)]
+    [InlineData("poster.png", true)]
+    [InlineData("a.gif", false)]
+    [InlineData("a/b.jpg", false)]
+    public void TmdbImageName_KnowsAName(string name, bool valid) => Assert.Equal(valid, TmdbImageName.IsValid(name));
+
+    [Fact]
+    public void TmdbImageName_HasALimit()
+    {
+        Assert.True(TmdbImageName.IsValid(new string('a', 60) + ".jpg"));
+        Assert.False(TmdbImageName.IsValid(new string('a', 61) + ".jpg"));
     }
 
     [Fact]
