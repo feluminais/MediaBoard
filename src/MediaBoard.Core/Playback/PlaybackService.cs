@@ -237,25 +237,24 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     /// <param name="fileId">The file whose stream failed.</param>
     /// <param name="url">The URL it failed on.</param>
     /// <param name="reason">What to tell the viewer.</param>
-    public async Task AbandonAsync(int fileId, string url, string reason)
+    public Task AbandonAsync(int fileId, string url, string reason)
     {
         Playing? playing;
         lock (_stateGate) playing = _current ?? _stopping;
-        if (playing is null || playing.Locator != url) return;
+        return playing is null || playing.Locator != url ? Task.CompletedTask : AbandonAsync(playing, fileId, reason);
+    }
 
-        lock (playing.Gate)
-        {
-            if (playing.Final || playing.FileId != fileId) return;
-
-            playing.Final = true;
-            _progress.Finished(fileId);
-        }
-
-        ClearCurrent(playing);
-        _hub.Log(ActivityLevel.Warning, reason);
-        await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
-        Release(playing);
-        ProgressChanged?.Invoke();
+    /// <summary>
+    /// <see cref="AbandonAsync(int, string, string)"/> for whatever plays now, for news that names no file. A paused player
+    /// reads nothing, so no failed stream speaks for it: the owner's stop and a server that has gone arrive this way. The
+    /// session has stopped listening by the time this returns, on any thread.
+    /// </summary>
+    /// <param name="reason">What to tell the viewer.</param>
+    public Task AbandonCurrentAsync(string reason)
+    {
+        Playing? playing;
+        lock (_stateGate) playing = _current ?? _stopping;
+        return playing is null ? Task.CompletedTask : AbandonAsync(playing, null, reason);
     }
 
     /// <summary>Saves the open session's position and closes its player.</summary>
@@ -271,6 +270,26 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         {
             _playGate.Release();
         }
+    }
+
+    /// <param name="playing">The session.</param>
+    /// <param name="fileId">The file it must be on, or null for whichever. With none, it isn't playing anything of ours.</param>
+    /// <param name="reason">What to tell the viewer.</param>
+    private async Task AbandonAsync(Playing playing, int? fileId, string reason)
+    {
+        lock (playing.Gate)
+        {
+            if (playing.Final || playing.FileId is not { } current || (fileId is not null && fileId != current)) return;
+
+            playing.Final = true;
+            _progress.Finished(current);
+        }
+
+        ClearCurrent(playing);
+        _hub.Log(ActivityLevel.Warning, reason);
+        await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        Release(playing);
+        ProgressChanged?.Invoke();
     }
 
     private async Task PlayCoreAsync(int fileId, bool fromStart, CancellationToken ct)

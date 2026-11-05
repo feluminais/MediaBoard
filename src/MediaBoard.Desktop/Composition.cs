@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using MediaBoard.Core;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Activity;
@@ -28,7 +30,23 @@ public sealed record DataPaths(string Database, string Settings, string Images, 
 
     /// <summary>The sharing server's certificate, next to the settings file.</summary>
     public string Certificate => Path.Combine(Path.GetDirectoryName(Settings) ?? ".", "certificate.bin");
+
+    /// <summary>
+    /// A viewer's unsent progress, next to the settings file. It holds bare file ids that mean nothing on another server or
+    /// to another account, so each pair has its own file. The name is a hash because an account name can be anything.
+    /// </summary>
+    public string Outbox(string fingerprint, string accountName)
+    {
+        var who = SHA256.HashData(Encoding.UTF8.GetBytes($"{fingerprint.ToUpperInvariant()}\n{accountName}"));
+        return Path.Combine(Path.GetDirectoryName(Settings) ?? ".", $"pending-progress-{Convert.ToHexStringLower(who.AsSpan(0, 16))}.json");
+    }
 }
+
+/// <summary>What the shell gets from the mode it runs in.</summary>
+/// <param name="IdentifyPending">Starts identifying what is pending; the task ends with the queue.</param>
+/// <param name="RescanAll">The palette's "Rescan library", or null when this PC has nothing to scan.</param>
+/// <param name="Sharing">The Sharing page, which only the owner's PC has.</param>
+internal sealed record ShellParts(Func<Task> IdentifyPending, Func<Task>? RescanAll, SharingViewModel? Sharing);
 
 /// <summary>
 /// Builds the service graph. Every Core service is a singleton; building and resolving starts nothing (no scan, no
@@ -47,17 +65,7 @@ public static class Composition
     {
         var services = new ServiceCollection();
 
-        services.AddSingleton(TimeProvider.System);
-        services.AddSingleton(sp => new ActivityHub(sp.GetRequiredService<TimeProvider>()));
-        services.AddSingleton(_ => new SettingsStore(paths.Settings));
-        services.AddSingleton(sp =>
-        {
-            var settings = sp.GetRequiredService<SettingsStore>();
-            return new ErrorReporter(
-                sp.GetRequiredService<ActivityHub>(),
-                paths.ErrorLog ?? Path.Combine(Path.GetDirectoryName(paths.Settings) ?? ".", "error.log"),
-                () => settings.Load().TmdbKey);
-        });
+        AddBasics(services, paths);
         services.AddSingleton(_ => new LibraryDatabase(paths.Database));
 
         // One client for TMDB, the connectivity probe and images. It is created by hand, not through
@@ -130,7 +138,6 @@ public static class Composition
             sp.GetRequiredService<Connectivity>(),
             sp.GetRequiredService<TitleStore>()));
 
-        services.AddSingleton(sp => PlayerDetector.CreateDefault(sp.GetRequiredService<ActivityHub>()));
         services.AddSingleton(sp => new LocalPlaybackSource(
             sp.GetRequiredService<FileStore>(),
             sp.GetRequiredService<ProgressStore>()));
@@ -160,28 +167,6 @@ public static class Composition
             sp.GetRequiredService<ActivityHub>()));
         services.AddSingleton<IFolderActions>(sp => sp.GetRequiredService<FolderActions>());
 
-        services.AddSingleton<Dialogs>();
-        services.AddSingleton(sp =>
-        {
-            var dialogs = sp.GetRequiredService<Dialogs>();
-            return new FoldersViewModel(
-                sp.GetRequiredService<ILibrary>(),
-                sp.GetRequiredService<IFolderActions>(),
-                sp.GetRequiredService<ActivityHub>(),
-                dialogs.PickFolderAsync,
-                question => dialogs.ConfirmAsync(question, "Remove", danger: true));
-        });
-        services.AddSingleton(sp =>
-        {
-            var dialogs = sp.GetRequiredService<Dialogs>();
-            return new SettingsViewModel(
-                sp.GetRequiredService<SettingsStore>(),
-                sp.GetRequiredService<PlayerDetector>(),
-                sp.GetRequiredService<ActivityHub>(),
-                dialogs.PickProgramAsync,
-                dialogs.OpenUrl);
-        });
-
         services.AddSingleton(sp =>
         {
             var dialogs = sp.GetRequiredService<Dialogs>();
@@ -207,6 +192,64 @@ public static class Composition
             sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<Dialogs>().AskClosePlayerAsync));
         services.AddSingleton(sp =>
         {
+            var host = sp.GetRequiredService<AppHost>();
+            return new ShellParts(
+                () => Task.Run(host.IdentifyPendingAsync),
+                sp.GetRequiredService<FolderActions>().RescanAllAsync,
+                sp.GetRequiredService<SharingViewModel>());
+        });
+        AddViewModels(services);
+        overrides?.Invoke(services);
+
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+    }
+
+    /// <summary>What every run of the app has, whoever's library it shows.</summary>
+    internal static void AddBasics(IServiceCollection services, DataPaths paths)
+    {
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(sp => new ActivityHub(sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(_ => new SettingsStore(paths.Settings));
+        services.AddSingleton(sp =>
+        {
+            var settings = sp.GetRequiredService<SettingsStore>();
+            return new ErrorReporter(
+                sp.GetRequiredService<ActivityHub>(),
+                paths.ErrorLog ?? Path.Combine(Path.GetDirectoryName(paths.Settings) ?? ".", "error.log"),
+                () => settings.Load().TmdbKey);
+        });
+        services.AddSingleton(sp => PlayerDetector.CreateDefault(sp.GetRequiredService<ActivityHub>()));
+    }
+
+    /// <summary>
+    /// The shell and its pages. Each composition supplies <see cref="ILibrary"/>, <see cref="ISearchService"/>,
+    /// <see cref="IFolderActions"/>, <see cref="IPlaybackService"/>, <see cref="PosterLoader"/> and <see cref="ShellParts"/>.
+    /// </summary>
+    internal static void AddViewModels(IServiceCollection services)
+    {
+        services.AddSingleton<Dialogs>();
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new FoldersViewModel(
+                sp.GetRequiredService<ILibrary>(),
+                sp.GetRequiredService<IFolderActions>(),
+                sp.GetRequiredService<ActivityHub>(),
+                dialogs.PickFolderAsync,
+                question => dialogs.ConfirmAsync(question, "Remove", danger: true));
+        });
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new SettingsViewModel(
+                sp.GetRequiredService<SettingsStore>(),
+                sp.GetRequiredService<PlayerDetector>(),
+                sp.GetRequiredService<ActivityHub>(),
+                dialogs.PickProgramAsync,
+                dialogs.OpenUrl);
+        });
+        services.AddSingleton(sp =>
+        {
             var dialogs = sp.GetRequiredService<Dialogs>();
             return new PlaybackLauncher(sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<ActivityHub>(), dialogs.AskFinishedAsync);
         });
@@ -215,7 +258,6 @@ public static class Composition
             var dialogs = sp.GetRequiredService<Dialogs>();
             var detector = sp.GetRequiredService<PlayerDetector>();
             var settings = sp.GetRequiredService<SettingsStore>();
-            var host = sp.GetRequiredService<AppHost>();
             return new TitleServices(
                 sp.GetRequiredService<ILibrary>(),
                 sp.GetRequiredService<ISearchService>(),
@@ -226,30 +268,31 @@ public static class Composition
                 dialogs.ConfirmDeleteAsync,
                 name => dialogs.ConfirmAsync(
                     $"Mark \"{name}\" as not a movie or show? It leaves the library and isn't identified again. Your files aren't touched.", "Mark"),
-                () => Task.Run(host.IdentifyPendingAsync));
+                sp.GetRequiredService<ShellParts>().IdentifyPending);
         });
 
         services.AddSingleton<StatusBarViewModel>();
         services.AddSingleton<ActivityPanelViewModel>();
-        services.AddSingleton(sp => new MainWindowViewModel(
-            sp.GetRequiredService<ILibrary>(),
-            sp.GetRequiredService<StatusBarViewModel>(),
-            sp.GetRequiredService<ActivityPanelViewModel>(),
-            sp.GetRequiredService<ActivityHub>(),
-            sp.GetRequiredService<FoldersViewModel>(),
-            sp.GetRequiredService<SettingsViewModel>(),
-            sp.GetRequiredService<PosterLoader>(),
-            sp.GetRequiredService<TitleServices>(),
-            sp.GetRequiredService<FolderActions>().RescanAllAsync,
-            sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<SharingViewModel>()));
-        overrides?.Invoke(services);
-
-        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        services.AddSingleton(sp =>
+        {
+            var parts = sp.GetRequiredService<ShellParts>();
+            return new MainWindowViewModel(
+                sp.GetRequiredService<ILibrary>(),
+                sp.GetRequiredService<StatusBarViewModel>(),
+                sp.GetRequiredService<ActivityPanelViewModel>(),
+                sp.GetRequiredService<ActivityHub>(),
+                sp.GetRequiredService<FoldersViewModel>(),
+                sp.GetRequiredService<SettingsViewModel>(),
+                sp.GetRequiredService<PosterLoader>(),
+                sp.GetRequiredService<TitleServices>(),
+                parts.RescanAll,
+                sp.GetRequiredService<TimeProvider>(),
+                parts.Sharing);
+        });
     }
 
     // The controller asks for the server only when sharing first comes on, so a single-user run never builds it.
-    private static void AddSharing(ServiceCollection services, DataPaths paths)
+    private static void AddSharing(IServiceCollection services, DataPaths paths)
     {
         services.AddSingleton(sp => new AccountStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => new DeviceStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));

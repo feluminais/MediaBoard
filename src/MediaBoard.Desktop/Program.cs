@@ -14,7 +14,7 @@ class Program
     {
         // Before anything opens the database or the certificate: a second copy of the certificate, once disposed,
         // can delete the key the first process is serving with.
-        using var instance = SingleInstance.For(AppPaths.DataDir);
+        using var instance = SingleInstance.Claim(AppPaths.DataDir, args);
         if (!instance.ShouldRun(args)) return;
 
         Instance = instance;

@@ -6,6 +6,18 @@ namespace MediaBoard.Core.Settings;
 /// <summary>The settings file exists but could not be read (another program holds it, or access is denied).</summary>
 public sealed class SettingsUnreadableException(string message, Exception inner) : IOException(message, inner);
 
+/// <summary>What <see cref="SettingsStore.TryLoad"/> found, for a caller that can't treat every failure as defaults.</summary>
+public abstract record SettingsReadResult
+{
+    /// <summary>A corrupt file comes back as defaults here too: nothing in it can be recovered.</summary>
+    public sealed record Ok(AppSettings Settings) : SettingsReadResult;
+
+    public sealed record Missing : SettingsReadResult;
+
+    /// <summary>The file exists but another program holds it or access is denied, so what it says is unknown.</summary>
+    public sealed record Unreadable : SettingsReadResult;
+}
+
 /// <summary>
 /// Reads and writes settings.json. <see cref="Load"/> yields default settings for a missing, corrupt or unreadable
 /// file. Changes go through <see cref="Update"/>, which refuses to write over a file it could not read, so a
@@ -34,6 +46,22 @@ public sealed class SettingsStore(string path)
             catch (SettingsUnreadableException)
             {
                 return new AppSettings();
+            }
+        }
+    }
+
+    /// <summary>Like <see cref="Load"/>, for startup, where a file that can't be read must not pass for one that isn't there.</summary>
+    public SettingsReadResult TryLoad()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                return File.Exists(path) ? new SettingsReadResult.Ok(Read()) : new SettingsReadResult.Missing();
+            }
+            catch (SettingsUnreadableException)
+            {
+                return new SettingsReadResult.Unreadable();
             }
         }
     }

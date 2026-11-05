@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MediaBoard.Desktop.ViewModels"
+             x:Class="MediaBoard.Desktop.Views.ConnectView"
+             x:DataType="vm:ConnectViewModel">
+    <StackPanel Spacing="16">
+        <StackPanel Spacing="4">
+            <TextBlock Classes="emptyTitle" Text="{Binding Heading}" TextWrapping="Wrap" />
+            <TextBlock Classes="muted" Text="{Binding Note}" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Takes line breaks: a chat app can wrap an invite, and a single-line box would keep only its first line. -->
+        <TextBox x:Name="InviteBox" Text="{Binding InviteText}" IsVisible="{Binding ShowInvite}"
+                 IsReadOnly="{Binding IsBusy}"
+                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="84" MaxHeight="140" MaxLength="8192"
+                 FontFamily="Consolas" FontSize="{DynamicResource SmallFontSize}"
+                 PlaceholderText="mb1-..." AutomationProperties.Name="Invite" />
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowName}">
+            <TextBlock Text="Name" />
+            <TextBox x:Name="NameBox" Text="{Binding Name}" IsReadOnly="{Binding IsBusy}" MaxLength="64"
+                     AutomationProperties.Name="Name" />
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowPassword}">
+            <TextBlock Text="Password" />
+            <TextBox x:Name="PasswordBox" Text="{Binding Password}" IsReadOnly="{Binding IsBusy}"
+                     PasswordChar="&#x2022;" IsUndoEnabled="False" AutomationProperties.Name="Password" />
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowRepeat}">
+            <TextBlock Text="Password again" />
+            <TextBox x:Name="RepeatBox" Text="{Binding Repeat}" IsReadOnly="{Binding IsBusy}"
+                     PasswordChar="&#x2022;" IsUndoEnabled="False" AutomationProperties.Name="Password again" />
+        </StackPanel>
+
+        <TextBlock x:Name="MessageText" Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"
+                   Foreground="{DynamicResource ErrorTextBrush}" />
+
+        <!-- The room is kept, so the buttons don't jump when a request starts. -->
+        <Panel Height="4">
+            <ProgressBar IsIndeterminate="{Binding IsBusy}" IsVisible="{Binding IsBusy}" Height="4" MinHeight="0" />
+        </Panel>
+
+        <DockPanel>
+            <Button x:Name="ActionButton" DockPanel.Dock="Right" Classes="accent" MinWidth="104" IsDefault="True" HorizontalContentAlignment="Center"
+                    Content="{Binding ActionLabel}" Command="{Binding ContinueCommand}" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <Button x:Name="BackButton" Content="Back" MinWidth="88" IsCancel="True" HorizontalContentAlignment="Center" Command="{Binding BackCommand}" />
+                <Button Classes="textLink" Content="Use an invite" VerticalAlignment="Center"
+                        IsVisible="{Binding ShowUseInvite}" Command="{Binding UseInviteCommand}" />
+            </StackPanel>
+        </DockPanel>
+    </StackPanel>
+</UserControl>

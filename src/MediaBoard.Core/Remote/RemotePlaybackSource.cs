@@ -103,6 +103,19 @@ public sealed class RemotePlaybackSource : IPlaybackSource
 
     public void Released(string locator) => _urls.Release(locator);
 
+    /// <summary>What to tell the viewer when a stream ends for this reason. The file's title goes in when it's known.</summary>
+    /// <param name="code">Why it ended.</param>
+    /// <param name="fileId">The file, when the news names one.</param>
+    public string ReasonFor(ApiErrorCode code, int? fileId = null) => code switch
+    {
+        ApiErrorCode.StreamStopped => $"{_ownerName} stopped this stream",
+        ApiErrorCode.FileMissing => fileId is { } id && _targets.TryGetValue(id, out var target) ? $"File missing: {target.Title}" : "File missing",
+        ApiErrorCode.DriveUnavailable => "The drive with this file isn't available",
+        ApiErrorCode.Unreachable => "Can't reach the server",
+        ApiErrorCode.TooManyStreams => "Too many streams on this account",
+        _ => "The stream ended",
+    };
+
     /// <summary>The server settles two devices by the newest entry, so an entry older than its answer has lost already.</summary>
     private static Progress? Overlay(Progress? saved, PendingProgress? waiting)
     {
@@ -116,15 +129,5 @@ public sealed class RemotePlaybackSource : IPlaybackSource
         return new Progress(waiting.FileId, position, duration, waiting.Watched ?? saved?.Watched ?? false, at);
     }
 
-    private void OnStreamFailed(int fileId, string url, ApiErrorCode code) => StreamLost?.Invoke(fileId, url, ReasonFor(fileId, code));
-
-    private string ReasonFor(int fileId, ApiErrorCode code) => code switch
-    {
-        ApiErrorCode.StreamStopped => $"{_ownerName} stopped this stream",
-        ApiErrorCode.FileMissing => _targets.TryGetValue(fileId, out var target) ? $"File missing: {target.Title}" : "File missing",
-        ApiErrorCode.DriveUnavailable => "The drive with this file isn't available",
-        ApiErrorCode.Unreachable => "Can't reach the server",
-        ApiErrorCode.TooManyStreams => "Too many streams on this account",
-        _ => "The stream ended",
-    };
+    private void OnStreamFailed(int fileId, string url, ApiErrorCode code) => StreamLost?.Invoke(fileId, url, ReasonFor(code, fileId));
 }

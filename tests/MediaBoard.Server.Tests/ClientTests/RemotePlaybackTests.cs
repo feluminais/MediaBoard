@@ -826,6 +826,70 @@ public sealed class RemotePlaybackTests
         Assert.Single(world.Hub.Recent, entry => entry.Message == "Can't reach the server");
     }
 
+    // A paused player reads nothing, so no failed stream speaks for it: only the server's event or a dead link can.
+    [Fact]
+    public async Task AbandonCurrent_KeepsLastPosition_AndClosesThePlayer()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+        var player = world.Player;
+        var changes = 0;
+        world.Service.ProgressChanged += () => changes++;
+        player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(115)));
+        player.Raise(new PlaybackEvent.Paused());
+
+        _ = world.Service.AbandonCurrentAsync("Stopped");
+
+        player.Position = TimeSpan.FromSeconds(Duration);
+        player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Ended());
+        await player.Closed.Task.WaitAsync(Within, Ct);
+        await WaitUntilAsync(() => changes > 0);
+
+        var waiting = world.Outbox.Waiting(world.File);
+        Assert.Equal(115, waiting?.PositionS);
+        Assert.NotEqual(true, waiting?.Watched);
+        Assert.Null(world.Service.CurrentPlayer);
+        Assert.Equal(urls.Handed, urls.Released);
+        Assert.Single(world.Hub.Recent, entry => entry.Message == "Stopped");
+    }
+
+    [Fact]
+    public async Task AbandonCurrent_NothingPlaying_DoesNothing()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+
+        await world.Service.AbandonCurrentAsync("Stopped");
+
+        Assert.DoesNotContain(world.Hub.Recent, entry => entry.Message == "Stopped");
+    }
+
+    [Fact]
+    public async Task AbandonCurrent_AfterAStreamFailed_SaysItOnce()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+        urls.Fail(world.File, ApiErrorCode.Unreachable);
+
+        await world.Service.AbandonCurrentAsync("Stopped");
+
+        Assert.DoesNotContain(world.Hub.Recent, entry => entry.Message == "Stopped");
+    }
+
+    [Fact]
+    public async Task ReasonFor_NamesTheOwner_OnceAFileHasPlayed()
+    {
+        await using var world = await World.StartAsync(new FakeUrls());
+        await world.PlayAsync();
+
+        Assert.Equal($"{world.Live.Fixture.Accounts.Get(LibraryDatabase.OwnerId)!.Name} stopped this stream", world.Source.ReasonFor(ApiErrorCode.StreamStopped));
+        Assert.Equal("Can't reach the server", world.Source.ReasonFor(ApiErrorCode.Unreachable));
+    }
+
     [Fact]
     public async Task PausePastTheEnd_OfAHealthyStream_StillCountsAsWatched()
     {

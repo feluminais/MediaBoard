@@ -82,6 +82,44 @@ public sealed class SingleInstanceTests
     }
 
     [Fact]
+    public void Claim_PlainStart_DoesNotWait()
+    {
+        using var first = SingleInstance.For(_dir);
+
+        using var second = SingleInstance.Claim(_dir, [], TimeSpan.FromMinutes(5));
+
+        Assert.False(second.ShouldRun(["--tray"]));
+    }
+
+    // Without the wait the app simply vanishes on a restart: the new process would find the old one still stopping.
+    [Fact]
+    public async Task Claim_Restart_WaitsForTheProcessThatAskedForIt()
+    {
+        var first = SingleInstance.For(_dir);
+        var claim = Task.Run(() => SingleInstance.Claim(_dir, [SingleInstance.RestartArgument], TimeSpan.FromSeconds(30)), Ct);
+        await Task.Delay(200, Ct);
+        Assert.False(claim.IsCompleted);
+
+        first.Dispose();
+
+        using var second = await claim.WaitAsync(Soon, Ct);
+        Assert.True(second.ShouldRun([SingleInstance.RestartArgument]));
+    }
+
+    [Fact]
+    public async Task Claim_Restart_OldProcessStaysPastTheLimit_HandsOver()
+    {
+        using var first = SingleInstance.For(_dir);
+        using var asked = new SemaphoreSlim(0);
+        first.Listen(() => asked.Release());
+
+        using var second = SingleInstance.Claim(_dir, [SingleInstance.RestartArgument], TimeSpan.FromMilliseconds(100));
+
+        Assert.False(second.ShouldRun([SingleInstance.RestartArgument]));
+        Assert.True(await asked.WaitAsync(Soon, Ct));
+    }
+
+    [Fact]
     public void OtherDataDirectory_RunsBesideIt()
     {
         using var first = SingleInstance.For(_dir);

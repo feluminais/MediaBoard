@@ -39,6 +39,9 @@ public sealed record AppSettings
 
     public SharingSettings Sharing { get; init; } = new();
 
+    /// <summary>Whose library this PC shows. Unset until someone chooses; a PC that already has a library then stays local.</summary>
+    public AppMode Mode { get; init; }
+
     /// <summary>The server this PC connects to as a viewer, or null if it has never joined one.</summary>
     public StoredConnection? Connection { get; init; }
 }
@@ -60,6 +63,14 @@ public sealed record SharingSettings
     public string? HomeAddress { get; init; }
 
     public bool StartWithWindows { get; init; }
+}
+
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<AppMode>))]
+public enum AppMode
+{
+    Unset,
+    ThisPc,
+    Server,
 }
 
 [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<PosterSize>))]

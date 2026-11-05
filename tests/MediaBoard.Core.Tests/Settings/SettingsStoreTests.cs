@@ -80,6 +80,66 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void TryLoad_NoFile_IsMissing()
+    {
+        Assert.IsType<SettingsReadResult.Missing>(new SettingsStore(SettingsPath).TryLoad());
+    }
+
+    [Fact]
+    public void TryLoad_SavedFile_IsOk()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings { Mode = AppMode.ThisPc });
+
+        var read = Assert.IsType<SettingsReadResult.Ok>(store.TryLoad());
+
+        Assert.Equal(AppMode.ThisPc, read.Settings.Mode);
+    }
+
+    [Fact]
+    public void TryLoad_FileHeldByAnotherProgram_IsUnreadable()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings());
+
+        using var held = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Delete);
+
+        Assert.IsType<SettingsReadResult.Unreadable>(store.TryLoad());
+    }
+
+    // Load and Update already treat a corrupt file as defaults, and a person can do nothing else with one.
+    [Fact]
+    public void TryLoad_CorruptFile_CountsAsDefaults()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(SettingsPath, "{ not json");
+
+        var read = Assert.IsType<SettingsReadResult.Ok>(new SettingsStore(SettingsPath).TryLoad());
+
+        Assert.Equal(new AppSettings(), read.Settings);
+    }
+
+    [Fact]
+    public void SettingsStore_WritesTheModeByName()
+    {
+        var store = new SettingsStore(SettingsPath);
+
+        store.Save(new AppSettings { Mode = AppMode.Server });
+
+        Assert.Contains("\"mode\": \"Server\"", File.ReadAllText(SettingsPath));
+        Assert.Equal(AppMode.Server, new SettingsStore(SettingsPath).Load().Mode);
+    }
+
+    [Fact]
+    public void SettingsStore_FileWithNoMode_IsUnset()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(SettingsPath, """{ "tmdbKey": "k-123" }""");
+
+        Assert.Equal(AppMode.Unset, new SettingsStore(SettingsPath).Load().Mode);
+    }
+
+    [Fact]
     public void SettingsStore_Save_RaisesChanged()
     {
         var store = new SettingsStore(SettingsPath);

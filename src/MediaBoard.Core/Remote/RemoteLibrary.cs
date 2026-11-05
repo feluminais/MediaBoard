@@ -88,6 +88,9 @@ public sealed class RemoteLibrary : ILibrary, IDisposable
         }
     }
 
+    /// <summary>For what changes the server's answers without it saying so, such as this viewer's own progress reaching it.</summary>
+    public void NotifyChanged() => Changed?.Invoke();
+
     public void Rename(TargetKind kind, int id, string? displayName) => throw new NotSupportedException();
 
     public void SetHidden(TargetKind kind, int id, bool hidden) => throw new NotSupportedException();
