@@ -113,6 +113,22 @@ public sealed class HostTests
     }
 
     [Fact]
+    public async Task Stop_LetsGoOfTheKeptPartOfTheLibrary()
+    {
+        await using var fixture = new ServerFixture();
+        fixture.AddFolder("open");
+        var token = fixture.Join(fixture.NewPerson("Sam")).Token;
+        var port = await StartAsync(fixture);
+        using var request = fixture.Request("GET", $"https://127.0.0.1:{port}/api/v1/titles?kind=Movie", token);
+        (await fixture.TlsClient().SendAsync(request, Ct)).EnsureSuccessStatusCode();
+        Assert.True(fixture.Owner.SharedBase!.Holds);
+
+        await fixture.Server.StopAsync();
+
+        Assert.False(fixture.Owner.SharedBase.Holds);
+    }
+
+    [Fact]
     public async Task Start_Stop_Start_Works()
     {
         await using var fixture = new ServerFixture();

@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="MediaBoard.Core.Tests" />
+    <InternalsVisibleTo Include="MediaBoard.Server.Tests" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Storage\Schema.sql" LogicalName="Schema.sql" />

@@ -99,6 +99,8 @@ public sealed class SharingServer(
             finally
             {
                 await app.DisposeAsync();
+                // The stop-time clear runs before Kestrel drains open requests, and one of those can keep the base again.
+                library.Owner.ForgetSnapshot();
             }
         }
         finally

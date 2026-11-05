@@ -540,4 +540,39 @@ public sealed class FoldersViewModelTests : IDisposable
             Assert.DoesNotContain(uiThread, queryThreads);
         }
     }
+
+    [AvaloniaFact]
+    public async Task Remove_AtTheFirstChanged_TheFolderIsThereDisabledAndCannotBeEnabled()
+    {
+        var vm = Create();
+        await AddAsync(vm, _stack.MakeLibrary("Movies", "Heat (1995).mkv"));
+        var item = Assert.Single(vm.Folders);
+        var folders = _stack.Services.GetRequiredService<FolderStore>();
+        (bool Present, bool Enabled, bool Removing, bool CanToggle)? first = null;
+        _stack.Library.Changed += () =>
+        {
+            if (first is not null) return;
+
+            var row = folders.All().SingleOrDefault(f => f.Id == item.Id);
+            first = (row is not null, row?.Enabled ?? true, item.IsRemoving, vm.ToggleEnabledCommand.CanExecute(item));
+        };
+
+        await vm.RemoveCommand.ExecuteAsync(item);
+
+        Assert.Equal((true, false, true, false), first);
+    }
+
+    [AvaloniaFact]
+    public async Task Remove_Declined_LeavesTheFolderEnableable()
+    {
+        var vm = Create();
+        await AddAsync(vm, _stack.MakeLibrary("Movies", "Heat (1995).mkv"));
+        var item = Assert.Single(vm.Folders);
+        _confirmAnswer = false;
+
+        await vm.RemoveCommand.ExecuteAsync(item);
+
+        Assert.False(item.IsRemoving);
+        Assert.True(vm.ToggleEnabledCommand.CanExecute(item));
+    }
 }

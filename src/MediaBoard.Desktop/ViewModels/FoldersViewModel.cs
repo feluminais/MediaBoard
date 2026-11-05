@@ -89,6 +89,13 @@ public sealed partial class FolderItem : ObservableObject
 
     public string ToggleLabel => IsEnabled ? "Disable" : "Enable";
 
+    /// <summary>
+    /// The folder is being removed. Removing switches it off first and tells the library, so for a moment the row reads
+    /// disabled; enabling it then would start a scan just before the rows go.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsRemoving { get; set; }
+
     /// <summary>"Scanning… 120 of 810 files", "Waiting to scan", "No videos found", "3 shows, 12 movies"…</summary>
     [ObservableProperty]
     public partial string Summary { get; private set; } = "";
@@ -244,12 +251,26 @@ public sealed partial class FoldersViewModel : PageViewModel
         // Removing forgets the folder's rows, and with them its watch progress and overrides (FolderStore.Remove cascades).
         var question = $"Remove \"{item.Name}\" from the library? Your files aren't touched, but MediaBoard forgets its watch progress and " +
                        "your edits, such as renames and hidden items. To keep those, use Disable instead, or Locate… if the folder moved.";
-        return await _confirm(question) ? await _actions.RemoveAsync(item.Id) : FolderOutcome.Done;
+        if (!await _confirm(question)) return FolderOutcome.Done;
+
+        item.IsRemoving = true;
+        ToggleEnabledCommand.NotifyCanExecuteChanged();
+        try
+        {
+            return await _actions.RemoveAsync(item.Id);
+        }
+        finally
+        {
+            item.IsRemoving = false;
+            ToggleEnabledCommand.NotifyCanExecuteChanged();
+        }
     });
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanToggleEnabled))]
     private Task ToggleEnabledAsync(FolderItem? item) =>
         item is null ? Task.CompletedTask : ActAsync(() => _actions.SetEnabledAsync(item.Id, !item.IsEnabled));
+
+    private static bool CanToggleEnabled(FolderItem? item) => item is { IsRemoving: false };
 
     [RelayCommand]
     private Task RepointAsync(FolderItem? item) => item is null ? Task.CompletedTask : ActAsync(async () =>

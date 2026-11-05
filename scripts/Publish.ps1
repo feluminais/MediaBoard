@@ -13,6 +13,7 @@
 
 .PARAMETER Output
     Where the folder and the zip go. Defaults to artifacts\ in the repository, which git ignores.
+    A relative path is taken from the repository root, not from where you run the script.
 #>
 param(
     [string]$Version,
@@ -34,7 +35,8 @@ if (-not $Version) {
 }
 if (-not $Output) { $Output = 'artifacts' }
 # A full path, from the repository root: the checks below cut the folder's path off each file's.
-$Output = [System.IO.Path]::GetFullPath($Output, $root)
+if (-not [System.IO.Path]::IsPathRooted($Output)) { $Output = Join-Path $root $Output }
+$Output = [System.IO.Path]::GetFullPath($Output)
 
 $name = "MediaBoard-$Version-win-x64"
 $folder = Join-Path $Output $name

@@ -28,6 +28,9 @@ internal sealed class LibraryBase
 
     public Dictionary<(TargetKind, int), OverrideRow> Overrides { get; }
 
+    /// <summary>Which read of <see cref="SharedLibraryBase"/> made this, or 0 for one made outside it. A cache keeps the number, not the base.</summary>
+    public long Generation { get; set; }
+
     public static LibraryBase Read(LibraryDatabase db)
     {
         using var connection = db.Open();
@@ -144,6 +147,7 @@ internal sealed class SharedLibraryBase(LibraryDatabase db, TimeProvider time, F
     private LibraryBase? _kept;
     private long _builtAt;
     private int _version;
+    private long _generation;
 
     /// <summary>Whether a base is kept and still young enough to hand out.</summary>
     public bool Holds => Kept() is not null;
@@ -158,8 +162,8 @@ internal sealed class SharedLibraryBase(LibraryDatabase db, TimeProvider time, F
         }
     }
 
-    /// <summary>Whether <paramref name="library"/> is the base kept now, for a cache made from it.</summary>
-    public bool IsCurrent(LibraryBase library) => ReferenceEquals(Kept(), library);
+    /// <summary>Whether the base kept now is the one <paramref name="generation"/> names, for a cache made from it.</summary>
+    public bool IsCurrent(long generation) => Kept() is { } kept && kept.Generation == generation;
 
     public LibraryBase Get()
     {
@@ -173,6 +177,7 @@ internal sealed class SharedLibraryBase(LibraryDatabase db, TimeProvider time, F
             int version;
             lock (_gate) version = _version;
             var fresh = _read(db);
+            fresh.Generation = Interlocked.Increment(ref _generation);
             lock (_gate)
             {
                 // A change that landed during the read outdates it; the next request reads again.
