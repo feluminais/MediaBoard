@@ -24,6 +24,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     private readonly string _deviceName;
     private readonly Func<bool> _restart;
     private readonly StoredConnection? _saved;
+    private readonly Action? _onSaved;
     private readonly CancellationTokenSource _closing = new();
     private ServerEndpoint? _endpoint;
     private ApiClient? _client;
@@ -37,11 +38,13 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     /// <param name="deviceName">What the owner sees this PC called.</param>
     /// <param name="restart">Restarts the app into the saved connection. False when it couldn't.</param>
     /// <param name="saved">The server of a signed-out device, or null.</param>
-    public ConnectViewModel(SettingsStore settings, string deviceName, Func<bool> restart, StoredConnection? saved = null)
+    /// <param name="onSaved">Runs once the connection is saved, even when the window has just closed.</param>
+    public ConnectViewModel(SettingsStore settings, string deviceName, Func<bool> restart, StoredConnection? saved = null, Action? onSaved = null)
     {
         _settings = settings;
         _deviceName = deviceName;
         _restart = restart;
+        _onSaved = onSaved;
         if (saved is null) return;
 
         if (!ModeGate.HasUsableEndpoint(saved))
@@ -54,6 +57,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         _endpoint = saved.Endpoint;
         Name = saved.AccountName;
         Step = ConnectStep.SignIn;
+        Message = FailureText.SignedOut;
     }
 
     /// <summary>Back was pressed on the first step.</summary>
@@ -146,8 +150,8 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
 
     private static string RefusalText(ApiErrorCode code, ConnectStep step) => code switch
     {
-        ApiErrorCode.InviteDead => "This invite no longer works. Ask for a new one.",
-        ApiErrorCode.Locked => "Too many tries. Wait 15 minutes.",
+        ApiErrorCode.InviteDead => FailureText.InviteDead,
+        ApiErrorCode.Locked => FailureText.Locked,
         ApiErrorCode.Disabled => "This account is disabled. Ask the person who invited you.",
         ApiErrorCode.PasswordTooShort => TooShortText,
         ApiErrorCode.WrongPassword when step == ConnectStep.SignIn => "Wrong name or password.",
@@ -174,11 +178,11 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
         }
         catch (ServerUnreachableException)
         {
-            Say($"Can't reach {ServerName}. Their PC may be off or asleep, or sharing is off.", canRetry: true);
+            Say(FailureText.Unreachable(ServerName), canRetry: true);
         }
         catch (IdentityChangedException)
         {
-            Say("This server's identity changed. Ask for a new invite.", canRetry: true);
+            Say(FailureText.IdentityChanged, canRetry: true);
         }
         catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException && _closing.IsCancellationRequested)
         {
@@ -304,6 +308,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     {
         if (!Save()) return;
 
+        _onSaved?.Invoke();
         _finished = true;
         Forget();
         if (_closing.IsCancellationRequested) return;

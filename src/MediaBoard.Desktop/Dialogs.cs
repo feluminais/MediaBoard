@@ -165,6 +165,14 @@ public sealed class Dialogs
         await new SharingDialog(panel).ShowDialog(owner);
     }
 
+    /// <summary>The Connect screen, over the shell; finishes when it has closed. Success restarts the app.</summary>
+    public async Task ShowConnectAsync(ConnectViewModel connect)
+    {
+        if (ShownOwner() is not { } owner) return;
+
+        await new ConnectDialog(connect).ShowDialog(owner);
+    }
+
     /// <summary>Puts text on the clipboard.</summary>
     public async Task CopyAsync(string text)
     {

@@ -37,6 +37,9 @@ public partial class EditableItem : ObservableObject
 
     public string HideText => IsHidden ? "Show" : "Hide";
 
+    /// <summary>False for a viewer, whose library refuses a rename or a hide.</summary>
+    public bool CanEdit => _page?.CanEdit != false;
+
     [ObservableProperty]
     public partial bool IsEditing { get; set; }
 
@@ -50,7 +53,7 @@ public partial class EditableItem : ObservableObject
         IsHidden = hidden;
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private void BeginRename()
     {
         EditText = Name;
@@ -61,7 +64,7 @@ public partial class EditableItem : ObservableObject
     private void CancelRename() => IsEditing = false;
 
     /// <summary>Saves the new name; an empty one clears the override, so the original name comes back.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private async Task CommitRenameAsync()
     {
         IsEditing = false;
@@ -71,7 +74,7 @@ public partial class EditableItem : ObservableObject
         await _page.RenameAsync(Kind, Id, text.Length == 0 ? null : text);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private Task ToggleHiddenAsync() => _page?.SetHiddenAsync(Kind, Id, !IsHidden) ?? Task.CompletedTask;
 }
 

@@ -17,7 +17,7 @@
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-                <CheckBox Content="Show hidden" IsChecked="{Binding ShowHidden}" />
+                <CheckBox Content="Show hidden" IsChecked="{Binding ShowHidden}" IsVisible="{Binding CanShowHidden}" />
             </StackPanel>
             <TextBlock Classes="pageTitle" Text="{Binding Title}" VerticalAlignment="Center" />
         </DockPanel>

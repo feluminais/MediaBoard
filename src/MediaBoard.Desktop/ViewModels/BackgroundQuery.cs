@@ -1,5 +1,6 @@
 using Avalonia.Threading;
 using MediaBoard.Core.Activity;
+using MediaBoard.Core.Remote;
 
 namespace MediaBoard.Desktop.ViewModels;
 
@@ -15,10 +16,12 @@ namespace MediaBoard.Desktop.ViewModels;
 /// <param name="hub">Where failures are logged.</param>
 /// <param name="what">What loads, for the log.</param>
 /// <param name="failed">Called on the UI thread each time the newest query fails, or null.</param>
-public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed = null)
+/// <param name="hint">What to do about a failure; null for <see cref="FailureHint"/>.</param>
+public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed = null, string? hint = null)
 {
     public const string FailureHint = "Restart MediaBoard to try again.";
 
+    private readonly string _hint = hint ?? FailureHint;
     private int _generation;
     private string? _lastFailure;
     private Task _latest = Task.CompletedTask;
@@ -59,9 +62,9 @@ public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed
             }
 
             failed?.Invoke();
-            if (e.Message == _lastFailure) return;
+            if (IsAboutTheConnection(e) || e.Message == _lastFailure) return;
             _lastFailure = e.Message;
-            hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", FailureHint);
+            hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", _hint);
             return;
         }
 
@@ -78,9 +81,14 @@ public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed
         }
         catch (Exception e)
         {
-            hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", FailureHint);
+            hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", _hint);
         }
     }
+
+    // A viewer's status bar and connection panel already say this, and a page that reloads when the link returns has no
+    // problem of its own to report.
+    private static bool IsAboutTheConnection(Exception e) =>
+        e is ServerUnreachableException or IdentityChangedException or ApiException { Code: ApiErrorCode.Unauthorized };
 
     // A stale run is never the latest (a newer RunAsync or Discard replaced it), so this never waits on itself. The
     // latest can be replaced again while we wait, so wait until it stops changing.

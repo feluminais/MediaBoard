@@ -252,6 +252,8 @@ internal sealed class FakeTrayReason : ITrayReason
 
     public string? QuitQuestion { get; set; }
 
+    public bool ExitsWhenOver { get; set; }
+
     public void Set(bool applies)
     {
         Applies = applies;

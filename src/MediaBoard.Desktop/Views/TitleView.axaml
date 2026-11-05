@@ -123,13 +123,13 @@
                                                    IsVisible="{Binding HasPlayReason}" />
                                     </StackPanel>
                                     <WrapPanel>
-                                        <Button Content="Rename" Command="{Binding Header.BeginRenameCommand}" Margin="0,0,8,8" />
-                                        <Button Content="{Binding HideText}" Command="{Binding ToggleHiddenCommand}" Margin="0,0,8,8" />
+                                        <Button Content="Rename" Command="{Binding Header.BeginRenameCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Content="{Binding HideText}" Command="{Binding ToggleHiddenCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
                                         <Button Content="{Binding WatchedText}" Command="{Binding ToggleWatchedCommand}" Margin="0,0,8,8"
                                                 IsEnabled="{Binding CanMarkWatched}" />
-                                        <Button Content="Fix match" Command="{Binding FixMatchCommand}" Margin="0,0,8,8" />
-                                        <Button Content="Not a movie or show" Command="{Binding NotMediaCommand}" Margin="0,0,8,8" />
-                                        <Button Classes="danger" Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8" />
+                                        <Button Content="Fix match" Command="{Binding FixMatchCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Content="Not a movie or show" Command="{Binding NotMediaCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Classes="danger" Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
                                     </WrapPanel>
                                     <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" Foreground="{DynamicResource WarningTextBrush}"
                                                IsVisible="{Binding HasNotice}" />
@@ -192,7 +192,7 @@
                             </DockPanel>
                             <TextBlock Classes="muted" FontSize="{DynamicResource MetaFontSize}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" IsVisible="{Binding CanEdit}">
                             <Button Content="Rename" Classes="rowAction" Command="{Binding BeginRenameCommand}" />
                             <Button Content="{Binding HideText}" Classes="rowAction" Command="{Binding ToggleHiddenCommand}" />
                         </StackPanel>
@@ -232,8 +232,8 @@
                                     <Button Content="{Binding WatchedText}" Classes="rowAction" Command="{Binding ToggleWatchedCommand}"
                                             IsVisible="{Binding CanMarkWatched}" />
                                 </Panel>
-                                <Button Content="Rename" Classes="rowAction quiet" Width="64" Command="{Binding BeginRenameCommand}" />
-                                <Button Content="{Binding HideText}" Classes="rowAction quiet" Width="56" Command="{Binding ToggleHiddenCommand}" />
+                                <Button Content="Rename" Classes="rowAction quiet" Width="64" Command="{Binding BeginRenameCommand}" IsVisible="{Binding CanEdit}" />
+                                <Button Content="{Binding HideText}" Classes="rowAction quiet" Width="56" Command="{Binding ToggleHiddenCommand}" IsVisible="{Binding CanEdit}" />
                             </StackPanel>
 
                             <DockPanel Grid.Column="2" Grid.ColumnSpan="2" VerticalAlignment="Center" Margin="0,0,12,0" IsVisible="{Binding IsEditing}">

@@ -15,10 +15,9 @@ namespace MediaBoard.Desktop.ViewModels;
 /// "Not in library" tag and nothing to play or edit. Every library read and write runs on the thread pool; the
 /// shell refreshes the page whenever the library changes.
 /// </summary>
-public sealed partial class TitleViewModel : PageViewModel
+public sealed partial class TitleViewModel : PageViewModel, IServerPage
 {
     public const string NotInLibraryTag = "Not in library";
-    private const string FileMissing = "File missing";
 
     private readonly TitleServices _s;
     private readonly TitleNavigation _nav;
@@ -59,7 +58,7 @@ public sealed partial class TitleViewModel : PageViewModel
         _onlineKind = kind;
         _kind = kind;
         IsOnline = online;
-        _query = new BackgroundQuery(services.Hub, "the title");
+        _query = new BackgroundQuery(services.Hub, "the title", hint: services.Capabilities.FailureHint);
         _previewQuery = new BackgroundQuery(services.Hub, "the files to delete");
         _relocateQuery = new BackgroundQuery(services.Hub, "the fixed match");
         _player = new Lazy<string?>(services.PlayerName);
@@ -97,6 +96,9 @@ public sealed partial class TitleViewModel : PageViewModel
     public bool IsOnline { get; }
 
     public bool IsLibrary => !IsOnline;
+
+    /// <summary>False for a viewer: Rename, Hide, Fix match, Not a movie or show and Delete belong to the owner's PC.</summary>
+    public bool CanEdit => _s.Capabilities.CanEditLibrary;
 
     /// <summary>The name, with its inline rename and hide.</summary>
     [ObservableProperty]
@@ -390,7 +392,7 @@ public sealed partial class TitleViewModel : PageViewModel
             : $"Play {code}in {player}";
         PlayReason = _playFileId is not null ? null
             : next is null && !d.Missing ? "Nothing to play"
-            : FileMissing;
+            : FailureText.FileMissing;
         CanPlay = _playerName is null || _playFileId is not null;
     }
 
@@ -521,7 +523,7 @@ public sealed partial class TitleViewModel : PageViewModel
         await RefreshAsync();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private Task ToggleHiddenAsync() => SetHiddenAsync(TargetKind.Title, _titleId, !Header.IsHidden);
 
     /// <summary>Marks every file of the title watched, or unwatched when they all are.</summary>
@@ -569,7 +571,7 @@ public sealed partial class TitleViewModel : PageViewModel
 
     // ---- Fix match ----
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private void FixMatch()
     {
         Notice = null;
@@ -675,7 +677,7 @@ public sealed partial class TitleViewModel : PageViewModel
     // ---- Not a movie or show ----
 
     /// <summary>Takes the title out of the library for good: every file is marked "not media" and is not identified again.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private async Task NotMediaAsync()
     {
         var fileIds = _files.Select(f => f.FileId).ToList();
@@ -702,7 +704,7 @@ public sealed partial class TitleViewModel : PageViewModel
 
     // ---- Delete from disk ----
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     private async Task DeleteAsync()
     {
         DeleteSummary = [];

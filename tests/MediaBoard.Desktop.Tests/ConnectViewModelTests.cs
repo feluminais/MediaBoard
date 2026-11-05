@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using MediaBoard.Core.Accounts;
+using MediaBoard.Core.Activity;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Settings;
+using MediaBoard.Desktop.Remote;
+using MediaBoard.Desktop.Sharing;
 using MediaBoard.Desktop.Tests.Support;
 using MediaBoard.Desktop.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
@@ -330,6 +333,34 @@ public sealed class ConnectViewModelTests
         Assert.DoesNotContain(Password, written, StringComparison.Ordinal);
         Assert.DoesNotContain(token!, written, StringComparison.Ordinal);
         Assert.DoesNotContain(invite.Code, written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SwitchingFromThisPc_ThroughConnect_TurnsStartWithWindowsOff()
+    {
+        await using var room = await Room.OpenAsync();
+        room.Viewer.Save(new AppSettings { Mode = AppMode.ThisPc, Sharing = new SharingSettings { StartWithWindows = true } });
+        var hub = new ActivityHub();
+        var key = new FakeRunKey();
+        key.Set("on");
+        var invite = room.Invite(room.Person());
+        var change = new ModeSwitch(
+            room.Viewer,
+            new AppRestart("MediaBoard.exe", (_, _) => { }, () => { }),
+            hub,
+            new StartWithWindows(room.Viewer, key, "MediaBoard.exe", hub),
+            async connect =>
+            {
+                await Paste(connect, invite);
+                await SubmitPassword(connect, Password);
+            },
+            "Laptop");
+
+        await change.ConnectToServerAsync();
+
+        Assert.Equal(AppMode.Server, room.Viewer.Load().Mode);
+        Assert.Null(key.Command);
+        Assert.False(room.Viewer.Load().Sharing.StartWithWindows);
     }
 
     // The invite is spent by now, so the token is all that's left of it.

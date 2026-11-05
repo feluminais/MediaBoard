@@ -8,14 +8,34 @@ using System.Text.Json;
 
 namespace MediaBoard.Core.Remote;
 
-public sealed class ApiException(ApiErrorCode code) : Exception($"The server answered {code}.")
+public sealed class ApiException(ApiErrorCode code) : Exception(PlainWords(code))
 {
     public ApiErrorCode Code { get; } = code;
+
+    // The activity list shows a message as it stands, so it has to read as words to a viewer.
+    private static string PlainWords(ApiErrorCode code) => code switch
+    {
+        ApiErrorCode.NotFound => "It isn't on the server anymore.",
+        ApiErrorCode.Unauthorized => "You've been signed out.",
+        ApiErrorCode.InviteDead => "This invite no longer works.",
+        ApiErrorCode.WrongPassword => "Wrong password.",
+        ApiErrorCode.Locked => "Too many tries.",
+        ApiErrorCode.Disabled => "This account is disabled.",
+        ApiErrorCode.PasswordTooShort => "That password is too short.",
+        ApiErrorCode.FileMissing => "The file is missing.",
+        ApiErrorCode.DriveUnavailable => "The drive with this file isn't available.",
+        ApiErrorCode.StreamStopped => "The stream was stopped.",
+        ApiErrorCode.TooManyStreams => "Too many streams on this account.",
+        ApiErrorCode.TooLarge => "That's too much to send.",
+        ApiErrorCode.VersionMismatch => "MediaBoard needs updating.",
+        ApiErrorCode.Unreachable => "The server can't be reached.",
+        _ => "The server turned this down.",
+    };
 }
 
 public sealed class ServerUnreachableException(Exception? innerException = null) : Exception("The server can't be reached.", innerException);
 
-public sealed class IdentityChangedException() : Exception("The server's certificate is not the pinned one.");
+public sealed class IdentityChangedException() : Exception("This server's identity changed.");
 
 /// <summary>
 /// Talks to one server over a connection that trusts its pinned certificate and nothing else. Whatever a request proves

@@ -213,7 +213,7 @@
                     <Button Classes="strip" x:Name="StatusStrip" Command="{Binding ToggleActivityCommand}"
                             ToolTip.Tip="Activity">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center"
+                            <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" MaxWidth="320" TextTrimming="CharacterEllipsis"
                                        Text="{Binding StatusBar.Connection}" />
                             <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
                                 <TextBlock x:Name="ProblemText" Text="{Binding StatusBar.Problem}"
@@ -346,7 +346,13 @@
                     </Grid>
                 </Border>
 
-                <ContentControl x:Name="PageHost" Content="{Binding CurrentPage}" Margin="{DynamicResource PageMargin}" />
+                <Panel>
+                    <ContentControl x:Name="PageHost" Content="{Binding CurrentPage}" Margin="{DynamicResource PageMargin}"
+                                    IsVisible="{Binding !IsPageCovered}" />
+                    <Panel x:Name="ConnectionHost" IsVisible="{Binding IsPageCovered}">
+                        <views:ConnectionPanel DataContext="{Binding Connection}" Margin="{DynamicResource PageMargin}" />
+                    </Panel>
+                </Panel>
             </DockPanel>
         </DockPanel>
 

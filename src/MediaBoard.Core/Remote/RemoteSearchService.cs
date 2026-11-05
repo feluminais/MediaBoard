@@ -25,20 +25,17 @@ public sealed class RemoteSearchService(ApiClient client) : ISearchService
         ct.ThrowIfCancellationRequested();
         var text = query.Trim();
 
-        IReadOnlyList<TitleCard> local = text.Length == 0
-            ? []
-            : await client.GetAsync<List<TitleCard>>(LocalRoute(text, SearchService.MaxLibraryResults), ct);
+        if (text.Length == 0) return new SearchResults([], [], OnlineState.TooShort);
+        if (text.Length < SearchService.MinOnlineQueryLength) return new SearchResults(await LocalAsync(text, ct), [], OnlineState.TooShort);
 
-        if (text.Length < SearchService.MinOnlineQueryLength) return new SearchResults(local, [], OnlineState.TooShort);
-
+        // The one request answers for both groups. The library's own route is for when it fails.
         try
         {
-            var full = await client.GetAsync<SearchResults>($"search?q={Uri.EscapeDataString(text)}", ct);
-            return new SearchResults(local, full.Online, full.State);
+            return await client.GetAsync<SearchResults>($"search?q={Uri.EscapeDataString(text)}", ct);
         }
         catch (Exception e) when (e is ServerUnreachableException or ApiException)
         {
-            return new SearchResults(local, [], OnlineState.Offline);
+            return new SearchResults(await LocalAsync(text, ct), [], OnlineState.Offline);
         }
     }
 
@@ -69,6 +66,9 @@ public sealed class RemoteSearchService(ApiClient client) : ISearchService
     }
 
     public IReadOnlyList<PaletteCommand> Commands(string filter) => PaletteCommands.Filter(AllCommands, filter);
+
+    private async Task<IReadOnlyList<TitleCard>> LocalAsync(string text, CancellationToken ct) =>
+        await client.GetAsync<List<TitleCard>>(LocalRoute(text, SearchService.MaxLibraryResults), ct);
 
     // Null is what the local service gives when TMDB can't answer; the caller can't tell a refusal from a dead link.
     private static async Task<T?> TryAsync<T>(Func<Task<T>> ask)

@@ -42,17 +42,33 @@ public partial class MainWindow : Window
 
     protected override void OnDataContextChanged(EventArgs e)
     {
-        if (_vm is not null) _vm.PropertyChanged -= OnViewModelChanged;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged -= OnViewModelChanged;
+            if (_vm.Connection is { } left) left.PropertyChanged -= OnConnectionChanged;
+        }
+
         _vm = DataContext as MainWindowViewModel;
-        if (_vm is not null) _vm.PropertyChanged += OnViewModelChanged;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged += OnViewModelChanged;
+            if (_vm.Connection is { } connection) connection.PropertyChanged += OnConnectionChanged;
+        }
+
         base.OnDataContextChanged(e);
+    }
+
+    // The panel can stay while its button goes: a retry that connected to an empty library.
+    private void OnConnectionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ConnectionPanelViewModel.HasAction)) FocusNewPage();
     }
 
     // Opening the palette remembers what had the focus and puts the caret in its box (the box becomes visible in the
     // same pass, so focus after it). Closing gives the focus back.
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.CurrentPage))
+        if (e.PropertyName is nameof(MainWindowViewModel.CurrentPage) or nameof(MainWindowViewModel.IsPageCovered))
         {
             FocusNewPage();
             return;
@@ -80,15 +96,18 @@ public partial class MainWindow : Window
     // The page that was open takes its focused control with it (the card that was pressed, a Back button, a row's
     // button), and the focus would be nowhere. Put it on the new page's first control, silently (no cue, no tooltip),
     // unless it is already somewhere visible: the sidebar button that was pressed keeps it. The new page's rows are
-    // built in the layout pass, so wait for it.
+    // built in the layout pass, so wait for it. The connection panel going over a page, or off it, is the same thing: what
+    // had the focus is out of sight, and keys must not go on reaching it. A panel with no button leaves the root, which
+    // keeps Ctrl+F working.
     private void FocusNewPage()
     {
         Dispatcher.UIThread.Post(() =>
         {
             if (FocusManager?.GetFocusedElement() is InputElement { IsEffectivelyVisible: true }) return;
 
-            PageHost.UpdateLayout();
-            FocusTargets.First(PageHost)?.Focus();
+            var shown = _vm is { IsPageCovered: true } ? (Control)ConnectionHost : PageHost;
+            shown.UpdateLayout();
+            (FocusTargets.First(shown) ?? Root).Focus();
         }, DispatcherPriority.Loaded);
     }
 

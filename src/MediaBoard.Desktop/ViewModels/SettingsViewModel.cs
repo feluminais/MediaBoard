@@ -12,6 +12,8 @@ namespace MediaBoard.Desktop.ViewModels;
 /// <summary>
 /// Settings: the TMDB key, the player, and About with the TMDB attribution. Saving the key writes settings.json;
 /// <see cref="SettingsStore.Changed"/> is what restarts identification. The key is never logged or put in a message.
+/// A viewer has no key to enter and no outside players to follow, and gets an account section instead. A PC on its own
+/// library gets the way to a server.
 /// </summary>
 public sealed partial class SettingsViewModel : PageViewModel
 {
@@ -23,6 +25,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly ActivityHub _hub;
     private readonly Func<Task<string?>> _browsePlayer;
     private readonly Action<string> _openUrl;
+    private readonly Func<Task<string?>>? _connectToServer;
     private readonly BackgroundQuery _query;
     private const string UnreadableMessage = "Settings weren't saved because they couldn't be read. Restart MediaBoard and try again.";
 
@@ -34,7 +37,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         PlayerDetector detector,
         ActivityHub hub,
         Func<Task<string?>> browsePlayer,
-        Action<string> openUrl)
+        Action<string> openUrl,
+        AppCapabilities? capabilities = null,
+        AccountViewModel? account = null,
+        Func<Task<string?>>? connectToServer = null)
         : base("Settings")
     {
         _settings = settings;
@@ -42,6 +48,9 @@ public sealed partial class SettingsViewModel : PageViewModel
         _hub = hub;
         _browsePlayer = browsePlayer;
         _openUrl = openUrl;
+        _connectToServer = connectToServer;
+        ShowsOwnerParts = (capabilities ?? AppCapabilities.Local).Connection is null;
+        Account = account;
         _query = new BackgroundQuery(hub, "the players");
         var saved = settings.Load();
         TmdbKey = saved.TmdbKey ?? "";
@@ -63,7 +72,34 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
     }
 
+    private bool ShowsOwnerParts { get; }
+
+    // ---- Account and server ----
+
+    /// <summary>A viewer's account section; null on a PC that shows its own library.</summary>
+    public AccountViewModel? Account { get; }
+
+    public bool ShowAccount => Account is not null;
+
+    public bool CanConnectToServer => _connectToServer is not null;
+
+    /// <summary>Why the switch to a server didn't happen; null when it went ahead.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasConnectMessage))]
+    public partial string? ConnectMessage { get; private set; }
+
+    public bool HasConnectMessage => ConnectMessage is not null;
+
+    [RelayCommand]
+    private async Task ConnectToServerAsync()
+    {
+        if (_connectToServer is { } connect) ConnectMessage = await connect();
+    }
+
     // ---- TMDB key ----
+
+    /// <summary>TMDB answers a viewer through the owner's key.</summary>
+    public bool ShowTmdbKey => ShowsOwnerParts;
 
     [ObservableProperty]
     public partial string TmdbKey { get; set; } = "";
@@ -184,6 +220,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     private sealed record PlayersData(IReadOnlyList<PlayerInfo> Detected, PlayerInfo? InUse);
 
     // ---- Players opened outside the app ----
+
+    /// <summary>Following a player needs a library file on this PC.</summary>
+    public bool ShowOtherPlayers => ShowsOwnerParts;
 
     public string FollowTitle => "Other players";
 

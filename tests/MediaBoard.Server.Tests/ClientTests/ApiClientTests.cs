@@ -23,6 +23,19 @@ public sealed class ApiClientTests
 
     private static ServerEndpoint Endpoint(string fingerprint, params string[] addresses) => new("Library", addresses, fingerprint);
 
+    public static TheoryData<ApiErrorCode> Codes => new(Enum.GetValues<ApiErrorCode>());
+
+    // The activity list shows these as they stand.
+    [Theory]
+    [MemberData(nameof(Codes))]
+    public void Refusal_ReadsAsWords_NotACode(ApiErrorCode code)
+    {
+        var message = new ApiException(code).Message;
+
+        Assert.DoesNotContain(code.ToString(), message, StringComparison.Ordinal);
+        Assert.EndsWith(".", message, StringComparison.Ordinal);
+    }
+
     private static ApiClient NewClient(FakeApi api, string fingerprint, TimeProvider? time = null) =>
         new(Endpoint(fingerprint, api.Address), () => Token, _ => { }, time);
 

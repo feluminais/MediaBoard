@@ -15,6 +15,7 @@ using MediaBoard.Core.Probing;
 using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
+using MediaBoard.Desktop.Remote;
 using MediaBoard.Desktop.Sharing;
 using MediaBoard.Desktop.ViewModels;
 using MediaBoard.Server;
@@ -45,8 +46,9 @@ public sealed record DataPaths(string Database, string Settings, string Images, 
 /// <summary>What the shell gets from the mode it runs in.</summary>
 /// <param name="IdentifyPending">Starts identifying what is pending; the task ends with the queue.</param>
 /// <param name="RescanAll">The palette's "Rescan library", or null when this PC has nothing to scan.</param>
+/// <param name="Folders">The Folders page, or null when the folders are on someone else's PC.</param>
 /// <param name="Sharing">The Sharing page, which only the owner's PC has.</param>
-internal sealed record ShellParts(Func<Task> IdentifyPending, Func<Task>? RescanAll, SharingViewModel? Sharing);
+internal sealed record ShellParts(Func<Task> IdentifyPending, Func<Task>? RescanAll, FoldersViewModel? Folders, SharingViewModel? Sharing);
 
 /// <summary>
 /// Builds the service graph. Every Core service is a singleton; building and resolving starts nothing (no scan, no
@@ -61,11 +63,13 @@ public static class Composition
 
     /// <param name="overrides">Runs last, so a test can replace a registration (for instance a Connectivity that never
     /// touches the network).</param>
-    public static ServiceProvider Build(DataPaths paths, Action<IServiceCollection>? overrides = null)
+    /// <param name="restart">How this run starts over, or null when it can't.</param>
+    public static ServiceProvider Build(DataPaths paths, Action<IServiceCollection>? overrides = null, AppRestart? restart = null)
     {
         var services = new ServiceCollection();
 
-        AddBasics(services, paths);
+        AddBasics(services, paths, restart);
+        services.AddSingleton(AppCapabilities.Local);
         services.AddSingleton(_ => new LibraryDatabase(paths.Database));
 
         // One client for TMDB, the connectivity probe and images. It is created by hand, not through
@@ -192,11 +196,34 @@ public static class Composition
             sp.GetRequiredService<IPlaybackService>(), sp.GetRequiredService<Dialogs>().AskClosePlayerAsync));
         services.AddSingleton(sp =>
         {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new FoldersViewModel(
+                sp.GetRequiredService<ILibrary>(),
+                sp.GetRequiredService<IFolderActions>(),
+                sp.GetRequiredService<ActivityHub>(),
+                dialogs.PickFolderAsync,
+                question => dialogs.ConfirmAsync(question, "Remove", danger: true));
+        });
+        services.AddSingleton(sp =>
+        {
             var host = sp.GetRequiredService<AppHost>();
             return new ShellParts(
                 () => Task.Run(host.IdentifyPendingAsync),
                 sp.GetRequiredService<FolderActions>().RescanAllAsync,
+                sp.GetRequiredService<FoldersViewModel>(),
                 sp.GetRequiredService<SharingViewModel>());
+        });
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new ModeSwitch(
+                sp.GetRequiredService<SettingsStore>(),
+                sp.GetRequiredService<AppRestart>(),
+                sp.GetRequiredService<ActivityHub>(),
+                sp.GetRequiredService<StartWithWindows>(),
+                dialogs.ShowConnectAsync,
+                Environment.MachineName,
+                question => dialogs.ConfirmAsync(question, "Connect"));
         });
         AddViewModels(services);
         overrides?.Invoke(services);
@@ -205,9 +232,10 @@ public static class Composition
     }
 
     /// <summary>What every run of the app has, whoever's library it shows.</summary>
-    internal static void AddBasics(IServiceCollection services, DataPaths paths)
+    internal static void AddBasics(IServiceCollection services, DataPaths paths, AppRestart? restart)
     {
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(restart ?? AppRestart.Unavailable);
         services.AddSingleton(sp => new ActivityHub(sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(_ => new SettingsStore(paths.Settings));
         services.AddSingleton(sp =>
@@ -223,7 +251,7 @@ public static class Composition
 
     /// <summary>
     /// The shell and its pages. Each composition supplies <see cref="ILibrary"/>, <see cref="ISearchService"/>,
-    /// <see cref="IFolderActions"/>, <see cref="IPlaybackService"/>, <see cref="PosterLoader"/> and <see cref="ShellParts"/>.
+    /// <see cref="IPlaybackService"/>, <see cref="PosterLoader"/>, <see cref="AppCapabilities"/> and <see cref="ShellParts"/>.
     /// </summary>
     internal static void AddViewModels(IServiceCollection services)
     {
@@ -231,22 +259,16 @@ public static class Composition
         services.AddSingleton(sp =>
         {
             var dialogs = sp.GetRequiredService<Dialogs>();
-            return new FoldersViewModel(
-                sp.GetRequiredService<ILibrary>(),
-                sp.GetRequiredService<IFolderActions>(),
-                sp.GetRequiredService<ActivityHub>(),
-                dialogs.PickFolderAsync,
-                question => dialogs.ConfirmAsync(question, "Remove", danger: true));
-        });
-        services.AddSingleton(sp =>
-        {
-            var dialogs = sp.GetRequiredService<Dialogs>();
+            var capabilities = sp.GetRequiredService<AppCapabilities>();
             return new SettingsViewModel(
                 sp.GetRequiredService<SettingsStore>(),
                 sp.GetRequiredService<PlayerDetector>(),
                 sp.GetRequiredService<ActivityHub>(),
                 dialogs.PickProgramAsync,
-                dialogs.OpenUrl);
+                dialogs.OpenUrl,
+                capabilities,
+                sp.GetService<AccountViewModel>(),
+                capabilities.Connection is null ? sp.GetRequiredService<ModeSwitch>().ConnectToServerAsync : null);
         });
         services.AddSingleton(sp =>
         {
@@ -268,7 +290,10 @@ public static class Composition
                 dialogs.ConfirmDeleteAsync,
                 name => dialogs.ConfirmAsync(
                     $"Mark \"{name}\" as not a movie or show? It leaves the library and isn't identified again. Your files aren't touched.", "Mark"),
-                sp.GetRequiredService<ShellParts>().IdentifyPending);
+                sp.GetRequiredService<ShellParts>().IdentifyPending)
+            {
+                Capabilities = sp.GetRequiredService<AppCapabilities>(),
+            };
         });
 
         services.AddSingleton<StatusBarViewModel>();
@@ -281,13 +306,15 @@ public static class Composition
                 sp.GetRequiredService<StatusBarViewModel>(),
                 sp.GetRequiredService<ActivityPanelViewModel>(),
                 sp.GetRequiredService<ActivityHub>(),
-                sp.GetRequiredService<FoldersViewModel>(),
+                parts.Folders,
                 sp.GetRequiredService<SettingsViewModel>(),
                 sp.GetRequiredService<PosterLoader>(),
                 sp.GetRequiredService<TitleServices>(),
                 parts.RescanAll,
                 sp.GetRequiredService<TimeProvider>(),
-                parts.Sharing);
+                parts.Sharing,
+                sp.GetRequiredService<AppCapabilities>(),
+                sp.GetService<ConnectionPanelViewModel>());
         });
     }
 

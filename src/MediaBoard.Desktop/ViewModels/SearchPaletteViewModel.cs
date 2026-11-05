@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Metadata;
+using MediaBoard.Core.Remote;
 
 namespace MediaBoard.Desktop.ViewModels;
 
@@ -53,7 +54,8 @@ public sealed partial class PaletteRow(string key, string text, string? detail, 
 /// The Ctrl+F palette. One box: text searches the library (a result per keystroke, never the network) and, after a
 /// 300 ms typing pause, TMDB; a leading <c>&gt;</c> lists commands instead. Every keystroke cancels the search in
 /// flight and a late answer is dropped. The library part asks <see cref="ILibrary.SearchLocal"/> directly: the
-/// search service's <c>SearchAsync</c> waits for TMDB, so it is only called once the pause has passed.
+/// search service's <c>SearchAsync</c> waits for TMDB, so it is only called once the pause has passed. A viewer's library
+/// is a server away, so with <c>searchesServer</c> nothing goes out until the pause, and the one answer fills both groups.
 /// </summary>
 public sealed partial class SearchPaletteViewModel : ObservableObject
 {
@@ -62,6 +64,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     public const string CommandsHeader = "Commands";
     public const string OfflineNote = "Offline";
     public const string NoKeyChoice = "Add a TMDB key";
+    public const string ServerNoKeyNote = "This library has no TMDB key";
     public const string KeyRejectedNote = "TMDB rejected the key";
     public const string NoMatches = "No matches";
     public const string NoCommands = "No commands";
@@ -75,6 +78,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     private readonly ActivityHub _hub;
     private readonly TimeProvider _time;
     private readonly Action _close;
+    private readonly bool _searchesServer;
     private readonly BackgroundQuery _libraryQuery;
 
     private CancellationTokenSource? _onlineCancel;
@@ -91,7 +95,8 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         PaletteActions actions,
         ActivityHub hub,
         TimeProvider time,
-        Action close)
+        Action close,
+        bool searchesServer = false)
     {
         _search = search;
         _library = library;
@@ -99,6 +104,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         _hub = hub;
         _time = time;
         _close = close;
+        _searchesServer = searchesServer;
         _libraryQuery = new BackgroundQuery(hub, "the search results");
     }
 
@@ -183,7 +189,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         else
         {
             var cancel = _onlineCancel = new CancellationTokenSource();
-            _libraryTask = _libraryQuery.RunAsync(
+            _libraryTask = _searchesServer ? Task.CompletedTask : _libraryQuery.RunAsync(
                 () => _library.SearchLocal(trimmed, SearchService.MaxLibraryResults),
                 hits =>
                 {
@@ -205,6 +211,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
             if (ct.IsCancellationRequested) return;
 
             _lastFailure = null;
+            if (_searchesServer) _libraryHits = results.Library;
             _onlineHits = results.Online;
             _onlineState = results.State;
             Rebuild(keepSelection: true);
@@ -216,6 +223,14 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             // TMDB timed out without us cancelling: the same as being offline.
+            _onlineHits = [];
+            _onlineState = OnlineState.Offline;
+            Rebuild(keepSelection: true);
+        }
+        catch (Exception e) when (_searchesServer && e is ServerUnreachableException or ApiException or IdentityChangedException)
+        {
+            // The status bar already says what's wrong with the connection.
+            _libraryHits = [];
             _onlineHits = [];
             _onlineState = OnlineState.Offline;
             Rebuild(keepSelection: true);
@@ -300,7 +315,9 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
                 break;
             case OnlineState.NoKey:
                 rows.Add(Header(OnlineHeader));
-                rows.Add(Item("key:missing", NoKeyChoice, null, _actions.OpenSettings));
+                rows.Add(_searchesServer
+                    ? new PaletteRow("note:no-key", ServerNoKeyNote, null, PaletteRowKind.Note, null)
+                    : Item("key:missing", NoKeyChoice, null, _actions.OpenSettings));
                 break;
             case OnlineState.KeyRejected:
                 rows.Add(Header(OnlineHeader));

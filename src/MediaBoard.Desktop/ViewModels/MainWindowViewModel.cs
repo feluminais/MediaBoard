@@ -42,6 +42,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly TitleServices _titles;
     private readonly TitleNavigation _titleNavigation;
     private readonly Func<Task>? _rescanAll;
+    private readonly AppCapabilities _capabilities;
     private readonly Stack<PageViewModel> _back = [];
     private readonly PageActions _actions;
     private readonly HomeViewModel _home;
@@ -54,14 +55,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         StatusBarViewModel statusBar,
         ActivityPanelViewModel activity,
         ActivityHub hub,
-        FoldersViewModel folders,
+        FoldersViewModel? folders,
         SettingsViewModel settings,
         PosterLoader posters,
         TitleServices titles,
         Func<Task>? rescanAll = null,
         TimeProvider? timeProvider = null,
-        SharingViewModel? sharing = null)
+        SharingViewModel? sharing = null,
+        AppCapabilities? capabilities = null,
+        ConnectionPanelViewModel? connection = null)
     {
+        _capabilities = capabilities ?? AppCapabilities.Local;
+        Connection = connection;
         _library = library;
         _hub = hub;
         _posters = posters;
@@ -77,9 +82,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             addFolder: () =>
             {
                 Navigate(FoldersPage);
-                folders.AddFolderCommand.Execute(null); // the picker opens at once
+                folders?.AddFolderCommand.Execute(null); // the picker opens at once
             },
-            addKey: () => Navigate(SettingsPage));
+            addKey: () => Navigate(SettingsPage),
+            _capabilities);
         _reviewCount = new BackgroundQuery(hub, "the review count");
         StatusBar = statusBar;
         Activity = activity;
@@ -89,31 +95,39 @@ public sealed partial class MainWindowViewModel : ObservableObject
             new PaletteActions(OpenTitle, OpenOnlineTitle, () => Navigate(SettingsPage), RescanAsync, ShowHiddenItems),
             hub,
             timeProvider ?? TimeProvider.System,
-            () => IsSearchOpen = false);
+            () => IsSearchOpen = false,
+            searchesServer: _capabilities.Connection is not null);
 
         _pages = new Dictionary<string, PageViewModel>
         {
             [HomePage] = _home,
-            [MoviesPage] = new TitleGridViewModel(TitleKind.Movie, library, hub, posters, _actions),
-            [ShowsPage] = new TitleGridViewModel(TitleKind.Show, library, hub, posters, _actions),
-            [ReviewPage] = new ReviewViewModel(titles),
-            [FoldersPage] = folders,
+            [MoviesPage] = new TitleGridViewModel(TitleKind.Movie, library, hub, posters, _actions, _capabilities),
+            [ShowsPage] = new TitleGridViewModel(TitleKind.Show, library, hub, posters, _actions, _capabilities),
             [SettingsPage] = settings,
         };
-        if (sharing is not null) _pages[SharingPage] = sharing;
+        var managesFolders = _capabilities.ManagesFolders && folders is not null;
+        var shares = _capabilities.Shares && sharing is not null;
+        if (managesFolders)
+        {
+            _pages[ReviewPage] = new ReviewViewModel(titles);
+            _pages[FoldersPage] = folders!;
+        }
+
+        if (shares) _pages[SharingPage] = sharing!;
         ReviewItem = new NavItem(ReviewPage, ReviewLabel(0));
         NavItems =
         [
             new NavItem(HomePage, "Home"),
             new NavItem(MoviesPage, "Movies"),
             new NavItem(ShowsPage, "Shows"),
-            new NavItem(FoldersPage, "Folders"),
-            .. sharing is null ? [] : new[] { new NavItem(SharingPage, "Sharing") },
+            .. managesFolders ? new[] { new NavItem(FoldersPage, "Folders") } : [],
+            .. shares ? new[] { new NavItem(SharingPage, "Sharing") } : [],
             new NavItem(SettingsPage, "Settings"),
         ];
 
         CurrentPage = _pages[HomePage];
         NavItems[0].IsSelected = true;
+        if (connection is not null) FollowConnection(connection, statusBar);
 
         statusBar.SettingsRequested += () => Navigate(SettingsPage);
         statusBar.SharingRequested += () => Navigate(SharingPage);
@@ -124,6 +138,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public StatusBarViewModel StatusBar { get; }
 
     public ActivityPanelViewModel Activity { get; }
+
+    /// <summary>What stands in for a page the connection has left empty; null on a PC that shows its own library.</summary>
+    public ConnectionPanelViewModel? Connection { get; }
+
+    /// <summary>The connection panel is showing in place of the page, which stays underneath.</summary>
+    [ObservableProperty]
+    public partial bool IsPageCovered { get; private set; }
 
     /// <summary>The Ctrl+F palette; it empties each time it opens.</summary>
     public SearchPaletteViewModel Search { get; }
@@ -219,7 +240,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // A Home row's arrow. The list reads the library once it is open and again whenever the library changes.
     private void OpenList(ListKind kind)
     {
-        var list = new ListViewModel(kind, _library, _hub, _posters, _actions);
+        var list = new ListViewModel(kind, _library, _hub, _posters, _actions, _capabilities);
         CurrentPage = list;
         _ = list.RefreshAsync();
     }
@@ -267,6 +288,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
     partial void OnCurrentPageChanged(ObservableObject oldValue, ObservableObject newValue)
     {
         if (oldValue is PageViewModel closed && !ReferenceEquals(oldValue, newValue)) closed.Closed();
+        Connection?.Follow(newValue);
+    }
+
+    // Home reloads even while hidden, and its newest-first list is the whole library, so its being empty answers for every page.
+    private void FollowConnection(ConnectionPanelViewModel connection, StatusBarViewModel statusBar)
+    {
+        statusBar.ShowConnection(connection.StatusLine);
+        IsPageCovered = connection.IsShown;
+        connection.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConnectionPanelViewModel.StatusLine)) statusBar.ShowConnection(connection.StatusLine);
+            else if (e.PropertyName == nameof(ConnectionPanelViewModel.IsShown)) IsPageCovered = connection.IsShown;
+        };
+        _home.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(HomeViewModel.IsLoaded) or nameof(HomeViewModel.RecentlyAdded))
+                connection.SetNothingShared(_home is { IsLoaded: true, NothingAdded: true });
+        };
     }
 
     // The item hides at 0, so its label keeps the last count meanwhile; the review page stays open and shows its own empty text.
@@ -290,7 +329,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Starts the loads and returns at once: every query runs on the thread pool (see BackgroundQuery).
     private void Refresh()
     {
-        _ = _reviewCount.RunAsync(_library.NeedsReviewCount, count => ReviewCount = count);
+        if (_capabilities.ManagesFolders) _ = _reviewCount.RunAsync(_library.NeedsReviewCount, count => ReviewCount = count);
         foreach (var page in _pages.Values)
         {
             if (page.RefreshesWhileHidden || ReferenceEquals(page, CurrentPage)) _ = page.RefreshAsync();

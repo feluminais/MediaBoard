@@ -73,6 +73,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     // A launch-only program's locator after it exited. Some hand the file to a running instance and exit at once, so its
     // exit says nothing about whether the locator is still being read. The next Play or the end of the app gives it back.
     private string? _lingering;
+    private volatile bool _endedWithNews;
 
     public PlaybackService(
         IPlaybackSource source,
@@ -101,6 +102,12 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             lock (_stateGate) return _current?.PlayerName;
         }
     }
+
+    /// <summary>
+    /// The last session ended with something still to tell the viewer: this app cut it off, or a player that reports
+    /// nothing was closed, so "did you finish?" is on its way. Whoever waits on the player to leave must stay for that.
+    /// </summary>
+    public bool EndedWithNews => _endedWithNews;
 
     public async Task PlayAsync(int fileId, bool fromStart, CancellationToken ct)
     {
@@ -285,6 +292,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             _progress.Finished(current);
         }
 
+        _endedWithNews = true;
         ClearCurrent(playing);
         _hub.Log(ActivityLevel.Warning, reason);
         await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
@@ -444,8 +452,9 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             _hub.Log(ActivityLevel.Warning, failed.Message, "Try again or choose another player in Settings");
         }
 
-        ClearCurrent(playing);
         var lingers = end == EndKind.Closed && !playing.Session.TracksProgress;
+        _endedWithNews = end == EndKind.Failed || (lingers && playing.FileId is not null);
+        ClearCurrent(playing);
         if (lingers) Linger(playing);
 
         // Not awaited: this runs on the player's event thread, which must not wait on the session.

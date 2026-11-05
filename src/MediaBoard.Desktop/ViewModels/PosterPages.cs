@@ -12,7 +12,7 @@ public enum ListKind { ContinueWatching, RecentlyAdded }
 /// The list behind a Home row's arrow: every in-progress item, or the whole library newest first. Rows are virtualized,
 /// so a library of thousands costs one screenful of controls.
 /// </summary>
-public sealed partial class ListViewModel : PageViewModel
+public sealed partial class ListViewModel : PageViewModel, IServerPage
 {
     private readonly ListKind _kind;
     private readonly ILibrary _library;
@@ -23,7 +23,7 @@ public sealed partial class ListViewModel : PageViewModel
     private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
     private StatusFeed? _feed;
 
-    public ListViewModel(ListKind kind, ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions)
+    public ListViewModel(ListKind kind, ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions, AppCapabilities? capabilities = null)
         : base(kind == ListKind.ContinueWatching ? "Continue watching" : "Recently added")
     {
         _kind = kind;
@@ -31,7 +31,7 @@ public sealed partial class ListViewModel : PageViewModel
         _posters = posters;
         _actions = actions;
         _hub = hub;
-        _query = new BackgroundQuery(hub, Title);
+        _query = new BackgroundQuery(hub, Title, hint: capabilities?.FailureHint);
     }
 
     public ListKind Kind => _kind;
@@ -106,7 +106,7 @@ public sealed record SortOption(TitleSort Sort, string Label);
 /// The Movies or Shows page: a poster grid with a sort, a text filter and a "Show hidden" switch. The library sorts
 /// and hides; the text filter runs in memory on the loaded titles, so typing never queries the database.
 /// </summary>
-public sealed partial class TitleGridViewModel : PageViewModel
+public sealed partial class TitleGridViewModel : PageViewModel, IServerPage
 {
     private static readonly SortOption[] Sorts =
     [
@@ -120,22 +120,27 @@ public sealed partial class TitleGridViewModel : PageViewModel
     private readonly PosterLoader _posters;
     private readonly PageActions _actions;
     private readonly BackgroundQuery _query;
+    private readonly AppCapabilities _capabilities;
     private IReadOnlyList<PosterCardViewModel> _all = [];
     private IReadOnlyDictionary<string, PosterCardViewModel> _known = new Dictionary<string, PosterCardViewModel>();
 
-    public TitleGridViewModel(TitleKind kind, ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions)
+    public TitleGridViewModel(TitleKind kind, ILibrary library, ActivityHub hub, PosterLoader posters, PageActions actions, AppCapabilities? capabilities = null)
         : base(kind == TitleKind.Movie ? "Movies" : "Shows")
     {
         _kind = kind;
         _library = library;
         _posters = posters;
         _actions = actions;
-        _query = new BackgroundQuery(hub, Title);
+        _capabilities = capabilities ?? AppCapabilities.Local;
+        _query = new BackgroundQuery(hub, Title, hint: _capabilities.FailureHint);
         BusyTitle = LibraryBusy.Title(hub.Current);
         _ = new StatusFeed(hub, status => BusyTitle = LibraryBusy.Title(status));
     }
 
     public IReadOnlyList<SortOption> SortOptions => Sorts;
+
+    /// <summary>Hidden titles never leave the owner's PC, so a viewer has nothing to switch on.</summary>
+    public bool CanShowHidden => _capabilities.CanEditLibrary;
 
     [ObservableProperty]
     public partial SortOption SelectedSort { get; set; } = Sorts[0];
@@ -164,6 +169,7 @@ public sealed partial class TitleGridViewModel : PageViewModel
 
     public string EmptyHint => _all.Count > 0 ? ""
         : BusyTitle is not null ? LibraryBusy.Line
+        : !_capabilities.ManagesFolders ? ""
         : _kind == TitleKind.Movie ? "Add a folder that has movies." : "Add a folder that has shows.";
 
     public bool HasEmptyHint => EmptyHint.Length > 0;

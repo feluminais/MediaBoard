@@ -2,6 +2,8 @@ using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using MediaBoard.Core.Activity;
+using MediaBoard.Core.Playback;
 
 namespace MediaBoard.Desktop.Sharing;
 
@@ -18,6 +20,12 @@ public interface ITrayReason
 
     /// <summary>What to ask before quitting, or null when quitting costs nobody anything.</summary>
     string? QuitQuestion { get; }
+
+    /// <summary>
+    /// When this was the last reason and the window is hidden, the app has finished and exits. False brings the window
+    /// back. Read as the reason ends.
+    /// </summary>
+    bool ExitsWhenOver { get; }
 }
 
 /// <summary>While sharing is on, closing the window must not stop the server.</summary>
@@ -39,12 +47,41 @@ public sealed class SharingTrayReason(SharingController sharing) : ITrayReason
         1 => "Someone is watching. Quit and stop their stream?",
         var watching => string.Create(CultureInfo.InvariantCulture, $"{watching} streams are playing. Quit and stop them?"),
     };
+
+    public bool ExitsWhenOver => false;
+}
+
+/// <summary>
+/// A viewer's stream runs through the app, so closing the window while a file plays must not stop it. Once the player
+/// closes the app has nothing left to do, unless the viewer still needs telling something, and the window is how.
+/// </summary>
+public sealed class PlaybackTrayReason : ITrayReason
+{
+    private readonly ActivityHub _hub;
+    private readonly PlaybackService _playback;
+
+    public PlaybackTrayReason(ActivityHub hub, PlaybackService playback)
+    {
+        _hub = hub;
+        _playback = playback;
+        hub.StatusChanged += _ => Changed?.Invoke();
+    }
+
+    public event Action? Changed;
+
+    public bool Applies => _hub.Current.PlayerName is not null;
+
+    public string Status => $"Playing in {_hub.Current.PlayerName}";
+
+    public string? QuitQuestion => null;
+
+    public bool ExitsWhenOver => !_playback.EndedWithNews;
 }
 
 /// <summary>
 /// The tray icon and the window's way there. The icon shows while a reason applies, and closing the window then hides
 /// it. When the last reason ends with the window hidden, the window comes back, since the app would otherwise run
-/// with nothing on screen to reach it by.
+/// with nothing on screen to reach it by, or the app exits if that reason says so.
 /// </summary>
 public sealed class TrayController
 {
@@ -53,6 +90,7 @@ public sealed class TrayController
     private readonly Window _window;
     private readonly IReadOnlyList<ITrayReason> _reasons;
     private readonly Func<string, Task<bool>> _confirmQuit;
+    private IReadOnlyList<ITrayReason> _heldBy = [];
     private bool _settling;
     private bool _quitting;
     private bool _asking;
@@ -165,7 +203,22 @@ public sealed class TrayController
         var holding = _reasons.Where(reason => reason.Applies).ToList();
         Icon.IsVisible = holding.Count > 0;
         Icon.ToolTipText = string.Join('\n', holding.Select(reason => reason.Status));
+        if (holding.Count > 0)
+        {
+            _heldBy = holding;
+            return;
+        }
 
-        if (holding.Count == 0 && !_settling && !_window.IsVisible) ShowWindow();
+        if (_settling || _window.IsVisible) return;
+
+        if (_heldBy.Count > 0 && _heldBy.All(reason => reason.ExitsWhenOver))
+        {
+            _quitting = true;
+            _window.Close();
+        }
+        else
+        {
+            ShowWindow();
+        }
     }
 }

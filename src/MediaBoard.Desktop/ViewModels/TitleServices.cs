@@ -17,7 +17,11 @@ public sealed record TitleServices(
     Func<string?> PlayerName,
     Func<DeletePreview, Task<bool>> ConfirmDelete,
     Func<string, Task<bool>> ConfirmNotMedia,
-    Func<Task> IdentifyPending);
+    Func<Task> IdentifyPending)
+{
+    /// <summary>What this run of the app can do, which decides the edits a page offers.</summary>
+    public AppCapabilities Capabilities { get; init; } = AppCapabilities.Local;
+}
 
 /// <summary>What a title page can ask the shell to do. All run on the UI thread.</summary>
 /// <param name="Back">Returns to the page that opened this one.</param>

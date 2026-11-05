@@ -5,6 +5,7 @@ using MediaBoard.Core.Playback;
 using MediaBoard.Core.Players;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Settings;
+using MediaBoard.Desktop.Sharing;
 using MediaBoard.Desktop.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,11 +22,12 @@ public static class RemoteComposition
     /// <param name="paths">The data folder.</param>
     /// <param name="connection">The server. <see cref="ModeGate.HasUsableEndpoint"/> has passed its endpoint.</param>
     /// <param name="overrides">Runs last, so a test can replace a registration.</param>
-    public static ServiceProvider Build(DataPaths paths, StoredConnection connection, Action<IServiceCollection>? overrides = null)
+    /// <param name="restart">How this run starts over, or null when it can't.</param>
+    public static ServiceProvider Build(DataPaths paths, StoredConnection connection, Action<IServiceCollection>? overrides = null, AppRestart? restart = null)
     {
         var services = new ServiceCollection();
 
-        Composition.AddBasics(services, paths);
+        Composition.AddBasics(services, paths, restart);
 
         services.AddSingleton(sp => Link.Open(connection, sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => sp.GetRequiredService<Link>().Client);
@@ -53,9 +55,30 @@ public static class RemoteComposition
             PlayerSessionFactory.Create));
         services.AddSingleton<IPlaybackService>(sp => sp.GetRequiredService<PlaybackService>());
 
-        services.AddSingleton<IFolderActions, NoFolders>();
-        services.AddSingleton(new ShellParts(() => Task.CompletedTask, RescanAll: null, Sharing: null));
+        services.AddSingleton(sp => AppCapabilities.Remote(sp.GetRequiredService<ConnectionMonitor>()));
+        services.AddSingleton(new ShellParts(() => Task.CompletedTask, RescanAll: null, Folders: null, Sharing: null));
         services.AddSingleton<RemoteHost>();
+        services.AddSingleton<ITrayReason>(sp => new PlaybackTrayReason(sp.GetRequiredService<ActivityHub>(), sp.GetRequiredService<PlaybackService>()));
+
+        services.AddSingleton(sp => new ViewerAccount(
+            connection,
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<ApiClient>(),
+            sp.GetRequiredService<ConnectionMonitor>(),
+            sp.GetRequiredService<AppRestart>()));
+        services.AddSingleton(sp => new ModeSwitch(
+            sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AppRestart>(), sp.GetRequiredService<ActivityHub>()));
+        services.AddSingleton(sp =>
+        {
+            var dialogs = sp.GetRequiredService<Dialogs>();
+            return new AccountViewModel(
+                sp.GetRequiredService<ViewerAccount>(),
+                sp.GetRequiredService<ModeSwitch>(),
+                sp.GetRequiredService<ActivityHub>(),
+                (question, yes) => dialogs.ConfirmAsync(question, yes));
+        });
+        services.AddSingleton(sp => new ConnectionPanelViewModel(
+            sp.GetRequiredService<ConnectionMonitor>(), connection.Endpoint.ServerName, sp.GetRequiredService<ViewerAccount>().ReturnToConnect));
 
         // PlayerExitPrompt stays out: leaving a player running would stop the proxy under it.
         Composition.AddViewModels(services);
@@ -75,22 +98,5 @@ public static class RemoteComposition
             monitor = new ConnectionMonitor(client, time);
             return new Link(client, monitor);
         }
-    }
-
-    /// <summary>The folders are on the owner's PC.</summary>
-    private sealed class NoFolders : IFolderActions
-    {
-        private static readonly Task<FolderOutcome> Refused =
-            Task.FromResult(FolderOutcome.Refused("Only the PC sharing this library can change its folders."));
-
-        public Task<FolderOutcome> AddAsync(string path) => Refused;
-
-        public Task<FolderOutcome> RemoveAsync(int folderId) => Refused;
-
-        public Task<FolderOutcome> SetEnabledAsync(int folderId, bool enabled) => Refused;
-
-        public Task<FolderOutcome> RepointAsync(int folderId, string newPath) => Refused;
-
-        public Task WhenIdleAsync() => Task.CompletedTask;
     }
 }

@@ -354,6 +354,21 @@ public sealed class RemoteLibraryTests
     }
 
     [Fact]
+    public async Task Search_OneRequestAnswersBothGroups()
+    {
+        await using var fixture = new ServerFixture();
+        var heat = new TitleCard(1, TitleKind.Movie, "Heat", 1995, null, null, null, false, false, false, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await using var api = await FakeApi.StartAsync(
+            fixture.NewCertificate(), context => Results.Json(new SearchResults([heat], [], OnlineState.Ok), ApiJson.Options).ExecuteAsync(context));
+        using var client = ClientOf(api, fixture);
+
+        var results = await new RemoteSearchService(client).SearchAsync("heat", Ct);
+
+        Assert.Equal(["Heat"], results.Library.Select(c => c.Name));
+        Assert.Equal(["/api/v1/search?q=heat"], api.Urls);
+    }
+
+    [Fact]
     public async Task Search_OnlineLegFails_KeepsTheLibraryHits_AndSaysOffline()
     {
         await using var fixture = new ServerFixture();

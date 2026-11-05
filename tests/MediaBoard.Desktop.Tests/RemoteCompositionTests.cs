@@ -23,9 +23,9 @@ public sealed class RemoteCompositionTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private sealed class Player : IPlayerSession
+    internal sealed class Player : IPlayerSession
     {
-        public bool TracksProgress => true;
+        public bool TracksProgress { get; set; } = true;
 
         public event Action<PlaybackEvent>? Event;
 
@@ -59,10 +59,11 @@ public sealed class RemoteCompositionTests
     }
 
     /// <summary>A viewer's PC with its own data folder, joined to a real server on loopback.</summary>
-    private sealed class Viewer : IAsyncDisposable
+    internal sealed class Viewer : IAsyncDisposable
     {
         private readonly string _dir = Directory.CreateTempSubdirectory("mediaboard-viewer-").FullName;
         private bool _stopped;
+        private int _restarts;
 
         private Viewer(SharingWorld world, StoredConnection connection, string token, Player player)
         {
@@ -97,7 +98,14 @@ public sealed class RemoteCompositionTests
                     sp.GetRequiredService<StreamProxy>(),
                     sp.GetRequiredService<ProgressOutbox>(),
                     Grace));
-            });
+
+                // Dialogs have no window here, and would answer no.
+                services.AddSingleton(sp => new AccountViewModel(
+                    sp.GetRequiredService<ViewerAccount>(),
+                    sp.GetRequiredService<ModeSwitch>(),
+                    sp.GetRequiredService<ActivityHub>(),
+                    (_, _) => Task.FromResult(true)));
+            }, new AppRestart("MediaBoard.exe", (_, _) => Interlocked.Increment(ref _restarts), () => { }));
         }
 
         public SharingWorld World { get; }
@@ -110,6 +118,8 @@ public sealed class RemoteCompositionTests
         public Player Player { get; }
 
         public ManualClock Grace { get; } = new();
+
+        public int Restarts => Volatile.Read(ref _restarts);
 
         public DataPaths Paths => new(Path.Combine(_dir, "library.db"), Path.Combine(_dir, "settings.json"), Path.Combine(_dir, "images"));
 

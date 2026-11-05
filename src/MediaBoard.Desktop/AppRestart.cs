@@ -14,6 +14,9 @@ namespace MediaBoard.Desktop;
 /// <param name="shutdown">Ends this process.</param>
 public sealed class AppRestart(string? processPath, Action<string, string> start, Action shutdown)
 {
+    /// <summary>For a run with no lifetime to end, such as a composition built by a test.</summary>
+    public static AppRestart Unavailable { get; } = new(null, (_, _) => { }, () => { });
+
     public static AppRestart For(IClassicDesktopStyleApplicationLifetime desktop) =>
         new(Environment.ProcessPath, (path, arguments) => Process.Start(path, arguments).Dispose(), () => desktop.Shutdown());
 

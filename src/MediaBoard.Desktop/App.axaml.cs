@@ -23,7 +23,6 @@ public partial class App : Application
     private Func<Task>? _stopHost;
     private TrayController? _tray;
     private FirstRunWindow? _startWindow;
-    private bool _exitPromptDone;
 
     public override void Initialize()
     {
@@ -73,7 +72,7 @@ public partial class App : Application
 
     private void RunLocal(IClassicDesktopStyleApplicationLifetime desktop, DataPaths paths)
     {
-        var services = Composition.Build(paths);
+        var services = Composition.Build(paths, restart: AppRestart.For(desktop));
         var (window, tray) = BuildShell(services);
         var host = services.GetRequiredService<AppHost>();
         _stopHost = host.StopAsync;
@@ -88,7 +87,7 @@ public partial class App : Application
     // window, as the tray does whenever no reason applies.
     private void RunRemote(IClassicDesktopStyleApplicationLifetime desktop, DataPaths paths, StoredConnection connection)
     {
-        var services = RemoteComposition.Build(paths, connection);
+        var services = RemoteComposition.Build(paths, connection, restart: AppRestart.For(desktop));
         var (window, _) = BuildShell(services);
         var host = services.GetRequiredService<RemoteHost>();
         _stopHost = host.StopAsync;
@@ -108,7 +107,7 @@ public partial class App : Application
         var tray = new TrayController(window, services.GetServices<ITrayReason>(), question => dialogs.ConfirmAsync(question, "Quit"));
         _tray = tray;
         TrayIcon.SetIcons(this, [tray.Icon]);
-        window.Closing += OnMainWindowClosing;
+        window.Closing += new ShellClosing(tray, services.GetService<PlayerExitPrompt>(), services.GetRequiredService<Core.Playback.IPlaybackService>()).OnClosing;
         return (window, tray);
     }
 
@@ -151,33 +150,6 @@ public partial class App : Application
             if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
             window.Activate();
         }
-    }
-
-    // Closing goes to the tray while something needs the app running. Otherwise, while a file plays, closing asks about
-    // the player first (R45). The close is cancelled, the question runs, then the window closes for real. Windows
-    // shutting down skips all of this: AppHost closes the player. A viewer has no question to ask, so RemoteComposition
-    // doesn't register the prompt and RemoteHost closes the player.
-    private async void OnMainWindowClosing(object? sender, WindowClosingEventArgs e)
-    {
-        if (_exitPromptDone || _services is not { } services || sender is not Window window) return;
-        if (e.CloseReason == WindowCloseReason.OSShutdown) return;
-        if (_tray is { } tray && tray.HideInstead(e)) return;
-        if (services.GetService<PlayerExitPrompt>() is not { } prompt) return;
-        if (services.GetRequiredService<Core.Playback.IPlaybackService>().CurrentPlayer is null) return;
-
-        e.Cancel = true;
-        _exitPromptDone = true;
-        try
-        {
-            await prompt.RunAsync();
-        }
-        catch (Exception ex)
-        {
-            // Closing goes ahead; AppHost.StopAsync still saves and closes whatever is left.
-            System.Diagnostics.Trace.TraceWarning($"Exit prompt failed: {ex}");
-        }
-
-        window.Close();
     }
 
     private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)

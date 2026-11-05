@@ -15,6 +15,7 @@ public sealed partial class StatusBarViewModel : ObservableObject
 {
     private int _unseenProblems;
     private string? _latestProblem;
+    private string? _connectionLine;
 
     public StatusBarViewModel(ActivityHub hub)
     {
@@ -91,6 +92,14 @@ public sealed partial class StatusBarViewModel : ObservableObject
     [ObservableProperty]
     public partial string? Sharing { get; private set; }
 
+    /// <summary>A viewer's line about the server, which takes the place of "Online" and of a scan's "Up to date".</summary>
+    public void ShowConnection(string line)
+    {
+        _connectionLine = line;
+        Connection = line;
+        Progress = null;
+    }
+
     [RelayCommand]
     private void OpenSettings() => SettingsRequested?.Invoke();
 
@@ -133,6 +142,7 @@ public sealed partial class StatusBarViewModel : ObservableObject
             { ScanFolder: { } folder } => $"Scanning {folder}",
             // "Up to date" would be wrong next to any of these.
             { PendingIdentification: > 0 } or { LibraryError: not null } or { FailedScans.Count: > 0 } => null,
+            _ when _connectionLine is not null => null,
             _ => "Up to date",
         };
         LibraryProblem = s.LibraryError is null ? null : "Can't open the library";
@@ -146,7 +156,7 @@ public sealed partial class StatusBarViewModel : ObservableObject
         Identifying = s.PendingIdentification > 0
             ? string.Create(CultureInfo.InvariantCulture, $"Identifying {s.PendingIdentification}")
             : null;
-        Connection = s.Online ? "Online" : "Offline";
+        Connection = _connectionLine ?? (s.Online ? "Online" : "Offline");
         KeyProblem = s.KeyState switch
         {
             KeyState.Missing => "TMDB key missing",
