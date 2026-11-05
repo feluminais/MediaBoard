@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace MediaBoard.Core.Remote;
 
 public enum ConnectionState { Connecting, Connected, Unreachable, SignedOut, IdentityChanged, VersionMismatch }
@@ -7,6 +9,8 @@ public enum ConnectionEvent
 {
     /// <summary>The events connection is open.</summary>
     Listening,
+
+    /// <summary>No address could be connected to.</summary>
     Unreachable,
     SignedOut,
     IdentityChanged,
@@ -31,6 +35,7 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Lock _gate = new();
     private ConnectionState _state = ConnectionState.Connecting;
+    private int? _serverVersion;
     private CancellationTokenSource? _hold;
     private TaskCompletionSource _retry = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -48,6 +53,15 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         get
         {
             lock (_gate) return _state;
+        }
+    }
+
+    /// <summary>The API version the server last gave, or null before it has answered. It says which side is behind on a mismatch.</summary>
+    public int? ServerVersion
+    {
+        get
+        {
+            lock (_gate) return _serverVersion;
         }
     }
 
@@ -82,12 +96,12 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         }
 
         asked.TrySetResult();
-        Changed?.Invoke();
+        Safely(() => Changed?.Invoke());
     }
 
     /// <summary>
-    /// Takes what a request found out. A request that couldn't get through also ends the events connection, which may
-    /// be dead without having said so, and the next try shows whether the server is there.
+    /// Takes what a request found out. Connecting nowhere also ends the events connection, which may be dead without
+    /// having said so, and the next try shows whether the server is there.
     /// </summary>
     public void Report(ConnectionEvent happened) => Move(happened switch
     {
@@ -99,6 +113,20 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
 
     private static bool IsFinal(ConnectionState state) =>
         state is ConnectionState.SignedOut or ConnectionState.IdentityChanged or ConnectionState.VersionMismatch;
+
+    // Nothing awaits RunAsync, so a failure in a handler would end the watch unseen, and a request that happened to
+    // report would fail for it.
+    private static void Safely(Action raise)
+    {
+        try
+        {
+            raise();
+        }
+        catch (Exception e)
+        {
+            Trace.TraceWarning($"A connection handler failed: {e.GetType().Name}");
+        }
+    }
 
     private TaskCompletionSource RetryAsked()
     {
@@ -113,6 +141,7 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         try
         {
             var ping = await client.GetAsync<PingReply>("ping", hold.Token);
+            lock (_gate) _serverVersion = ping.Version;
             if (ping.Version != ApiVersion.Current)
             {
                 Move(ConnectionState.VersionMismatch);
@@ -127,7 +156,7 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
                     return;
                 }
 
-                EventReceived?.Invoke(name);
+                Safely(() => EventReceived?.Invoke(name));
             }
 
             if (!hold.IsCancellationRequested) Move(ConnectionState.Unreachable);
@@ -136,8 +165,12 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         {
             // Whoever ended it has already set the state.
         }
-        catch (Exception e) when (e is ServerUnreachableException or IdentityChangedException or ApiException)
+        catch (Exception e)
         {
+            // Anything unexpected, such as a token function that throws, is one more failed try: nothing awaits this loop.
+            if (e is not (ServerUnreachableException or IdentityChangedException or ApiException))
+                Trace.TraceWarning($"Connecting failed: {e.GetType().Name}");
+
             // Move leaves a final state alone, so a sign-out or a new certificate stays.
             Move(ConnectionState.Unreachable);
         }
@@ -167,6 +200,6 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
             if (next != ConnectionState.Connected) _hold?.Cancel();
         }
 
-        Changed?.Invoke();
+        Safely(() => Changed?.Invoke());
     }
 }

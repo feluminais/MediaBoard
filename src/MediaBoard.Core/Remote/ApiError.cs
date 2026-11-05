@@ -22,7 +22,8 @@ public enum ApiErrorCode
     BadRequest,
 }
 
-public sealed record ApiErrorBody(ApiErrorCode Code);
+/// <param name="Code">Required, because an enum left out would read as its first member.</param>
+public sealed record ApiErrorBody([property: JsonRequired] ApiErrorCode Code);
 
 public static class ApiVersion
 {

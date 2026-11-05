@@ -18,8 +18,9 @@ public sealed class ServerUnreachableException(Exception? innerException = null)
 public sealed class IdentityChangedException() : Exception("The server's certificate is not the pinned one.");
 
 /// <summary>
-/// Talks to one server over a connection that trusts its pinned certificate and nothing else. Every failure of a request
-/// is also reported, so what shows the connection's state doesn't depend on which caller met it.
+/// Talks to one server over a connection that trusts its pinned certificate and nothing else. Whatever a request proves
+/// about the connection is also reported, so what shows its state doesn't depend on which caller met it. A slow or broken
+/// answer proves the server is there, so that goes only to the caller.
 /// </summary>
 /// <param name="endpoint">The server.</param>
 /// <param name="token">The device token, asked for per request, or null for none.</param>
@@ -30,6 +31,9 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
     private const string EventField = "event:";
 
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
+    // The stream route opens the file before any header leaves, and a drive that has to spin up takes a while.
+    private static readonly TimeSpan StreamHeadersTimeout = TimeSpan.FromSeconds(30);
 
     // Well inside the request's 10 s, so a home address that drops packets while away leaves time for the public one.
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
@@ -49,8 +53,8 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
 
     /// <summary>Blocks the caller. Safe on the UI thread, where a wait on an async call could deadlock.</summary>
     /// <exception cref="ApiException">The server refused.</exception>
-    /// <exception cref="ServerUnreachableException">No address answered in time.</exception>
-    /// <exception cref="IdentityChangedException">An address answered with another certificate and none with the pinned one.</exception>
+    /// <exception cref="ServerUnreachableException">No address gave a usable answer in time.</exception>
+    /// <exception cref="IdentityChangedException">Every address answered with another certificate.</exception>
     public T Get<T>(string route)
     {
         using var response = Exchange(root => Request(HttpMethod.Get, root + route));
@@ -62,16 +66,20 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         Exchange(root => Request(method, root + route, body)).Dispose();
 
     /// <inheritdoc cref="Get{T}"/>
-    public async Task<T> GetAsync<T>(string route, CancellationToken ct)
-    {
-        using var response = await ExchangeAsync(root => Request(HttpMethod.Get, root + route), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
-        return Read<T>(response);
-    }
+    public Task<T> GetAsync<T>(string route, CancellationToken ct) => SendAsync<T>(HttpMethod.Get, route, null, ct);
 
     /// <inheritdoc cref="Get{T}"/>
     public async Task SendAsync(HttpMethod method, string route, object? body, CancellationToken ct)
     {
         using var response = await ExchangeAsync(root => Request(method, root + route, body), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
+    }
+
+    /// <summary>For a request whose answer matters, such as the <see cref="SessionReply"/> of <c>sign-in</c>.</summary>
+    /// <inheritdoc cref="Get{T}"/>
+    public async Task<T> SendAsync<T>(HttpMethod method, string route, object? body, CancellationToken ct)
+    {
+        using var response = await ExchangeAsync(root => Request(method, root + route, body), HttpCompletionOption.ResponseContentRead, blocking: false, ct);
+        return Read<T>(response);
     }
 
     /// <summary>
@@ -94,7 +102,8 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
             },
             HttpCompletionOption.ResponseHeadersRead,
             blocking: false,
-            ct);
+            ct,
+            StreamHeadersTimeout);
     }
 
     /// <summary>
@@ -220,15 +229,18 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         ExchangeAsync(build, HttpCompletionOption.ResponseContentRead, blocking: true, CancellationToken.None).GetAwaiter().GetResult();
 
     /// <summary>
-    /// Tries the addresses in turn under one timeout. It moves on only from a failure to get through, so a request the
-    /// server may have acted on is never sent twice.
+    /// Tries the addresses in turn under one timeout. It moves on only from a failure to connect, so a request the server
+    /// may have acted on is never sent twice. Only connecting nowhere is reported: the end of the events connection or
+    /// the next failed connect finds a server that has really gone, and until then a slow route must not look like one.
     /// </summary>
-    private async Task<HttpResponseMessage> ExchangeAsync(Func<string, HttpRequestMessage> build, HttpCompletionOption completion, bool blocking, CancellationToken ct)
+    private async Task<HttpResponseMessage> ExchangeAsync(
+        Func<string, HttpRequestMessage> build, HttpCompletionOption completion, bool blocking, CancellationToken ct, TimeSpan? within = null)
     {
-        using var timeout = new CancellationTokenSource(RequestTimeout, _time);
+        using var timeout = new CancellationTokenSource(within ?? RequestTimeout, _time);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         Exception? failure = null;
-        var wrongIdentity = false;
+        var reached = false;
+        var wrongIdentities = 0;
 
         foreach (var root in InTryOrder())
         {
@@ -248,12 +260,16 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
             catch (Exception e) when (e is HttpRequestException || (e is OperationCanceledException && !ct.IsCancellationRequested))
             {
                 failure = e;
-                wrongIdentity |= IsWrongIdentity(e);
-                if (timeout.IsCancellationRequested || !NeverReachedTheServer(e)) break;
+                if (IsWrongIdentity(e)) wrongIdentities++;
+                reached = timeout.IsCancellationRequested || !NeverReachedTheServer(e);
+                if (reached) break;
             }
         }
 
-        if (wrongIdentity)
+        if (reached) throw new ServerUnreachableException(failure);
+
+        // With any address unaccounted for, the real server may be behind it, and trying again is the right answer.
+        if (wrongIdentities > 0 && wrongIdentities == _roots.Count)
         {
             report(ConnectionEvent.IdentityChanged);
             throw new IdentityChangedException();
@@ -279,11 +295,8 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
             return new ApiException(code ?? ApiErrorCode.Unauthorized);
         }
 
-        if (code is { } known) return new ApiException(known);
-
         // With no code this didn't come from the API, and a person can do nothing with it but try again later.
-        report(ConnectionEvent.Unreachable);
-        return new ServerUnreachableException();
+        return code is { } known ? new ApiException(known) : new ServerUnreachableException();
     }
 
     private T Read<T>(HttpResponseMessage response)
@@ -294,10 +307,9 @@ public sealed class ApiClient(ServerEndpoint endpoint, Func<string?> token, Acti
         }
         catch (JsonException)
         {
-            // Reported below, with the null.
+            // Thrown below, with the null.
         }
 
-        report(ConnectionEvent.Unreachable);
         throw new ServerUnreachableException();
     }
 }

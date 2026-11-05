@@ -28,4 +28,22 @@ public static class RemoteSession
     /// <exception cref="FormatException">The blob was never made by <see cref="Protect"/>.</exception>
     public static string Unprotect(string blob) =>
         Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(blob), null, DataProtectionScope.CurrentUser));
+
+    /// <summary>
+    /// For the app's token function. A settings file brought from another PC can't be opened here. Null sends no token,
+    /// the server answers that with 401, and the device lands on the signed-out path with its server still saved.
+    /// </summary>
+    public static string? TryUnprotect(string? blob)
+    {
+        if (blob is null) return null;
+
+        try
+        {
+            return Unprotect(blob);
+        }
+        catch (Exception e) when (e is CryptographicException or FormatException)
+        {
+            return null;
+        }
+    }
 }

@@ -185,6 +185,56 @@ public sealed class ApiClientTests
     }
 
     [Fact]
+    public async Task Pin_EveryAddressWrong_IsIdentityChanged()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var first = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        await using var second = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), first.Address, second.Address), () => Token, _ => { });
+
+        await Assert.ThrowsAsync<IdentityChangedException>(() => client.GetAsync<PingReply>("ping", Ct));
+    }
+
+    [Fact]
+    public async Task Pin_WrongFirstAddress_ThenADeadOne_IsUnreachable()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, $"127.0.0.1:{ServerFixture.FreePort()}"), () => Token, reports.Add);
+
+        await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Equal([ConnectionEvent.Unreachable], reports);
+    }
+
+    [Fact]
+    public async Task Pin_WrongFirstAddress_ThenOneThatTimesOut_IsNoIdentityChange()
+    {
+        await using var fixture = new ServerFixture();
+        await using var stranger = new ServerFixture();
+        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var wrong = await FakeApi.ForEventsAsync(stranger.NewCertificate(), FakeApi.HangAsync);
+        await using var right = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
+        {
+            arrived.TrySetResult();
+            return FakeApi.HangAsync(context);
+        });
+        var clock = new FakeTimeProvider();
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), wrong.Address, right.Address), () => Token, reports.Add, clock);
+
+        var pending = client.GetAsync<PingReply>("ping", Ct);
+        await arrived.Task.WaitAsync(Within, Ct);
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        await Assert.ThrowsAsync<ServerUnreachableException>(() => pending.WaitAsync(Within, Ct));
+        Assert.Empty(reports);
+    }
+
+    [Fact]
     public async Task Address_Ipv6InBrackets_Works()
     {
         await using var fixture = new ServerFixture();
@@ -236,6 +286,40 @@ public sealed class ApiClientTests
     }
 
     [Fact]
+    public async Task WorkingAddressGoesDown_ALaterRequestFallsBack()
+    {
+        await using var fixture = new ServerFixture();
+        var first = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
+        await using var second = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), first.Address, second.Address), () => Token, reports.Add);
+        await client.GetAsync<PingReply>("ping", Ct);
+        await first.DisposeAsync();
+
+        await client.GetAsync<PingReply>("ping", Ct);
+
+        Assert.Equal(1, second.Count("ping"));
+        Assert.Empty(reports);
+    }
+
+    [Fact]
+    public async Task Redirect_IsNotFollowed()
+    {
+        await using var fixture = new ServerFixture();
+        await using var elsewhere = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
+        {
+            context.Response.Redirect($"https://{elsewhere.Address}/api/v1/ping");
+            return Task.CompletedTask;
+        });
+        using var client = NewClient(api, FingerprintOf(fixture));
+
+        await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Empty(elsewhere.Urls);
+    }
+
+    [Fact]
     public async Task Post_CutAfterItArrived_IsNotSentToTheNextAddress()
     {
         await using var fixture = new ServerFixture();
@@ -245,11 +329,13 @@ public sealed class ApiClientTests
             return Task.CompletedTask;
         });
         await using var next = await FakeApi.StartAsync(fixture.NewCertificate(), _ => Task.CompletedTask);
-        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), cut.Address, next.Address), () => Token, _ => { });
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), cut.Address, next.Address), () => Token, reports.Add);
 
         await Assert.ThrowsAsync<ServerUnreachableException>(() => client.SendAsync(HttpMethod.Post, "invites/redeem", new RedeemRequest(), Ct));
 
         Assert.Empty(next.Urls);
+        Assert.Empty(reports);
     }
 
     [Fact]
@@ -263,7 +349,8 @@ public sealed class ApiClientTests
             return FakeApi.HangAsync(context);
         });
         var clock = new FakeTimeProvider();
-        using var client = NewClient(api, FingerprintOf(fixture), clock);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), api.Address), () => Token, reports.Add, clock);
 
         var pending = client.GetAsync<PingReply>("ping", Ct);
         await arrived.Task.WaitAsync(Within, Ct);
@@ -274,6 +361,7 @@ public sealed class ApiClientTests
 
         clock.Advance(TimeSpan.FromSeconds(0.1));
         await Assert.ThrowsAsync<ServerUnreachableException>(() => pending.WaitAsync(Within, Ct));
+        Assert.Empty(reports);
     }
 
     [Fact]
@@ -387,28 +475,68 @@ public sealed class ApiClientTests
         Assert.Equal(ApiErrorCode.NotFound, blocking.Code);
     }
 
-    [Fact]
-    public async Task Error_WithNoCode_IsUnreachable()
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("{\"code\":null}")]
+    [InlineData("{\"code\":\"SomethingNew\"}")]
+    public async Task Error_WithNoCode_ThrowsUnreachable_AndReportsNothing(string body)
     {
         await using var fixture = new ServerFixture();
         await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            return Task.CompletedTask;
+            return context.Response.WriteAsync(body, context.RequestAborted);
         });
-        using var client = NewClient(api, FingerprintOf(fixture));
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), api.Address), () => Token, reports.Add);
 
         await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Empty(reports);
     }
 
     [Fact]
-    public async Task Answer_ThatIsNotJson_IsUnreachable()
+    public async Task Unauthorized_WithNoCode_StillSignsOut()
+    {
+        await using var fixture = new ServerFixture();
+        await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return context.Response.WriteAsync("{}", context.RequestAborted);
+        });
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), api.Address), () => Token, reports.Add);
+
+        var thrown = await Assert.ThrowsAsync<ApiException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Equal(ApiErrorCode.Unauthorized, thrown.Code);
+        Assert.Equal([ConnectionEvent.SignedOut], reports);
+    }
+
+    [Fact]
+    public async Task Answer_ThatIsNotJson_ThrowsUnreachable_AndReportsNothing()
     {
         await using var fixture = new ServerFixture();
         await using var api = await FakeApi.StartAsync(fixture.NewCertificate(), context => context.Response.WriteAsync("<html>", context.RequestAborted));
-        using var client = NewClient(api, FingerprintOf(fixture));
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), api.Address), () => Token, reports.Add);
 
         await Assert.ThrowsAsync<ServerUnreachableException>(() => client.GetAsync<PingReply>("ping", Ct));
+
+        Assert.Empty(reports);
+    }
+
+    [Fact]
+    public async Task SendAsync_ReturnsTheReply()
+    {
+        await using var live = await Live.StartAsync();
+        using var client = new ApiClient(Endpoint(live.Fingerprint, live.Address), () => null, _ => { });
+        var body = new SignInRequest { Name = "Sam", Password = ServerFixture.Password, DeviceName = "Tablet" };
+
+        var reply = await client.SendAsync<SessionReply>(HttpMethod.Post, "sign-in", body, Ct);
+
+        Assert.Equal("Tablet", live.Fixture.Devices.ByToken(reply.Token)!.Name);
     }
 
     [Fact]
@@ -521,7 +649,7 @@ public sealed class ApiClientTests
     }
 
     [Fact]
-    public async Task OpenStream_ThatNeverAnswers_TimesOut()
+    public async Task OpenStream_GetsLongerForItsHeaders_ThanARequest()
     {
         await using var fixture = new ServerFixture();
         var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -531,13 +659,19 @@ public sealed class ApiClientTests
             return FakeApi.HangAsync(context);
         });
         var clock = new FakeTimeProvider();
-        using var client = NewClient(api, FingerprintOf(fixture), clock);
+        var reports = new List<ConnectionEvent>();
+        using var client = new ApiClient(Endpoint(FingerprintOf(fixture), api.Address), () => Token, reports.Add, clock);
 
         var pending = client.OpenStreamAsync(1, null, Ct);
         await arrived.Task.WaitAsync(Within, Ct);
-        clock.Advance(TimeSpan.FromSeconds(10));
 
+        clock.Advance(TimeSpan.FromSeconds(29.9));
+        await Task.Delay(100, Ct);
+        Assert.False(pending.IsCompleted);
+
+        clock.Advance(TimeSpan.FromSeconds(0.1));
         await Assert.ThrowsAsync<ServerUnreachableException>(() => pending.WaitAsync(Within, Ct));
+        Assert.Empty(reports);
     }
 
     // ---- Events ----
@@ -767,6 +901,7 @@ public sealed class ApiClientTests
             await using var running = new Running(monitor);
 
             await ReachAsync(monitor, ConnectionState.VersionMismatch);
+            Assert.Equal(ApiVersion.Current + 1, monitor.ServerVersion);
             clock.Advance(TimeSpan.FromMinutes(5));
             await Task.Delay(200, Ct);
 
@@ -953,7 +1088,36 @@ public sealed class ApiClientTests
     }
 
     [Fact]
-    public async Task Monitor_RequestThatFails_EndsTheConnection_AndMakesANewOne()
+    public async Task Monitor_SlowRequest_LeavesTheStateConnected()
+    {
+        await using var fixture = new ServerFixture();
+        var clock = new FakeTimeProvider();
+        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), async context =>
+        {
+            if (context.Request.Path.Value!.EndsWith("/events", StringComparison.Ordinal)) await FakeApi.OpenEventsAsync(context);
+            else arrived.TrySetResult();
+            await FakeApi.HangAsync(context);
+        });
+        var (monitor, client) = Watched(Endpoint(FingerprintOf(fixture), api.Address), Token, clock);
+        using (client)
+        {
+            await using var running = new Running(monitor);
+            await ReachAsync(monitor, ConnectionState.Connected);
+
+            var slow = client.GetAsync<MeReply>("search?q=heat", Ct);
+            await arrived.Task.WaitAsync(Within, Ct);
+            clock.Advance(TimeSpan.FromSeconds(10));
+            await Assert.ThrowsAsync<ServerUnreachableException>(() => slow.WaitAsync(Within, Ct));
+
+            await Task.Delay(200, Ct);
+            Assert.Equal(ConnectionState.Connected, monitor.State);
+            Assert.Equal(1, api.Count("events"));
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_ConnectFailure_EndsTheConnection_AndMakesANewOne()
     {
         await using var fixture = new ServerFixture();
         var clock = new FakeTimeProvider();
@@ -976,6 +1140,77 @@ public sealed class ApiClientTests
 
             await WaitForAsync(() => Volatile.Read(ref ended) == 1);
             Assert.Equal(2, api.Count("events"));
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_TokenThatWontDecrypt_EndsSignedOut()
+    {
+        await using var live = await Live.StartAsync();
+        var (monitor, client) = Watched(Endpoint(live.Fingerprint, live.Address), RemoteSession.TryUnprotect("bm90IGEgZHBhcGkgYmxvYg=="));
+        using (client)
+        {
+            await using var running = new Running(monitor);
+
+            await ReachAsync(monitor, ConnectionState.SignedOut);
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_TokenFunctionThatThrows_KeepsRunning()
+    {
+        await using var fixture = new ServerFixture();
+        await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
+        ConnectionMonitor monitor = null!;
+        using var client = new ApiClient(
+            Endpoint(FingerprintOf(fixture), api.Address), () => throw new InvalidOperationException("Broken."), happened => monitor.Report(happened), new FakeTimeProvider());
+        monitor = new ConnectionMonitor(client, new FakeTimeProvider());
+
+        await using var running = new Running(monitor);
+
+        await ReachAsync(monitor, ConnectionState.Unreachable);
+    }
+
+    [Fact]
+    public async Task Monitor_EventHandlerThatThrows_KeepsTheConnection()
+    {
+        await using var fixture = new ServerFixture();
+        await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), async context =>
+        {
+            await FakeApi.OpenEventsAsync(context);
+            await FakeApi.SendAsync(context, "event: one\ndata: \n\nevent: two\ndata: \n\n");
+            await FakeApi.HangAsync(context);
+        });
+        var (monitor, client) = Watched(Endpoint(FingerprintOf(fixture), api.Address), Token);
+        using (client)
+        {
+            var heardTwo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            monitor.EventReceived += name =>
+            {
+                if (name == "two") heardTwo.TrySetResult();
+                throw new InvalidOperationException("Broken.");
+            };
+
+            await using var running = new Running(monitor);
+
+            await heardTwo.Task.WaitAsync(Within, Ct);
+            Assert.Equal(ConnectionState.Connected, monitor.State);
+            Assert.Equal(1, api.Count("events"));
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_ChangedHandlerThatThrows_KeepsRunning()
+    {
+        await using var live = await Live.StartAsync();
+        var (monitor, client) = Watched(Endpoint(live.Fingerprint, live.Address), live.Phone.Token);
+        using (client)
+        {
+            monitor.Changed += () => throw new InvalidOperationException("Broken.");
+
+            await using var running = new Running(monitor);
+
+            await WaitForAsync(() => monitor.State == ConnectionState.Connected);
         }
     }
 
@@ -1070,7 +1305,14 @@ public sealed class ApiClientTests
 
         Assert.DoesNotContain(Token, blob, StringComparison.Ordinal);
         Assert.Equal(Token, RemoteSession.Unprotect(blob));
+        Assert.Equal(Token, RemoteSession.TryUnprotect(blob));
     }
+
+    [Theory]
+    [InlineData("bm90IGEgZHBhcGkgYmxvYg==")]
+    [InlineData("not base64 at all!")]
+    [InlineData(null)]
+    public void TryUnprotect_WhatCantBeOpened_IsNull(string? blob) => Assert.Null(RemoteSession.TryUnprotect(blob));
 
     [Fact]
     public void StoredConnection_ToString_LeavesOutTheToken()
