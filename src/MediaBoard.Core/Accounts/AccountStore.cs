@@ -86,12 +86,23 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
         return connection.ExecuteScalar<string?>("SELECT password_hash FROM users WHERE id = @id", new { id });
     }
 
-    /// <summary>Stores the hash from <see cref="Passwords.Hash"/>; null removes the password.</summary>
-    public void SetPasswordHash(int id, string? hash)
+    /// <summary>
+    /// Stores the hash from <see cref="Passwords.Hash"/>; null removes the password. Internal because a password change
+    /// can go with signing devices out: outside callers go through <see cref="AccountService"/>.
+    /// </summary>
+    internal void SetPasswordHash(int id, string? hash)
     {
         using var connection = db.Open();
-        connection.Execute("UPDATE users SET password_hash = @hash WHERE id = @id", new { id, hash });
+        SetPasswordHash(connection, null, id, hash);
     }
+
+    internal static void SetPasswordHash(SqliteConnection connection, SqliteTransaction? transaction, int id, string? hash) =>
+        connection.Execute("UPDATE users SET password_hash = @hash WHERE id = @id", new { id, hash }, transaction);
+
+    /// <summary>Whether the account exists, is not disabled, and still has this password hash (null for none).</summary>
+    internal static bool IsCurrent(SqliteConnection connection, SqliteTransaction transaction, int id, string? hash) =>
+        connection.ExecuteScalar<long>(
+            "SELECT COUNT(*) FROM users WHERE id = @id AND disabled = 0 AND password_hash IS @hash", new { id, hash }, transaction) != 0;
 
     /// <summary>Null gives access to all folders, including ones added later.</summary>
     /// <exception cref="InvalidOperationException">The account is the owner, who always reaches every folder.</exception>
@@ -107,13 +118,16 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
         transaction.Commit();
     }
 
+    /// <summary>
+    /// Takes the caller's transaction, which must also revoke the devices. Internal so disabling can't skip that:
+    /// outside callers go through <see cref="AccountService"/>.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The account is the owner.</exception>
-    public void SetDisabled(int id, bool disabled)
+    internal void SetDisabled(SqliteConnection connection, SqliteTransaction transaction, int id, bool disabled)
     {
         RefuseOwner(id, "The owner account cannot be disabled.");
 
-        using var connection = db.Open();
-        connection.Execute("UPDATE users SET disabled = @disabled WHERE id = @id", new { id, disabled = disabled ? 1 : 0 });
+        connection.Execute("UPDATE users SET disabled = @disabled WHERE id = @id", new { id, disabled = disabled ? 1 : 0 }, transaction);
     }
 
     /// <summary>Deletes the account with its progress, devices and invites. The log keeps its entries without a user.</summary>

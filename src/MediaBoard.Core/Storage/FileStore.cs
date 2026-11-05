@@ -131,7 +131,7 @@ public sealed class FileStore(LibraryDatabase db)
     internal static string FormatTime(DateTimeOffset time) =>
         time.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
 
-    private static DateTime ParseTime(string text) =>
+    internal static DateTime ParseTime(string text) =>
         DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     private sealed class Row

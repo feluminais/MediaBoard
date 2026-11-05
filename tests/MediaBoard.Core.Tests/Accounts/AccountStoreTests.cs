@@ -31,6 +31,14 @@ public sealed class AccountStoreTests : IDisposable
             "INSERT INTO folders(path, enabled, added_at) VALUES (@path, 1, '2026-01-01'); SELECT last_insert_rowid()", new { path });
     }
 
+    private void SetDisabled(AccountStore store, int id)
+    {
+        using var connection = _db.Open();
+        using var transaction = connection.BeginTransaction();
+        store.SetDisabled(connection, transaction, id, true);
+        transaction.Commit();
+    }
+
     private int AddFile(int folderId, string relPath)
     {
         using var connection = _db.Open();
@@ -121,7 +129,7 @@ public sealed class AccountStoreTests : IDisposable
     [Fact]
     public void SetDisabled_RefusesOwner()
     {
-        Assert.Throws<InvalidOperationException>(() => _store.SetDisabled(LibraryDatabase.OwnerId, true));
+        Assert.Throws<InvalidOperationException>(() => SetDisabled(_store, LibraryDatabase.OwnerId));
 
         Assert.False(_store.Get(LibraryDatabase.OwnerId)!.Disabled);
     }
@@ -227,7 +235,7 @@ public sealed class AccountStoreTests : IDisposable
         var store = new AccountStore(_db, clock);
         var account = store.Create("Anna", null);
 
-        store.SetDisabled(account.Id, true);
+        SetDisabled(store, account.Id);
         store.Touch(account.Id);
 
         var read = store.Get(account.Id)!;

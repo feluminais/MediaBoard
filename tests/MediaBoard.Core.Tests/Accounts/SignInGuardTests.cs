@@ -101,4 +101,24 @@ public sealed class SignInGuardTests
 
         Assert.False(_guard.IsLocked("anna", "10.0.0.1"));
     }
+
+    [Fact]
+    public void NoName_CountsOnlyTheAddress()
+    {
+        for (var i = 0; i < 20; i++) _guard.RecordFailure(null, "10.0.0.1");
+
+        Assert.True(_guard.IsLocked(null, "10.0.0.1"));
+        Assert.False(_guard.IsLocked(null, "10.0.0.2"));
+        Assert.Empty(_guard.LockedNames());
+    }
+
+    [Fact]
+    public void NoAddress_CountsOnlyTheName()
+    {
+        for (var i = 0; i < 5; i++) _guard.RecordFailure("anna", null);
+
+        Assert.True(_guard.IsLocked("anna", null));
+        Assert.False(_guard.IsLocked("bob", null));
+        Assert.Equal(["anna"], _guard.LockedNames());
+    }
 }

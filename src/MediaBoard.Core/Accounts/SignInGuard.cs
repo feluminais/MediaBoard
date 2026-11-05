@@ -19,17 +19,21 @@ public sealed class SignInGuard
         _addresses = new Tally(20, TimeSpan.FromHours(1), time);
     }
 
-    public bool IsLocked(string name, string address)
+    /// <param name="name">Null when there is no name to go by.</param>
+    /// <param name="address">Null when there is no address to go by.</param>
+    public bool IsLocked(string? name, string? address)
     {
-        lock (_gate) return _names.IsLocked(name) || _addresses.IsLocked(address);
+        lock (_gate) return (name is not null && _names.IsLocked(name)) || (address is not null && _addresses.IsLocked(address));
     }
 
-    public void RecordFailure(string name, string address)
+    /// <param name="name">Null to count only against the address.</param>
+    /// <param name="address">Null to count only against the name.</param>
+    public void RecordFailure(string? name, string? address)
     {
         lock (_gate)
         {
-            _names.Fail(name);
-            _addresses.Fail(address);
+            if (name is not null) _names.Fail(name);
+            if (address is not null) _addresses.Fail(address);
         }
     }
 
