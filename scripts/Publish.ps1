@@ -49,11 +49,14 @@ if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 foreach ($needed in 'MediaBoard.Desktop.exe', 'hostfxr.dll', 'coreclr.dll', 'Microsoft.AspNetCore.dll', 'Microsoft.AspNetCore.Server.Kestrel.Core.dll') {
     if (-not (Test-Path -LiteralPath (Join-Path $folder $needed))) { throw "The published folder has no $needed." }
 }
-$unwanted = Get-ChildItem -LiteralPath $folder -Recurse -Force | Where-Object {
-    $_.Extension -in '.pdb', '.db', '.sqlite', '.pfx', '.bin' -or $_.Name -in 'settings.json', 'pending-progress.json' -or
-    $_.FullName -match '\\(\.claude|\.superpowers|docs)(\\|$)'
+# A package can bring its own symbols (libHarfBuzzSharp.pdb); the app ships none.
+Get-ChildItem -LiteralPath $folder -Recurse -Force -Filter *.pdb | Remove-Item -Force
+$unwanted = Get-ChildItem -LiteralPath $folder -Recurse -Force | ForEach-Object {
+    $relative = $_.FullName.Substring($folder.Length).TrimStart([char]92)
+    if ($_.Extension -in '.db', '.sqlite', '.pfx', '.bin' -or $_.Name -in 'settings.json', 'pending-progress.json' -or
+        $relative -match '^(\.claude|\.superpowers|docs)([\\/]|$)') { $relative }
 }
-if ($unwanted) { throw "The published folder holds files that should not ship:`n$($unwanted.FullName -join "`n")" }
+if ($unwanted) { throw "The published folder holds files that should not ship:`n$($unwanted -join "`n")" }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($folder, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
