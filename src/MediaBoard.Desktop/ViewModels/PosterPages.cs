@@ -31,7 +31,7 @@ public sealed partial class ListViewModel : PageViewModel, IServerPage
         _posters = posters;
         _actions = actions;
         _hub = hub;
-        _query = new BackgroundQuery(hub, Title, hint: capabilities?.FailureHint);
+        _query = new BackgroundQuery(hub, Title, NoteLoadFailed, capabilities);
     }
 
     public ListKind Kind => _kind;
@@ -132,7 +132,7 @@ public sealed partial class TitleGridViewModel : PageViewModel, IServerPage
         _posters = posters;
         _actions = actions;
         _capabilities = capabilities ?? AppCapabilities.Local;
-        _query = new BackgroundQuery(hub, Title, hint: _capabilities.FailureHint);
+        _query = new BackgroundQuery(hub, Title, NoteLoadFailed, _capabilities);
         BusyTitle = LibraryBusy.Title(hub.Current);
         _ = new StatusFeed(hub, status => BusyTitle = LibraryBusy.Title(status));
     }

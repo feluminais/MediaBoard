@@ -10,6 +10,9 @@ public abstract class PageViewModel(string title) : ObservableObject
 {
     public string Title { get; } = title;
 
+    /// <summary>The page's last load failed. It counts only while the page has nothing to show.</summary>
+    public bool LoadFailed { get; private set; }
+
     /// <summary>Where the page's list was scrolled to (pixels from the top), kept for the next time its view is built.</summary>
     public double ScrollOffset { get; set; }
 
@@ -34,6 +37,13 @@ public abstract class PageViewModel(string title) : ObservableObject
     /// anyway and is costly to load (a grid of thousands) says no.
     /// </summary>
     public virtual bool RefreshesWhileHidden => true;
+
+    /// <summary>For a page's <see cref="BackgroundQuery"/> to call.</summary>
+    protected void NoteLoadFailed()
+    {
+        LoadFailed = true;
+        OnPropertyChanged(nameof(LoadFailed));
+    }
 }
 
 /// <summary>
@@ -43,6 +53,8 @@ public abstract class PageViewModel(string title) : ObservableObject
 public interface IServerPage
 {
     bool IsLoaded { get; }
+
+    bool LoadFailed { get; }
 }
 
 /// <summary>What the poster pages can ask the shell to do. All run on the UI thread and return at once.</summary>
@@ -77,7 +89,7 @@ public sealed partial class HomeViewModel : PageViewModel, IServerPage
         _actions = actions;
         _addFolder = addFolder;
         _addKey = addKey;
-        _query = new BackgroundQuery(hub, "Home", hint: capabilities?.FailureHint);
+        _query = new BackgroundQuery(hub, "Home", NoteLoadFailed, capabilities);
         SyncStatus(hub.Current);
         _ = new StatusFeed(hub, SyncStatus);
     }

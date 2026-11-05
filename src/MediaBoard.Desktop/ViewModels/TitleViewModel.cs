@@ -58,7 +58,7 @@ public sealed partial class TitleViewModel : PageViewModel, IServerPage
         _onlineKind = kind;
         _kind = kind;
         IsOnline = online;
-        _query = new BackgroundQuery(services.Hub, "the title", hint: services.Capabilities.FailureHint);
+        _query = new BackgroundQuery(services.Hub, "the title", NoteLoadFailed, services.Capabilities);
         _previewQuery = new BackgroundQuery(services.Hub, "the files to delete");
         _relocateQuery = new BackgroundQuery(services.Hub, "the fixed match");
         _player = new Lazy<string?>(services.PlayerName);

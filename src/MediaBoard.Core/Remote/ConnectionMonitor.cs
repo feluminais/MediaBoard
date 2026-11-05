@@ -65,6 +65,10 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         }
     }
 
+    /// <summary>States that wait for <see cref="Retry"/>.</summary>
+    public static bool IsFinal(ConnectionState state) =>
+        state is ConnectionState.SignedOut or ConnectionState.IdentityChanged or ConnectionState.VersionMismatch;
+
     public async Task RunAsync(CancellationToken ct)
     {
         var wait = FirstWait;
@@ -110,9 +114,6 @@ public sealed class ConnectionMonitor(ApiClient client, TimeProvider? time = nul
         ConnectionEvent.IdentityChanged => ConnectionState.IdentityChanged,
         _ => ConnectionState.Unreachable,
     });
-
-    private static bool IsFinal(ConnectionState state) =>
-        state is ConnectionState.SignedOut or ConnectionState.IdentityChanged or ConnectionState.VersionMismatch;
 
     // Nothing awaits RunAsync, so a failure in a handler would end the watch unseen, and a request that happened to
     // report would fail for it.

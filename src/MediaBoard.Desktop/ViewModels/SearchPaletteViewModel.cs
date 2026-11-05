@@ -55,7 +55,8 @@ public sealed partial class PaletteRow(string key, string text, string? detail, 
 /// 300 ms typing pause, TMDB; a leading <c>&gt;</c> lists commands instead. Every keystroke cancels the search in
 /// flight and a late answer is dropped. The library part asks <see cref="ILibrary.SearchLocal"/> directly: the
 /// search service's <c>SearchAsync</c> waits for TMDB, so it is only called once the pause has passed. A viewer's library
-/// is a server away, so with <c>searchesServer</c> nothing goes out until the pause, and the one answer fills both groups.
+/// is a server away, so for a viewer nothing goes out until the pause. Then both go at once, each filling its own group,
+/// so library hits still don't wait for TMDB.
 /// </summary>
 public sealed partial class SearchPaletteViewModel : ObservableObject
 {
@@ -65,6 +66,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     public const string OfflineNote = "Offline";
     public const string NoKeyChoice = "Add a TMDB key";
     public const string ServerNoKeyNote = "This library has no TMDB key";
+    public const string SearchingNote = "Searching…";
     public const string KeyRejectedNote = "TMDB rejected the key";
     public const string NoMatches = "No matches";
     public const string NoCommands = "No commands";
@@ -88,6 +90,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
     private Task _libraryTask = Task.CompletedTask;
     private Task _onlineTask = Task.CompletedTask;
     private string? _lastFailure;
+    private bool _libraryPending; // a viewer's library group hasn't answered for the current text
 
     public SearchPaletteViewModel(
         ISearchService search,
@@ -96,7 +99,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         ActivityHub hub,
         TimeProvider time,
         Action close,
-        bool searchesServer = false)
+        AppCapabilities? capabilities = null)
     {
         _search = search;
         _library = library;
@@ -104,8 +107,8 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         _hub = hub;
         _time = time;
         _close = close;
-        _searchesServer = searchesServer;
-        _libraryQuery = new BackgroundQuery(hub, "the search results");
+        _searchesServer = capabilities?.Connection is not null;
+        _libraryQuery = new BackgroundQuery(hub, "the search results", _searchesServer ? OnLibraryFailed : null, capabilities);
     }
 
     /// <summary>What the box holds.</summary>
@@ -182,6 +185,7 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         if (trimmed.Length == 0 || trimmed[0] == '>') // nothing typed, or commands: no search runs
         {
             _libraryHits = [];
+            _libraryPending = false;
             _libraryTask = Task.CompletedTask;
             _onlineTask = Task.CompletedTask;
             Rebuild(keepSelection: false);
@@ -189,29 +193,51 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         else
         {
             var cancel = _onlineCancel = new CancellationTokenSource();
-            _libraryTask = _searchesServer ? Task.CompletedTask : _libraryQuery.RunAsync(
-                () => _library.SearchLocal(trimmed, SearchService.MaxLibraryResults),
-                hits =>
-                {
-                    _libraryHits = hits;
-                    Rebuild(keepSelection: false);
-                });
+            if (_searchesServer)
+            {
+                // The last text's hits must go with it: Enter would open one of them.
+                _libraryHits = [];
+                _libraryPending = true;
+                _libraryTask = Task.CompletedTask;
+            }
+            else
+            {
+                _libraryTask = SearchLibraryAsync(trimmed);
+            }
+
             _onlineTask = RunOnlineAsync(trimmed, cancel.Token);
             Rebuild(keepSelection: false); // the online group of the last keystroke goes at once
         }
     }
 
+    private Task SearchLibraryAsync(string text) => _libraryQuery.RunAsync(
+        () => _library.SearchLocal(text, SearchService.MaxLibraryResults),
+        hits =>
+        {
+            _libraryHits = hits;
+            _libraryPending = false;
+            Rebuild(keepSelection: false);
+        });
+
+    private void OnLibraryFailed()
+    {
+        _libraryPending = false;
+        Rebuild(keepSelection: true);
+    }
+
     // Waits out the pause, then asks the search service on the thread pool: its library part is synchronous work.
     private async Task RunOnlineAsync(string text, CancellationToken ct)
     {
+        var library = Task.CompletedTask;
         try
         {
             await Task.Delay(OnlineDelay, _time, ct);
+            if (_searchesServer) library = _libraryTask = SearchLibraryAsync(text);
+
             var results = await Task.Run(() => _search.SearchAsync(text, ct), ct);
             if (ct.IsCancellationRequested) return;
 
             _lastFailure = null;
-            if (_searchesServer) _libraryHits = results.Library;
             _onlineHits = results.Online;
             _onlineState = results.State;
             Rebuild(keepSelection: true);
@@ -223,24 +249,35 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             // TMDB timed out without us cancelling: the same as being offline.
-            _onlineHits = [];
-            _onlineState = OnlineState.Offline;
-            Rebuild(keepSelection: true);
+            ShowOffline();
         }
         catch (Exception e) when (_searchesServer && e is ServerUnreachableException or ApiException or IdentityChangedException)
         {
             // The status bar already says what's wrong with the connection.
-            _libraryHits = [];
-            _onlineHits = [];
-            _onlineState = OnlineState.Offline;
-            Rebuild(keepSelection: true);
+            ShowOffline();
         }
         catch (Exception e)
         {
-            if (ct.IsCancellationRequested || e.Message == _lastFailure) return;
-            _lastFailure = e.Message;
-            _hub.Log(ActivityLevel.Error, $"Couldn't search online: {e.Message}");
+            if (!ct.IsCancellationRequested) Report(e);
         }
+
+        await library;
+    }
+
+    private void ShowOffline()
+    {
+        _onlineHits = [];
+        _onlineState = OnlineState.Offline;
+        Rebuild(keepSelection: true);
+    }
+
+    private void Report(Exception e)
+    {
+        if (_searchesServer) ShowOffline(); // or "Searching" would stay
+        if (e.Message == _lastFailure) return;
+
+        _lastFailure = e.Message;
+        _hub.Log(ActivityLevel.Error, $"Couldn't search online: {e.Message}");
     }
 
     private void Rebuild(bool keepSelection)
@@ -264,7 +301,9 @@ public sealed partial class SearchPaletteViewModel : ObservableObject
         {
             AddLibraryGroup(rows);
             AddOnlineGroup(rows);
-            if (rows.Count == 0 && _onlineState is not null) empty = NoMatches;
+            var waiting = _libraryPending || (_searchesServer && _onlineState is null);
+            if (rows.Count == 0 && waiting) rows.Add(new PaletteRow("note:searching", SearchingNote, null, PaletteRowKind.Note, null));
+            else if (rows.Count == 0 && _onlineState is not null) empty = NoMatches;
         }
 
         Rows = rows;

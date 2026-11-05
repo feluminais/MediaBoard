@@ -25,8 +25,16 @@ public sealed class ModeSwitch(
     string? deviceName = null,
     Func<string, Task<bool>>? confirm = null)
 {
-    /// <returns>False when the settings file refused or the app couldn't restart, and this run carries on.</returns>
-    public bool UseThisPc() => Save(AppMode.ThisPc) && restart.Run();
+    private const string NotSaved = "Couldn't save this change. See the activity panel.";
+    private const string RestartToConnect = "Restart MediaBoard to connect.";
+
+    /// <returns>What to tell the viewer, or null.</returns>
+    public string? UseThisPc()
+    {
+        if (!Save(AppMode.ThisPc)) return NotSaved;
+
+        return restart.Run() ? null : "Restart MediaBoard to open this PC's library.";
+    }
 
     /// <summary>
     /// With a session still held, goes straight back to it. Otherwise opens Connect, and the mode changes only when that
@@ -40,17 +48,19 @@ public sealed class ModeSwitch(
         var saved = settings.Load().Connection;
         if (saved is { ProtectedToken: not null } && ModeGate.HasUsableEndpoint(saved))
         {
-            if (!Save(AppMode.Server)) return "Couldn't save this change. See the activity panel.";
+            if (!Save(AppMode.Server)) return NotSaved;
 
             LeaveThisPc();
-            return restart.Run() ? null : "Restart MediaBoard to connect.";
+            return restart.Run() ? null : RestartToConnect;
         }
 
         if (showConnect is null) return null;
 
         using var connect = new ConnectViewModel(settings, deviceName ?? Environment.MachineName, restart.Run, saved, LeaveThisPc);
         await showConnect(connect);
-        return null;
+
+        // Closed as the answer came in: Connect saved the mode, and the restart was left to a window that has gone.
+        return settings.Load().Mode == AppMode.Server ? RestartToConnect : null;
     }
 
     private string? StoppingQuestion() => (hub.Current.Sharing, hub.Current.PlayerName) switch

@@ -32,6 +32,7 @@ public static class RemoteComposition
         services.AddSingleton(sp => Link.Open(connection, sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => sp.GetRequiredService<Link>().Client);
         services.AddSingleton(sp => sp.GetRequiredService<Link>().Monitor);
+        services.AddSingleton(sp => sp.GetRequiredService<Link>().Token);
 
         services.AddSingleton(sp => new RemoteLibrary(sp.GetRequiredService<ApiClient>(), sp.GetRequiredService<ConnectionMonitor>()));
         services.AddSingleton<ILibrary>(sp => sp.GetRequiredService<RemoteLibrary>());
@@ -64,8 +65,12 @@ public static class RemoteComposition
             connection,
             sp.GetRequiredService<SettingsStore>(),
             sp.GetRequiredService<ApiClient>(),
+            sp.GetRequiredService<DeviceToken>(),
             sp.GetRequiredService<ConnectionMonitor>(),
-            sp.GetRequiredService<AppRestart>()));
+            sp.GetRequiredService<IPlaybackService>(),
+            sp.GetRequiredService<ProgressOutbox>(),
+            sp.GetRequiredService<AppRestart>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton(sp => new ModeSwitch(
             sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<AppRestart>(), sp.GetRequiredService<ActivityHub>()));
         services.AddSingleton(sp =>
@@ -88,15 +93,15 @@ public static class RemoteComposition
     }
 
     /// <summary>The client reports to the monitor, which listens through the client, so the two are made together.</summary>
-    private sealed record Link(ApiClient Client, ConnectionMonitor Monitor)
+    private sealed record Link(ApiClient Client, ConnectionMonitor Monitor, DeviceToken Token)
     {
         public static Link Open(StoredConnection connection, TimeProvider time)
         {
-            var token = new Lazy<string?>(() => RemoteSession.TryUnprotect(connection.ProtectedToken));
+            var token = new DeviceToken(connection.ProtectedToken);
             ConnectionMonitor? monitor = null;
-            var client = new ApiClient(connection.Endpoint, () => token.Value, happened => monitor?.Report(happened), time);
+            var client = new ApiClient(connection.Endpoint, token.Read, happened => monitor?.Report(happened), time);
             monitor = new ConnectionMonitor(client, time);
-            return new Link(client, monitor);
+            return new Link(client, monitor, token);
         }
     }
 }

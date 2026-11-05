@@ -155,7 +155,7 @@ public sealed partial class AccountViewModel : ObservableObject
     {
         if (PlayerClosing.Length > 0 && !await _confirm($"Use this PC's library?{PlayerClosing}", "Use this PC")) return;
 
-        LeaveMessage = _mode.UseThisPc() ? null : "Restart MediaBoard to open this PC's library.";
+        LeaveMessage = _mode.UseThisPc();
     }
 
     private void ClearPasswords()

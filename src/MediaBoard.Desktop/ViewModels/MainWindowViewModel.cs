@@ -96,7 +96,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             hub,
             timeProvider ?? TimeProvider.System,
             () => IsSearchOpen = false,
-            searchesServer: _capabilities.Connection is not null);
+            _capabilities);
 
         _pages = new Dictionary<string, PageViewModel>
         {
@@ -105,25 +105,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
             [ShowsPage] = new TitleGridViewModel(TitleKind.Show, library, hub, posters, _actions, _capabilities),
             [SettingsPage] = settings,
         };
-        var managesFolders = _capabilities.ManagesFolders && folders is not null;
-        var shares = _capabilities.Shares && sharing is not null;
-        if (managesFolders)
+        var sidebar = new List<NavItem> { new(HomePage, "Home"), new(MoviesPage, "Movies"), new(ShowsPage, "Shows") };
+        if (_capabilities.ManagesFolders && folders is not null)
         {
             _pages[ReviewPage] = new ReviewViewModel(titles);
-            _pages[FoldersPage] = folders!;
+            _pages[FoldersPage] = folders;
+            sidebar.Add(new NavItem(FoldersPage, "Folders"));
         }
 
-        if (shares) _pages[SharingPage] = sharing!;
+        if (_capabilities.Shares && sharing is not null)
+        {
+            _pages[SharingPage] = sharing;
+            sidebar.Add(new NavItem(SharingPage, "Sharing"));
+        }
+
+        sidebar.Add(new NavItem(SettingsPage, "Settings"));
+        NavItems = sidebar;
         ReviewItem = new NavItem(ReviewPage, ReviewLabel(0));
-        NavItems =
-        [
-            new NavItem(HomePage, "Home"),
-            new NavItem(MoviesPage, "Movies"),
-            new NavItem(ShowsPage, "Shows"),
-            .. managesFolders ? new[] { new NavItem(FoldersPage, "Folders") } : [],
-            .. shares ? new[] { new NavItem(SharingPage, "Sharing") } : [],
-            new NavItem(SettingsPage, "Settings"),
-        ];
 
         CurrentPage = _pages[HomePage];
         NavItems[0].IsSelected = true;

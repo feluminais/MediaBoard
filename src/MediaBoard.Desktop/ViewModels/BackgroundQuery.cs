@@ -16,12 +16,12 @@ namespace MediaBoard.Desktop.ViewModels;
 /// <param name="hub">Where failures are logged.</param>
 /// <param name="what">What loads, for the log.</param>
 /// <param name="failed">Called on the UI thread each time the newest query fails, or null.</param>
-/// <param name="hint">What to do about a failure; null for <see cref="FailureHint"/>.</param>
-public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed = null, string? hint = null)
+/// <param name="capabilities">Gives the hint for a failure and, for a viewer, the connection; null for this PC's library.</param>
+public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed = null, AppCapabilities? capabilities = null)
 {
     public const string FailureHint = "Restart MediaBoard to try again.";
 
-    private readonly string _hint = hint ?? FailureHint;
+    private readonly string _hint = capabilities?.FailureHint ?? FailureHint;
     private int _generation;
     private string? _lastFailure;
     private Task _latest = Task.CompletedTask;
@@ -62,7 +62,7 @@ public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed
             }
 
             failed?.Invoke();
-            if (IsAboutTheConnection(e) || e.Message == _lastFailure) return;
+            if (TheShellSaysSo(e) || e.Message == _lastFailure) return;
             _lastFailure = e.Message;
             hub.Log(ActivityLevel.Error, $"Couldn't load {what}: {e.Message}", _hint);
             return;
@@ -85,10 +85,11 @@ public sealed class BackgroundQuery(ActivityHub hub, string what, Action? failed
         }
     }
 
-    // A viewer's status bar and connection panel already say this, and a page that reloads when the link returns has no
-    // problem of its own to report.
-    private static bool IsAboutTheConnection(Exception e) =>
-        e is ServerUnreachableException or IdentityChangedException or ApiException { Code: ApiErrorCode.Unauthorized };
+    // A viewer's status bar and connection panel say this already, but only if the monitor heard. A timeout, an error with
+    // no code and unreadable JSON all arrive as unreachable with the monitor still Connected, and then this is all there is.
+    private bool TheShellSaysSo(Exception e) => capabilities?.Connection is { } link
+        && (e is IdentityChangedException or ApiException { Code: ApiErrorCode.Unauthorized }
+            || (e is ServerUnreachableException && link.State != ConnectionState.Connected));
 
     // A stale run is never the latest (a newer RunAsync or Discard replaced it), so this never waits on itself. The
     // latest can be replaced again while we wait, so wait until it stops changing.

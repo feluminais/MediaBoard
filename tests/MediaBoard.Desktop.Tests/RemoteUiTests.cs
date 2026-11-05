@@ -314,8 +314,75 @@ public sealed class RemoteUiTests : IDisposable
         store.Save(new AppSettings { Mode = AppMode.Server });
         var change = new ModeSwitch(store, new AppRestart(null, (_, _) => { }, () => { }), _hub);
 
-        Assert.False(change.UseThisPc());
+        Assert.Equal("Restart MediaBoard to open this PC's library.", change.UseThisPc());
         Assert.Equal(AppMode.ThisPc, store.Load().Mode);
+    }
+
+    [Fact]
+    public void UseThisPc_SaveRefused_SaysThat_AndDoesNotRestart()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings { Mode = AppMode.Server });
+        var restarts = new List<string>();
+        var change = new ModeSwitch(store, new AppRestart("MediaBoard.exe", (_, _) => restarts.Add("restart"), () => { }), _hub);
+
+        string? said;
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Delete)) said = change.UseThisPc();
+
+        Assert.Equal("Couldn't save this change. See the activity panel.", said);
+        Assert.Empty(restarts);
+    }
+
+    [AvaloniaFact]
+    public async Task SignOut_MidPlay_TheServerHasThePosition()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        var account = viewer.Services.GetRequiredService<SettingsViewModel>().Account!;
+        var file = await PlayAsync(viewer);
+
+        await account.SignOutCommand.ExecuteAsync(null);
+
+        // Nothing has run the exit path, and the token is dead, so only a send before the sign-out can have put it there.
+        Assert.True(viewer.Player.Closed.Task.IsCompleted);
+        var sam = world.Services.GetRequiredService<AccountStore>().All().Single(a => a.Name == "Sam");
+        Assert.Equal(115, world.Services.GetRequiredService<ProgressStore>().Get(sam.Id, file)?.PositionS);
+        Assert.Null(world.Services.GetRequiredService<DeviceStore>().ByToken(viewer.Token));
+    }
+
+    [AvaloniaFact]
+    public async Task SignOut_WhileStillConnecting_TellsTheServer()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world);
+        var account = viewer.Services.GetRequiredService<SettingsViewModel>().Account!;
+        Assert.Equal(ConnectionState.Connecting, viewer.Monitor.State);
+
+        await account.SignOutCommand.ExecuteAsync(null);
+
+        Assert.Null(world.Services.GetRequiredService<DeviceStore>().ByToken(viewer.Token));
+    }
+
+    [AvaloniaFact]
+    public async Task SignOut_RestartRefused_TheTokenInMemoryStopsWorking()
+    {
+        await using var world = new SharingWorld();
+        await using var viewer = await Viewer.JoinAsync(world, restartWorks: false);
+        var account = viewer.Services.GetRequiredService<SettingsViewModel>().Account!;
+        viewer.Host.Start();
+        await viewer.ConnectedAsync();
+        await world.Sharing.SetOnAsync(false);
+        await Ui.WaitUntil(() => viewer.Monitor.State == ConnectionState.Unreachable);
+
+        await account.SignOutCommand.ExecuteAsync(null);
+        await world.Sharing.SetOnAsync(true);
+        await Task.Delay(TimeSpan.FromSeconds(2.5), Ct); // longer than the monitor's wait from its first failure
+
+        Assert.Contains("Restart", account.LeaveMessage, StringComparison.Ordinal);
+        Assert.Equal(ConnectionState.SignedOut, viewer.Monitor.State);
+        Assert.NotNull(world.Services.GetRequiredService<DeviceStore>().ByToken(viewer.Token)); // the server never heard
+        var refused = await Assert.ThrowsAsync<ApiException>(() => viewer.Services.GetRequiredService<ApiClient>().GetAsync<MeReply>("me", Ct));
+        Assert.Equal(ApiErrorCode.Unauthorized, refused.Code);
     }
 
     private ModeSwitch Switch(SettingsStore store, FakeRunKey key, Func<ConnectViewModel, Task>? show = null, List<string>? restarts = null, Func<string, Task<bool>>? confirm = null)
@@ -366,6 +433,22 @@ public sealed class RemoteUiTests : IDisposable
 
         Assert.Equal(ConnectStep.SignIn, shown!.Step);
         Assert.Equal("Sam", shown.Name);
+    }
+
+    [AvaloniaFact]
+    public async Task ConnectToServer_ClosedAsTheAnswerArrived_SaysToRestart()
+    {
+        var store = new SettingsStore(SettingsPath);
+        store.Save(new AppSettings { Mode = AppMode.ThisPc });
+
+        // Connect saves and leaves the restart to a window that has gone.
+        var said = await Switch(store, new FakeRunKey(), _ =>
+        {
+            store.Update(s => s with { Mode = AppMode.Server });
+            return Task.CompletedTask;
+        }).ConnectToServerAsync();
+
+        Assert.Equal("Restart MediaBoard to connect.", said);
     }
 
     [AvaloniaFact]
@@ -502,6 +585,62 @@ public sealed class RemoteUiTests : IDisposable
         Assert.Equal(ConnectionState.Connecting, monitor.State);
         Assert.True(shell.IsPageCovered);
         Assert.Equal($"Connecting to {Server}…", panel.Message);
+    }
+
+    // A timeout, an error with no code and unreadable JSON all throw this without telling the monitor.
+    [AvaloniaFact]
+    public async Task LoadFails_WhileConnected_SaysSo_AndRetryReloadsThePage()
+    {
+        var (shell, panel, monitor) = RemoteShell();
+        monitor.Report(ConnectionEvent.Listening);
+        Ui.Flush();
+        var failing = true;
+        _library.OnQuery = _ =>
+        {
+            if (Volatile.Read(ref failing)) throw new ServerUnreachableException();
+        };
+
+        _library.RaiseChanged();
+        Ui.Flush();
+        await Ui.WaitUntil(() => shell.IsPageCovered);
+
+        Assert.Equal(FailureText.LoadFailed, panel.Message);
+        Assert.Equal("Retry", panel.ActionLabel);
+        Assert.Equal(AppCapabilities.RemoteFailureHint, _hub.Recent[^1].Hint);
+        Assert.Equal(ConnectionState.Connected, monitor.State);
+
+        _library.Recent.Add(FakeLibrary.Card(1, "Heat"));
+        Volatile.Write(ref failing, false);
+        panel.ActCommand.Execute(null);
+
+        await Ui.WaitUntil(() => !shell.IsPageCovered);
+        Assert.True(((HomeViewModel)shell.CurrentPage).IsLoaded);
+    }
+
+    [AvaloniaFact]
+    public async Task LoadFails_WhileConnected_RetryThatFails_StaysCovered()
+    {
+        var (shell, panel, monitor) = RemoteShell();
+        monitor.Report(ConnectionEvent.Listening);
+        Ui.Flush();
+        var tries = 0;
+        _library.OnQuery = _ =>
+        {
+            Interlocked.Increment(ref tries);
+            throw new ServerUnreachableException();
+        };
+        _library.RaiseChanged();
+        Ui.Flush();
+        await Ui.WaitUntil(() => shell.IsPageCovered);
+        var before = Volatile.Read(ref tries);
+
+        panel.ActCommand.Execute(null);
+        await Ui.WaitUntil(() => Volatile.Read(ref tries) > before);
+        await Task.Delay(50, Ct);
+        Ui.Flush();
+
+        Assert.True(shell.IsPageCovered);
+        Assert.Equal(FailureText.LoadFailed, panel.Message);
     }
 
     [AvaloniaFact]
@@ -825,7 +964,7 @@ public sealed class RemoteUiTests : IDisposable
     }
 
     [AvaloniaFact]
-    public async Task Panel_OverAFocusedField_TakesTheKeyboard_AndGivesItBack()
+    public async Task Panel_OverAFocusedField_TakesTheKeyboard_ThenLeavesTheFocusOnSomethingVisible()
     {
         var (window, filter, shell, _, monitor) = await GridInAWindowAsync();
         var grid = (TitleGridViewModel)shell.CurrentPage;
@@ -846,6 +985,66 @@ public sealed class RemoteUiTests : IDisposable
         Assert.False(shell.IsPageCovered);
         Assert.True(filter.IsEffectivelyVisible);
         Assert.True(((InputElement)Focused(window)!).IsEffectivelyVisible);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Retry_OnACoveredPageWithData_StaysCovered_AndKeepsTheFocus()
+    {
+        var (window, _, shell, panel, monitor) = await GridInAWindowAsync();
+        monitor.Report(ConnectionEvent.IdentityChanged);
+        Settle(window);
+        var retry = Assert.IsType<Button>(Focused(window));
+
+        panel.ActCommand.Execute(null);
+        Settle(window);
+
+        Assert.Equal(ConnectionState.Connecting, monitor.State);
+        Assert.True(shell.IsPageCovered);
+        Assert.Same(retry, Focused(window));
+
+        monitor.Report(ConnectionEvent.IdentityChanged);
+        Settle(window);
+
+        Assert.True(shell.IsPageCovered);
+        Assert.Same(retry, Focused(window));
+
+        panel.ActCommand.Execute(null);
+        monitor.Report(ConnectionEvent.Listening);
+        Settle(window);
+
+        Assert.False(shell.IsPageCovered);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Panel_UnderAModalDialog_LeavesTheDialogItsKeyboard()
+    {
+        var (window, _, shell, _, monitor) = await GridInAWindowAsync();
+        var pressed = 0;
+        var ok = new Button { Content = "OK" };
+        ok.Click += (_, _) => pressed++;
+        var dialog = new Window { Width = 300, Height = 200, Content = ok };
+        var showing = dialog.ShowDialog(window);
+        Settle(dialog);
+        ok.Focus();
+        Settle(dialog);
+
+        monitor.Report(ConnectionEvent.IdentityChanged);
+        Settle(window);
+        Settle(dialog);
+
+        Assert.True(shell.IsPageCovered);
+        Assert.True(dialog.IsVisible);
+        Assert.Same(ok, Focused(dialog));
+
+        dialog.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+        Settle(dialog);
+
+        Assert.Equal(1, pressed);
+        Assert.Equal(ConnectionState.IdentityChanged, monitor.State); // Retry behind the dialog heard nothing
+        dialog.Close();
+        await showing;
         window.Close();
     }
 
@@ -997,45 +1196,226 @@ public sealed class RemoteUiTests : IDisposable
 
     // ---- The palette ----
 
+    private static readonly SearchCandidate Severance = new(95396, TitleKind.Show, "Severance", null, 2022, 40, 8.4, null, null);
+
+    private readonly List<int> _opened = [];
+
     private SearchPaletteViewModel Palette(FakeSearch search, ManualClock clock) => new(
-        search, _library, new PaletteActions(_ => { }, (_, _) => { }, () => { }, () => Task.CompletedTask, () => { }), _hub, clock, () => { }, searchesServer: true);
+        search, _library, new PaletteActions(_opened.Add, (_, _) => { }, () => { }, () => Task.CompletedTask, () => { }), _hub, clock, () => { },
+        AppCapabilities.Remote(Monitor()));
+
+    private static string[] Texts(SearchPaletteViewModel palette) => [.. palette.Rows.Select(r => r.Text)];
 
     [AvaloniaFact]
-    public async Task Palette_Remote_OneQueryPerSettledText()
+    public async Task Palette_Remote_TwoRequestsPerSettledText_NonePerKeystroke()
     {
         var hit = FakeLibrary.Card(1, "The Matrix");
-        var search = new FakeSearch { OnSearch = (_, _) => Task.FromResult(new SearchResults([hit], [], OnlineState.Ok)) };
-        _library.LocalSearch = _ => throw new InvalidOperationException("The palette asked the server per keystroke.");
+        var search = new FakeSearch();
+        var asked = new List<string>();
+        _library.LocalSearch = query =>
+        {
+            lock (asked) asked.Add(query);
+            return [hit];
+        };
         var clock = new ManualClock();
         var palette = Palette(search, clock);
 
         palette.Query = "m";
         palette.Query = "ma";
         palette.Query = "mat";
+        await Task.Delay(50, Ct);
+        Ui.Flush();
+        Assert.Empty(asked);
         Assert.Empty(search.Queries);
 
         clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix") && search.Queries.Count == 1);
         await palette.Settled;
-        Ui.Flush();
 
+        Assert.Equal(["mat"], asked);
         Assert.Equal(["mat"], search.Queries);
-        Assert.Contains("The Matrix", palette.Rows.Select(r => r.Text));
         Assert.Empty(_hub.Recent);
     }
 
     [AvaloniaFact]
-    public async Task Palette_Remote_ServerGone_SaysOffline_WithoutLogging()
+    public async Task Palette_Remote_LastTextsHits_GoWithIt_SoEnterOpensNothingOld()
     {
+        _library.LocalSearch = query => query == "heat" ? [FakeLibrary.Card(1, "Heat")] : [FakeLibrary.Card(2, "The Matrix")];
+        var late = new TaskCompletionSource<SearchResults>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new FakeSearch { OnSearch = (query, _) => query == "heat" ? Task.FromResult(new SearchResults([], [], OnlineState.Ok)) : late.Task };
+        var clock = new ManualClock();
+        var palette = Palette(search, clock);
+        palette.Query = "heat";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => Texts(palette).Contains("Heat"));
+
+        palette.Query = "matrix";
+
+        Assert.DoesNotContain("Heat", Texts(palette));
+        Assert.Equal([SearchPaletteViewModel.SearchingNote], Texts(palette));
+        palette.OpenSelectedCommand.Execute(null);
+        Assert.Empty(_opened);
+        late.SetResult(new SearchResults([], [], OnlineState.Ok));
+    }
+
+    [AvaloniaFact]
+    public void Palette_Remote_SaysSearching_FromTheFirstKey()
+    {
+        var palette = Palette(new FakeSearch(), new ManualClock());
+
+        palette.Query = "m";
+
+        Assert.Equal([SearchPaletteViewModel.SearchingNote], Texts(palette));
+        Assert.Null(palette.Selected);
+    }
+
+    [AvaloniaFact]
+    public async Task Palette_Remote_NoHitsAnywhere_EndsOnNoMatches()
+    {
+        _library.LocalSearch = _ => [];
+        var clock = new ManualClock();
+        var palette = Palette(new FakeSearch(), clock);
+
+        palette.Query = "nothing";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+
+        await Ui.WaitUntil(() => palette.EmptyText == SearchPaletteViewModel.NoMatches);
+        Assert.Empty(Texts(palette));
+    }
+
+    [AvaloniaFact]
+    public async Task Palette_Remote_LibraryHits_DoNotWaitForTmdb()
+    {
+        _library.LocalSearch = _ => [FakeLibrary.Card(1, "The Matrix")];
+        var never = new TaskCompletionSource<SearchResults>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new ManualClock();
+        var palette = Palette(new FakeSearch { OnSearch = (_, _) => never.Task }, clock);
+
+        palette.Query = "matrix";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+
+        await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix"));
+        Assert.Equal(1, palette.Selected?.Text == "The Matrix" ? 1 : 0);
+        never.SetResult(new SearchResults([], [], OnlineState.Ok));
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Palette_Remote_EitherAnswerFirst_LibraryStaysOnTop(bool libraryFirst)
+    {
+        using var local = new ManualResetEventSlim();
+        var online = new TaskCompletionSource<SearchResults>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new SearchResults([], [new OnlineResult(Severance, null)], OnlineState.Ok);
+        _library.LocalSearch = _ =>
+        {
+            Assert.True(local.Wait(TimeSpan.FromSeconds(15), Ct));
+            return [FakeLibrary.Card(1, "The Matrix")];
+        };
+        var search = new FakeSearch { OnSearch = (_, _) => online.Task };
+        var clock = new ManualClock();
+        var palette = Palette(search, clock);
+
+        palette.Query = "matrix";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => search.Queries.Count == 1);
+
+        if (libraryFirst)
+        {
+            local.Set();
+            await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix"));
+            online.SetResult(answer);
+        }
+        else
+        {
+            online.SetResult(answer);
+            await Ui.WaitUntil(() => Texts(palette).Contains("Severance"));
+            local.Set();
+        }
+
+        await Ui.WaitUntil(() => Texts(palette).Length == 4);
+        Assert.Equal([SearchPaletteViewModel.LibraryHeader, "The Matrix", SearchPaletteViewModel.OnlineHeader, "Severance"], Texts(palette));
+    }
+
+    [AvaloniaFact]
+    public async Task Palette_Remote_SearchLegsOwnLibraryHits_LeaveTheLocalOnesInPlace()
+    {
+        _library.LocalSearch = _ => [FakeLibrary.Card(1, "The Matrix")];
+        var search = new FakeSearch { OnSearch = (_, _) => Task.FromResult(new SearchResults([FakeLibrary.Card(9, "Something Else")], [], OnlineState.Ok)) };
+        var clock = new ManualClock();
+        var palette = Palette(search, clock);
+
+        palette.Query = "matrix";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix") && search.Queries.Count == 1);
+        await palette.Settled;
+        Ui.Flush();
+
+        Assert.Equal([SearchPaletteViewModel.LibraryHeader, "The Matrix"], Texts(palette));
+    }
+
+    [AvaloniaFact]
+    public async Task Palette_Remote_StaleAnswers_FromEitherRequest_AreDropped()
+    {
+        using var heatLocal = new ManualResetEventSlim();
+        var heatOnline = new TaskCompletionSource<SearchResults>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = 0;
+        _library.LocalSearch = query =>
+        {
+            Interlocked.Increment(ref asked);
+            if (query != "heat") return [FakeLibrary.Card(2, "The Matrix")];
+
+            Assert.True(heatLocal.Wait(TimeSpan.FromSeconds(15), Ct));
+            return [FakeLibrary.Card(1, "Heat")];
+        };
+        var search = new FakeSearch
+        {
+            OnSearch = (query, _) => query == "heat" ? heatOnline.Task : Task.FromResult(new SearchResults([], [], OnlineState.Ok)),
+        };
+        var clock = new ManualClock();
+        var palette = Palette(search, clock);
+
+        palette.Query = "heat";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => Volatile.Read(ref asked) == 1 && search.Queries.Count == 1);
+        palette.Query = "matrix";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+        await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix"));
+
+        heatLocal.Set();
+        heatOnline.SetResult(new SearchResults([], [new OnlineResult(Severance, null)], OnlineState.Ok));
+        await Task.Delay(100, Ct);
+        Ui.Flush();
+
+        Assert.Equal([SearchPaletteViewModel.LibraryHeader, "The Matrix"], Texts(palette));
+    }
+
+    [AvaloniaFact]
+    public async Task Palette_Remote_SearchFails_KeepsTheLibraryHits()
+    {
+        _library.LocalSearch = _ => [FakeLibrary.Card(1, "The Matrix")];
         var search = new FakeSearch { OnSearch = (_, _) => Task.FromException<SearchResults>(new ServerUnreachableException()) };
         var clock = new ManualClock();
         var palette = Palette(search, clock);
 
         palette.Query = "matrix";
         clock.Advance(SearchPaletteViewModel.OnlineDelay);
-        await palette.Settled;
-        Ui.Flush();
+        await Ui.WaitUntil(() => Texts(palette).Contains("The Matrix") && Texts(palette).Contains(SearchPaletteViewModel.OfflineNote));
+    }
 
-        Assert.Contains(SearchPaletteViewModel.OfflineNote, palette.Rows.Select(r => r.Text));
+    [AvaloniaFact]
+    public async Task Palette_Remote_ServerGone_SaysOffline_WithoutLogging()
+    {
+        _library.LocalSearch = _ => throw new ServerUnreachableException();
+        var search = new FakeSearch { OnSearch = (_, _) => Task.FromException<SearchResults>(new ServerUnreachableException()) };
+        var clock = new ManualClock();
+        var palette = Palette(search, clock);
+
+        palette.Query = "matrix";
+        clock.Advance(SearchPaletteViewModel.OnlineDelay);
+
+        await Ui.WaitUntil(() => Texts(palette).Contains(SearchPaletteViewModel.OfflineNote));
+        Assert.DoesNotContain(SearchPaletteViewModel.SearchingNote, Texts(palette));
         Assert.Empty(_hub.Recent);
     }
 
@@ -1048,11 +1428,9 @@ public sealed class RemoteUiTests : IDisposable
 
         palette.Query = "matrix";
         clock.Advance(SearchPaletteViewModel.OnlineDelay);
-        await palette.Settled;
-        Ui.Flush();
 
-        Assert.DoesNotContain(SearchPaletteViewModel.NoKeyChoice, palette.Rows.Select(r => r.Text));
-        Assert.Contains(palette.Rows, r => r.IsNote);
+        await Ui.WaitUntil(() => Texts(palette).Contains(SearchPaletteViewModel.ServerNoKeyNote));
+        Assert.DoesNotContain(SearchPaletteViewModel.NoKeyChoice, Texts(palette));
     }
 
     // ---- Closing ----

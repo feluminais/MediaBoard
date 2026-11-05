@@ -65,7 +65,7 @@ public sealed class RemoteCompositionTests
         private bool _stopped;
         private int _restarts;
 
-        private Viewer(SharingWorld world, StoredConnection connection, string token, Player player)
+        private Viewer(SharingWorld world, StoredConnection connection, string token, Player player, bool restartWorks)
         {
             World = world;
             Connection = connection;
@@ -105,7 +105,7 @@ public sealed class RemoteCompositionTests
                     sp.GetRequiredService<ModeSwitch>(),
                     sp.GetRequiredService<ActivityHub>(),
                     (_, _) => Task.FromResult(true)));
-            }, new AppRestart("MediaBoard.exe", (_, _) => Interlocked.Increment(ref _restarts), () => { }));
+            }, new AppRestart(restartWorks ? "MediaBoard.exe" : null, (_, _) => Interlocked.Increment(ref _restarts), () => { }));
         }
 
         public SharingWorld World { get; }
@@ -133,7 +133,7 @@ public sealed class RemoteCompositionTests
 
         public ActivityHub Hub => Services.GetRequiredService<ActivityHub>();
 
-        public static async Task<Viewer> JoinAsync(SharingWorld world, bool signIn = true)
+        public static async Task<Viewer> JoinAsync(SharingWorld world, bool signIn = true, bool restartWorks = true)
         {
             world.OpenDatabase();
             world.SetSharing(s => s with { HomeAddress = "127.0.0.1" });
@@ -143,7 +143,7 @@ public sealed class RemoteCompositionTests
             var token = world.Services.GetRequiredService<DeviceStore>().Issue(account.Id, "Laptop", "198.51.100.1").Token;
             var stored = signIn ? RemoteSession.Protect(token) : "this was never protected";
             var endpoint = new ServerEndpoint(invite.ServerName, invite.Addresses, invite.Fingerprint);
-            return new Viewer(world, new StoredConnection(endpoint, "Sam", "Laptop", stored), token, new Player());
+            return new Viewer(world, new StoredConnection(endpoint, "Sam", "Laptop", stored), token, new Player(), restartWorks);
         }
 
         public async Task ConnectedAsync()
