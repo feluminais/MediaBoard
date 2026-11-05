@@ -17,6 +17,23 @@ public class DialogsTests
         Assert.False(await new Dialogs().AskClosePlayerAsync("MPC-HC")); // leaves the player playing
     }
 
+    [AvaloniaFact]
+    public async Task HiddenWindow_ComesBackForTheDialog()
+    {
+        var owner = new Window();
+        owner.Show();
+        owner.Hide();
+        var dialogs = new Dialogs { Owner = owner };
+
+        var answer = dialogs.AskFinishedAsync("Heat");
+        Ui.Flush();
+
+        Assert.True(owner.IsVisible);
+        Assert.Single(owner.OwnedWindows).Close();
+        Assert.Null(await answer);
+        owner.Close();
+    }
+
     [AvaloniaTheory]
     [InlineData("Remove", true)]
     [InlineData("Cancel", false)]

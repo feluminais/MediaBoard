@@ -34,6 +34,27 @@ public sealed record AppSettings
 
     /// <summary>Text and posters step up in a wide window (UiSizes in the desktop app); off keeps the chosen sizes at every width.</summary>
     public bool GrowWithWindow { get; init; } = true;
+
+    public SharingSettings Sharing { get; init; } = new();
+}
+
+public sealed record SharingSettings
+{
+    /// <summary>Sharing came up the last time it was asked to, so startup brings it back.</summary>
+    public bool On { get; init; }
+
+    public int Port { get; init; } = 47880;
+
+    /// <summary>The name people see; null is "&lt;Windows user&gt;'s library".</summary>
+    public string? ServerName { get; init; }
+
+    /// <summary>What reaches this PC from the internet: a host name or address, with a port if the router forwards a different one.</summary>
+    public string? PublicAddress { get; init; }
+
+    /// <summary>What reaches this PC from the home network, in the same form. Invites try it first.</summary>
+    public string? HomeAddress { get; init; }
+
+    public bool StartWithWindows { get; init; }
 }
 
 [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<PosterSize>))]

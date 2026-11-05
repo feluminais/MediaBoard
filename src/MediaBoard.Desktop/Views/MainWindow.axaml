@@ -236,6 +236,8 @@
                                           Width="8" Height="9" VerticalAlignment="Center" />
                                     <TextBlock Text="{Binding StatusBar.Player}" />
                                 </StackPanel>
+                                <TextBlock x:Name="SharingText" Text="{Binding StatusBar.Sharing}"
+                                           IsVisible="{Binding StatusBar.Sharing, Converter={x:Static ObjectConverters.IsNotNull}}" />
                             </StackPanel>
                         </DockPanel>
                     </Button>

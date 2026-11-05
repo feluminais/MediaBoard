@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using MediaBoard.Core.Accounts;
@@ -12,10 +13,15 @@ using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using HttpProtocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols;
+using ListenOptions = Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions;
 
 namespace MediaBoard.Server;
 
-public sealed record SharingOptions(int Port, string ServerName, X509Certificate2 Certificate);
+public sealed record SharingOptions(int Port, string ServerName, X509Certificate2 Certificate)
+{
+    /// <summary>For tests: only this PC can connect, and so Windows Firewall has nothing to ask about.</summary>
+    public bool LoopbackOnly { get; init; }
+}
 
 public sealed class PortInUseException(int port, Exception innerException) : Exception($"Port {port} is in use.", innerException)
 {
@@ -174,7 +180,7 @@ public sealed class SharingServer(
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = MaxBodyBytes;
             kestrel.Limits.MaxConcurrentConnections = MaxConnections;
-            kestrel.ListenAnyIP(options.Port, listen =>
+            void Configure(ListenOptions listen)
             {
                 // The client speaks HTTP/1.1 only, so nothing else is offered.
                 listen.Protocols = HttpProtocols.Http1;
@@ -183,7 +189,10 @@ public sealed class SharingServer(
                     ServerCertificate = options.Certificate,
                     SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
                 });
-            });
+            }
+
+            if (options.LoopbackOnly) kestrel.Listen(IPAddress.Loopback, options.Port, Configure);
+            else kestrel.ListenAnyIP(options.Port, Configure);
         });
 
         var app = builder.Build();

@@ -6,14 +6,15 @@ using MediaBoard.Core.Playback;
 using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
+using MediaBoard.Desktop.Sharing;
 
 namespace MediaBoard.Desktop;
 
 /// <summary>
 /// Runs the app's background work. <see cref="Start"/> returns at once; everything slow happens on the thread pool,
 /// so the window shows before the database is open or any scan has finished. Startup order: database, connectivity,
-/// identification (which picks up files left pending last time), a scan of each enabled folder followed by an
-/// identification run, the watcher and the lookout for players started outside the app, then one metadata refresh.
+/// identification (which picks up files left pending last time), sharing if it was on, a scan of each enabled folder
+/// followed by an identification run, the watcher and the lookout for players started outside the app, then one metadata refresh.
 /// <see cref="StopAsync"/> undoes it in reverse.
 /// </summary>
 public sealed class AppHost(
@@ -29,9 +30,11 @@ public sealed class AppHost(
     LocalLibrary library,
     PlaybackService playback,
     PlayerWatcher players,
-    FolderRecheck recheck)
+    FolderRecheck recheck,
+    SharingController sharing)
 {
     private readonly CancellationTokenSource _stopping = new();
+    private readonly TaskCompletionSource _sharingSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _keyGate = new();
     private readonly Dictionary<int, string> _failedScans = [];
     private string? _lastKey;
@@ -41,6 +44,9 @@ public sealed class AppHost(
 
     /// <summary>The background startup; completes when the first scans, identification and refresh are done.</summary>
     public Task Startup => _startup;
+
+    /// <summary>Completes once sharing has resumed, failed to, or never will because startup ended early. Never throws.</summary>
+    public Task SharingSettled => _sharingSettled.Task;
 
     /// <summary>Call once, from the UI thread, after the window was created.</summary>
     public void Start()
@@ -76,6 +82,7 @@ public sealed class AppHost(
         await players.DisposeAsync().ConfigureAwait(false);
         await playback.DisposeAsync().ConfigureAwait(false);
         await _startup.ConfigureAwait(false); // never throws: RunStartupAsync catches everything
+        await sharing.StopForExitAsync().ConfigureAwait(false); // after startup, which may be resuming it
         watcher.Dispose();
         identification.Dispose();
         connectivity.Dispose();
@@ -92,6 +99,10 @@ public sealed class AppHost(
 
             connectivity.Start();
             identification.Start();
+
+            // Before the scans, which can take minutes: the database is all the server needs.
+            await sharing.ResumeAsync().ConfigureAwait(false);
+            _sharingSettled.TrySetResult();
 
             await ScanInTurnAsync(line, ct, scanned => _ = IdentifyAsync(ct)).ConfigureAwait(false);
 
@@ -112,6 +123,10 @@ public sealed class AppHost(
         catch (Exception e)
         {
             hub.Log(ActivityLevel.Error, $"Library update stopped: {e.Message}", "Restart MediaBoard to try again.");
+        }
+        finally
+        {
+            _sharingSettled.TrySetResult();
         }
     }
 

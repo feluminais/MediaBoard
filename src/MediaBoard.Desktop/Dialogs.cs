@@ -45,7 +45,7 @@ public sealed class Dialogs
     /// <summary>Asks <paramref name="question"/> with two buttons; true when the user pressed <paramref name="yes"/>.</summary>
     public async Task<bool> ConfirmAsync(string question, string yes)
     {
-        if (Owner is null) return false;
+        if (ShownOwner() is not { } owner) return false;
 
         var dialog = new Window
         {
@@ -78,7 +78,7 @@ public sealed class Dialogs
         };
 
         DialogFrame.Apply(dialog, "MediaBoard");
-        return await dialog.ShowDialog<bool>(Owner);
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     /// <summary>
@@ -87,7 +87,7 @@ public sealed class Dialogs
     /// </summary>
     public async Task<bool> AskClosePlayerAsync(string player)
     {
-        if (Owner is null) return false;
+        if (ShownOwner() is not { } owner) return false;
 
         var dialog = new Window
         {
@@ -133,23 +133,30 @@ public sealed class Dialogs
         };
 
         DialogFrame.Apply(dialog, "MediaBoard");
-        return await dialog.ShowDialog<bool>(Owner);
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     /// <summary>Lists the files that would go to the Recycle Bin; true when the user pressed Delete.</summary>
     public async Task<bool> ConfirmDeleteAsync(DeletePreview preview)
     {
-        if (Owner is null) return false;
+        if (ShownOwner() is not { } owner) return false;
 
-        return await new ConfirmDeleteDialog(preview).ShowDialog<bool>(Owner);
+        return await new ConfirmDeleteDialog(preview).ShowDialog<bool>(owner);
     }
 
     /// <summary>"Did you finish ...?": true for Yes, false for No, null when the user closed it without answering.</summary>
     public async Task<bool?> AskFinishedAsync(string title)
     {
-        if (Owner is null) return null;
+        if (ShownOwner() is not { } owner) return null;
 
-        return await new FinishedPromptDialog(title).ShowDialog<bool?>(Owner);
+        return await new FinishedPromptDialog(title).ShowDialog<bool?>(owner);
+    }
+
+    // The window may be hidden in the tray or never have opened, and a dialog can't open over a hidden owner.
+    private Window? ShownOwner()
+    {
+        if (Owner is { IsVisible: false } hidden) hidden.Show();
+        return Owner;
     }
 
     /// <summary>Opens a web address in the default browser. Only https addresses.</summary>

@@ -85,6 +85,9 @@ public sealed class ActivityHub
     public void SetPlayer(string? name) =>
         Update(s => s.PlayerName == name ? s : s with { PlayerName = name });
 
+    public void SetSharing(string? summary) =>
+        Update(s => s.Sharing == summary ? s : s with { Sharing = summary });
+
     public void SetUnavailableFolders(IReadOnlyList<string> names)
     {
         var copy = names.ToArray();

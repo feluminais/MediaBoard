@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using MediaBoard.Core;
+using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Identification;
 using MediaBoard.Core.Library;
@@ -12,7 +13,9 @@ using MediaBoard.Core.Probing;
 using MediaBoard.Core.Scanning;
 using MediaBoard.Core.Settings;
 using MediaBoard.Core.Storage;
+using MediaBoard.Desktop.Sharing;
 using MediaBoard.Desktop.ViewModels;
+using MediaBoard.Server;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace MediaBoard.Desktop;
@@ -22,6 +25,9 @@ namespace MediaBoard.Desktop;
 public sealed record DataPaths(string Database, string Settings, string Images, string? ErrorLog = null)
 {
     public static DataPaths Default => new(AppPaths.DatabasePath, AppPaths.SettingsPath, AppPaths.ImagesDir, AppPaths.ErrorLogPath);
+
+    /// <summary>The sharing server's certificate, next to the settings file.</summary>
+    public string Certificate => Path.Combine(Path.GetDirectoryName(Settings) ?? ".", "certificate.bin");
 }
 
 /// <summary>
@@ -142,6 +148,8 @@ public static class Composition
             return new PlayerWatcher(sp.GetRequiredService<SettingsStore>(), playback.AttachAsync, () => playback.CurrentPlayer);
         });
 
+        AddSharing(services, paths);
+
         services.AddSingleton(FolderRecheck.Default);
         services.AddSingleton<AppHost>();
         services.AddSingleton(sp => new FolderActions(
@@ -216,6 +224,60 @@ public static class Composition
         overrides?.Invoke(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+    }
+
+    // The controller asks for the server only when sharing first comes on, so a single-user run never builds it.
+    private static void AddSharing(ServiceCollection services, DataPaths paths)
+    {
+        services.AddSingleton(sp => new AccountStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new DeviceStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new InviteStore(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new SharingLog(sp.GetRequiredService<LibraryDatabase>(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new SignInGuard(sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new AccountService(
+            sp.GetRequiredService<LibraryDatabase>(),
+            sp.GetRequiredService<AccountStore>(),
+            sp.GetRequiredService<DeviceStore>(),
+            sp.GetRequiredService<InviteStore>(),
+            sp.GetRequiredService<SignInGuard>(),
+            sp.GetRequiredService<SharingLog>()));
+
+        services.AddSingleton(_ => new CertificateStore(paths.Certificate));
+        services.AddSingleton(sp => new StreamRegistry(sp.GetRequiredService<TimeProvider>(), new SleepBlocker()));
+        services.AddSingleton(sp => new ViewerAccess(sp.GetRequiredService<LibraryDatabase>()));
+        services.AddSingleton(sp =>
+        {
+            var owner = sp.GetRequiredService<LocalLibrary>();
+            var provider = sp.GetRequiredService<IMetadataProvider>();
+            var connectivity = sp.GetRequiredService<Connectivity>();
+            var titles = sp.GetRequiredService<TitleStore>();
+            var access = sp.GetRequiredService<ViewerAccess>();
+            var searches = new ViewerSearches(viewer => new SearchService(owner.ForViewer(viewer), provider, connectivity, titles, access, viewer));
+            return new SharedLibrary(
+                owner, access, sp.GetRequiredService<FileStore>(), sp.GetRequiredService<ProgressStore>(), searches.For, sp.GetRequiredService<ImageCache>());
+        });
+        services.AddSingleton(sp => new SharingServer(
+            sp.GetRequiredService<AccountService>(),
+            sp.GetRequiredService<AccountStore>(),
+            sp.GetRequiredService<DeviceStore>(),
+            sp.GetRequiredService<SharedLibrary>(),
+            sp.GetRequiredService<StreamRegistry>(),
+            time: sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => new SharingController(
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<CertificateStore>(),
+            sp.GetRequiredService<InviteStore>(),
+            sp.GetRequiredService<StreamRegistry>(),
+            sp.GetRequiredService<ActivityHub>(),
+            sp.GetRequiredService<SharingServer>));
+        services.AddSingleton<ITrayReason>(sp => new SharingTrayReason(sp.GetRequiredService<SharingController>()));
+
+        services.AddSingleton<IRunKey, RegistryRunKey>();
+        services.AddSingleton(sp => new StartWithWindows(
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<IRunKey>(),
+            Environment.ProcessPath ?? "",
+            sp.GetRequiredService<ActivityHub>()));
     }
 
     private static HttpClient CreateHttpClient()

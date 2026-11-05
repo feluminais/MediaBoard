@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MediaBoard.Core\MediaBoard.Core.csproj" />
+    <ProjectReference Include="..\MediaBoard.Server\MediaBoard.Server.csproj" />
   </ItemGroup>
   <!-- A MediaBoard shortcut on the desktop follows the latest build (Debug or Release). Skipped on CI, or when
        MediaBoardNoShortcut=true; a failure never fails the build. -->

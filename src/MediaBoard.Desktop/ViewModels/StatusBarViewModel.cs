@@ -84,6 +84,10 @@ public sealed partial class StatusBarViewModel : ObservableObject
     [ObservableProperty]
     public partial string? Player { get; private set; }
 
+    /// <summary>"Sharing: 2 watching" while sharing is on.</summary>
+    [ObservableProperty]
+    public partial string? Sharing { get; private set; }
+
     [RelayCommand]
     private void OpenSettings() => SettingsRequested?.Invoke();
 
@@ -150,5 +154,6 @@ public sealed partial class StatusBarViewModel : ObservableObject
             _ => $"Folders unavailable: {string.Join(", ", s.UnavailableFolders)}",
         };
         Player = s.PlayerName;
+        Sharing = s.Sharing;
     }
 }

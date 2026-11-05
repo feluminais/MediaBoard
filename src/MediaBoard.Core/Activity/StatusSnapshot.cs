@@ -29,6 +29,9 @@ public sealed record StatusSnapshot
     /// <summary>Player currently running a file, or null when nothing is playing.</summary>
     public string? PlayerName { get; init; }
 
+    /// <summary>"Sharing: 2 watching" while sharing is on, or null.</summary>
+    public string? Sharing { get; init; }
+
     public IReadOnlyList<string> UnavailableFolders { get; init; } = [];
 
     /// <summary>The library database could not be opened: what to do about it. Null once it opened.</summary>
