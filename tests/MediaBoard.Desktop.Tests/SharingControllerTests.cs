@@ -22,6 +22,18 @@ public sealed class SharingControllerTests
     // ---- On and off ----
 
     [Fact]
+    public async Task CheckConnection_NewPortSavedWhileOn_TriesThePortInUse()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+        await world.Sharing.SetOnAsync(true);
+
+        world.SetSharing(s => s with { PublicAddress = "127.0.0.1", Port = SharingWorld.FreePort() });
+
+        Assert.Equal(CheckResult.Reachable, await world.Sharing.CheckConnectionAsync(Ct));
+    }
+
+    [Fact]
     public async Task Off_NothingListens()
     {
         await using var world = new SharingWorld();

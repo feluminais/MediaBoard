@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using Avalonia.Headless.XUnit;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Library;
@@ -1351,6 +1353,63 @@ public sealed class SharingViewModelTests
 
         page.PublicAddress = "another.example.org";
         Assert.Null(page.CheckResult);
+    }
+
+    [AvaloniaFact]
+    public async Task CheckConnection_EditWhileRunning_DropsTheResult_AndAllowsNoSecondCheck()
+    {
+        await using var world = new SharingWorld();
+        var page = await OpenLoaded(world);
+        await world.Sharing.SetOnAsync(true);
+        await Ui.WaitUntil(() => page.StatusLine.StartsWith("Sharing on", StringComparison.Ordinal));
+
+        // It takes the connection and never answers, so the check waits until the listener goes.
+        var silent = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        page.PublicAddress = $"127.0.0.1:{((IPEndPoint)silent.LocalEndpoint).Port}";
+        await page.SaveConnectionCommand.ExecuteAsync(null);
+
+        var check = page.CheckConnectionCommand.ExecuteAsync(null);
+        Assert.Equal("Checking…", page.CheckResult);
+
+        page.PublicAddress = "other.example.org";
+        var second = page.CheckConnectionCommand.ExecuteAsync(null);
+
+        Assert.True(second.IsCompleted);
+        Assert.Equal("Checking…", page.CheckResult);
+
+        silent.Stop();
+        await check;
+
+        Assert.Null(page.CheckResult); // it answered for an address no longer on screen
+    }
+
+    [AvaloniaFact]
+    public async Task FailedResume_CheckAndInvite_DontSayToTurnItOn()
+    {
+        await using var world = new SharingWorld();
+        world.SetSharing(s => s with { On = true, Port = 70000, HomeAddress = "192.168.1.20", PublicAddress = Address });
+        world.Accounts.AddPerson("Anna", null);
+        string? note = null;
+        var owner = new OwnerAtDialogs();
+        owner.InPanel = panel =>
+        {
+            note = ((InviteStep)panel.Step!).Note;
+            return Task.CompletedTask;
+        };
+        var page = await OpenLoaded(world, owner);
+        await world.Sharing.ResumeAsync();
+        await Ui.WaitUntil(() => page.HasProblem);
+        Assert.True(page.IsOn);
+
+        await page.CheckConnectionCommand.ExecuteAsync(null);
+        var row = await OpenRow(page, "Anna");
+        await page.NewInviteCommand.ExecuteAsync(row);
+
+        Assert.Contains("isn't running", page.CheckResult);
+        Assert.DoesNotContain("Turn sharing on", page.CheckResult);
+        Assert.Contains("isn't running", note);
+        Assert.DoesNotContain("turn it on", note);
     }
 
     [AvaloniaFact]

@@ -124,11 +124,12 @@ public sealed class SharingController(
     /// <summary>
     /// Asks the public address for <c>ping</c>, trusting only this server's certificate. Failure proves nothing, since
     /// many routers can't loop back to themselves. With sharing off nothing goes out, because nothing could answer.
+    /// With no port in the address it tries the port in use, since a saved change waits for the next start.
     /// </summary>
     public async Task<CheckResult> CheckConnectionAsync(CancellationToken ct)
     {
         var sharing = settings.Load().Sharing;
-        if (ConnectAddress(sharing.PublicAddress, sharing.Port) is not { } address) return CheckResult.NoAddress;
+        if (ConnectAddress(sharing.PublicAddress, Port ?? sharing.Port) is not { } address) return CheckResult.NoAddress;
         if (_fingerprint is not { } fingerprint) return CheckResult.NotConclusive;
 
         using var handler = new SocketsHttpHandler

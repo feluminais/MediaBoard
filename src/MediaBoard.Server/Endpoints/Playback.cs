@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Remote;
@@ -45,9 +46,9 @@ internal static class Playback
             streams.Heartbeat(who.Device.Id, id, entry.PositionS, entry.DurationS);
             try
             {
-                var wasWatched = IsWatched(shared, who.Account.Id, id);
-                if (shared.Progress.SaveIfNewer(who.Account.Id, id, entry) && entry.Watched == true && !wasWatched)
-                    log.Add(SharingEvent.FinishedWatching, who.Account.Id, file.Title);
+                // Only an entry that says watched needs the read: most entries are a player's position.
+                var finishing = entry.Watched == true && !IsWatched(shared, who.Account.Id, id);
+                if (shared.Progress.SaveIfNewer(who.Account.Id, id, entry) && finishing) LogFinished(log, who.Account.Id, file);
 
                 return Results.NoContent();
             }
@@ -70,7 +71,7 @@ internal static class Playback
             {
                 var wasWatched = IsWatched(shared, who.Account.Id, id);
                 shared.Owner.ForViewer(viewer).SetWatched(id, watched);
-                if (watched && !wasWatched) log.Add(SharingEvent.FinishedWatching, who.Account.Id, file.Title);
+                if (watched && !wasWatched) LogFinished(log, who.Account.Id, file);
 
                 return Results.NoContent();
             }
@@ -79,6 +80,20 @@ internal static class Playback
                 return ApiResults.Error(ApiErrorCode.NotFound);
             }
         });
+    }
+
+    // The viewer's change is already saved, so a log that can't be written must not answer as if it failed.
+    private static void LogFinished(SharingLog log, int userId, ReachableFile file)
+    {
+        try
+        {
+            log.Add(SharingEvent.FinishedWatching, userId, file.Title);
+        }
+        catch (Exception e)
+        {
+            // The type alone: a message can hold a path.
+            Trace.TraceWarning($"Logging a finished title failed: {e.GetType().Name}");
+        }
     }
 
     private static bool IsWatched(SharedLibrary shared, int userId, int fileId) => shared.Progress.Get(userId, fileId)?.Watched == true;

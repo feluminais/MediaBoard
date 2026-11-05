@@ -99,9 +99,9 @@
                                             Command="{Binding $parent[UserControl].((vm:SharingViewModel)DataContext).SignOutCommand}"
                                             CommandParameter="{Binding}" />
                                     <StackPanel>
-                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
                                         <SelectableTextBlock Classes="muted" Text="{Binding Details}" IsTabStop="False"
-                                                             TextTrimming="CharacterEllipsis"
+                                                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Details}"
                                                              FontSize="{DynamicResource SmallFontSize}" />
                                     </StackPanel>
                                 </DockPanel>

@@ -121,6 +121,36 @@ public sealed class ProgressEndpointTests
         Assert.Single(Finished(world));
     }
 
+    private static void BreakTheLog(World world)
+    {
+        using var connection = world.Fixture.Db.Open();
+        connection.Execute("CREATE TRIGGER no_log BEFORE INSERT ON sharing_log BEGIN SELECT RAISE(ABORT, 'No log today.'); END");
+    }
+
+    [Fact]
+    public async Task Watched_Put_LogWriteFails_TheRequestStillSucceeds()
+    {
+        await using var world = await World.StartAsync();
+        BreakTheLog(world);
+
+        var response = await world.PutWatchedAsync("{\"watched\":true}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.True(world.Saved!.Watched);
+    }
+
+    [Fact]
+    public async Task Progress_CarryingWatched_LogWriteFails_TheRequestStillSucceeds()
+    {
+        await using var world = await World.StartAsync();
+        BreakTheLog(world);
+
+        var response = await world.PutProgressAsync(Entry(2990, Start, watched: true));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.True(world.Saved!.Watched);
+    }
+
     [Fact]
     public async Task Watched_InAnOlderEntry_LogsNothing()
     {

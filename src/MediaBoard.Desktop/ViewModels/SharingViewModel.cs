@@ -84,6 +84,7 @@ public sealed partial class SharingViewModel : PageViewModel
     private bool _acting;
     private bool _applying;
     private bool _fieldsFilled;
+    private bool _checking;
 
     public SharingViewModel(SharingServices services, SharingDialogs dialogs)
         : base("Sharing")
@@ -427,12 +428,15 @@ public sealed partial class SharingViewModel : PageViewModel
 
     // ---- Connection ----
 
+    // The switch reads on through a start and a failed resume, so "turn it on" would make no sense.
+    private bool SwitchedOnButNotRunning => _s.Controller.Status == SharingStatus.Starting || _s.Controller.ComesBackAtLaunch;
+
     private bool HasAddress => !string.IsNullOrWhiteSpace(_saved.PublicAddress) || !string.IsNullOrWhiteSpace(_saved.HomeAddress);
 
     partial void OnPublicAddressChanged(string value)
     {
         ConnectionMessage = null;
-        CheckResult = null;
+        ClearCheckResult();
     }
 
     partial void OnHomeAddressChanged(string value) => ConnectionMessage = null;
@@ -442,7 +446,13 @@ public sealed partial class SharingViewModel : PageViewModel
     partial void OnPortTextChanged(string value)
     {
         ConnectionMessage = null;
-        CheckResult = null;
+        ClearCheckResult();
+    }
+
+    // A check under way keeps saying so, and drops its own answer when it ends.
+    private void ClearCheckResult()
+    {
+        if (!_checking) CheckResult = null;
     }
 
     partial void OnStartsWithWindowsChanged(bool value)
@@ -543,10 +553,10 @@ public sealed partial class SharingViewModel : PageViewModel
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task CheckConnectionAsync()
     {
-        if (CheckResult == Checking) return;
+        if (_checking) return;
         if (_s.Controller.Status != SharingStatus.On)
         {
-            CheckResult = "Turn sharing on first.";
+            CheckResult = SwitchedOnButNotRunning ? "Sharing isn't running, so there's nothing to check." : "Turn sharing on first.";
             return;
         }
 
@@ -558,10 +568,14 @@ public sealed partial class SharingViewModel : PageViewModel
             return;
         }
 
+        var checkedAddress = PublicAddress;
+        var checkedPort = PortText;
+        _checking = true;
         CheckResult = Checking;
+        string? result;
         try
         {
-            CheckResult = await Task.Run(() => _s.Controller.CheckConnectionAsync(CancellationToken.None)) switch
+            result = await Task.Run(() => _s.Controller.CheckConnectionAsync(CancellationToken.None)) switch
             {
                 Sharing.CheckResult.Reachable => "Reached this PC. The port forward looks right.",
                 Sharing.CheckResult.NoAddress => "Enter a public address first.",
@@ -571,8 +585,12 @@ public sealed partial class SharingViewModel : PageViewModel
         catch (Exception e)
         {
             Report(e, "Check connection failed.");
-            CheckResult = ActionFailed;
+            result = ActionFailed;
         }
+
+        _checking = false;
+        var sameFields = string.Equals(PublicAddress, checkedAddress, StringComparison.Ordinal) && string.Equals(PortText, checkedPort, StringComparison.Ordinal);
+        CheckResult = sameFields ? result : null;
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
@@ -904,7 +922,8 @@ public sealed partial class SharingViewModel : PageViewModel
     private InviteStep InviteFor(string name, bool isOwner, string invite)
     {
         var life = "It works once, within 7 days. You won't see it again, but you can make another.";
-        if (_s.Controller.Status != SharingStatus.On) life += " Sharing is off, so it won't work until you turn it on.";
+        if (SwitchedOnButNotRunning) life += " Sharing isn't running, so it won't work until sharing starts.";
+        else if (_s.Controller.Status != SharingStatus.On) life += " Sharing is off, so it won't work until you turn it on.";
         return isOwner
             ? new InviteStep("Invite for your other PC", $"Paste this into MediaBoard on your other PC. {life}", invite, _dialogs.Copy)
             : new InviteStep($"Invite for {name}", $"Send this to {name}. {life}", invite, _dialogs.Copy);
