@@ -1,3 +1,5 @@
+using MediaBoard.Core.Remote;
+
 namespace MediaBoard.Core.Settings;
 
 public sealed record AppSettings
@@ -36,6 +38,9 @@ public sealed record AppSettings
     public bool GrowWithWindow { get; init; } = true;
 
     public SharingSettings Sharing { get; init; } = new();
+
+    /// <summary>The server this PC connects to as a viewer, or null if it has never joined one.</summary>
+    public StoredConnection? Connection { get; init; }
 }
 
 public sealed record SharingSettings
