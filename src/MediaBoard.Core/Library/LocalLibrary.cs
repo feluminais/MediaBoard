@@ -154,6 +154,24 @@ public sealed partial class LocalLibrary : ILibrary
         NotifyProgressChanged();
     }
 
+    public void SetTitleWatched(int titleId, IReadOnlyCollection<int> fileIds, bool watched) => MarkTitle(titleId, fileIds, watched);
+
+    /// <summary>What <see cref="SetTitleWatched"/> does. A file that isn't this title's, or is already that way, is left alone.</summary>
+    /// <returns>How many files changed.</returns>
+    public int MarkTitle(int titleId, IReadOnlyCollection<int> fileIds, bool watched)
+    {
+        var snapshot = Snapshot();
+        if (!snapshot.Titles.ContainsKey(titleId)) return 0;
+
+        var named = fileIds.ToHashSet();
+        var changing = snapshot.FilesByTitle[titleId].Where(f => named.Contains(f.Id) && f.Watched != watched).Select(f => f.Id).ToList();
+        if (changing.Count == 0) return 0;
+
+        _progress.SetWatched(_viewer.UserId, changing, watched);
+        NotifyProgressChanged();
+        return changing.Count;
+    }
+
     public void MarkNotMedia(int fileId)
     {
         RequireFile(fileId);

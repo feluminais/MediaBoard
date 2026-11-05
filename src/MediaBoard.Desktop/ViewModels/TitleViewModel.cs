@@ -532,13 +532,8 @@ public sealed partial class TitleViewModel : PageViewModel, IServerPage
     {
         var files = _files;
         var target = !(files.Count > 0 && files.All(f => f.Watched));
-        return EditAsync("change the watched state", () =>
-        {
-            foreach (var (fileId, watched) in files)
-            {
-                if (watched != target) _s.Library.SetWatched(fileId, target);
-            }
-        });
+        var changing = files.Where(f => f.Watched != target).Select(f => f.FileId).ToList();
+        return EditAsync("change the watched state", () => _s.Library.SetTitleWatched(_titleId, changing, target));
     }
 
     // ---- Playing ----

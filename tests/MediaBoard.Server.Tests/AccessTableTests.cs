@@ -41,6 +41,7 @@ public sealed class AccessTableTests
         { "GET", "/api/v1/files/{f}/stream" },
         { "PUT", "/api/v1/files/{f}/progress" },
         { "PUT", "/api/v1/files/{f}/watched" },
+        { "PUT", "/api/v1/titles/{f}/watched" },
         { "GET", "/api/v1/events" },
     };
 
@@ -86,6 +87,7 @@ public sealed class AccessTableTests
     [InlineData("PUT", "/api/v1/files/1/progress", "text/plain", "not json")]
     [InlineData("PUT", "/api/v1/files/1/progress", "application/json", "{\"positionS\":-1}")]
     [InlineData("PUT", "/api/v1/files/1/watched", "text/plain", "not json")]
+    [InlineData("PUT", "/api/v1/titles/1/watched", "text/plain", "not json")]
     [InlineData("PUT", "/api/v1/me/password", "text/plain", "not json")]
     [InlineData("PUT", "/api/v1/me/password", "application/json", "{")]
     [InlineData("POST", "/api/v1/sign-out", "text/plain", "not json")]

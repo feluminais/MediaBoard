@@ -69,6 +69,9 @@ public sealed class ProgressEndpointTests
         public Task<HttpResponseMessage> PutWatchedAsync(string json, int? fileId = null) =>
             PutAsync($"/api/v1/files/{fileId ?? File}/watched", new StringContent(json, Encoding.UTF8, "application/json"), null);
 
+        public Task<HttpResponseMessage> PutTitleWatchedAsync(int titleId, string json) =>
+            PutAsync($"/api/v1/titles/{titleId}/watched", new StringContent(json, Encoding.UTF8, "application/json"), null);
+
         /// <summary>The file's row goes in the moment a write reaches it, after the access check passed.</summary>
         public void DeleteTheFileAsTheWriteLands()
         {
@@ -90,6 +93,65 @@ public sealed class ProgressEndpointTests
 
     private static IEnumerable<SharingLogEntry> Finished(World world) =>
         world.Fixture.Log.Recent(50).Where(e => e.Kind == SharingEvent.FinishedWatching);
+
+    [Fact]
+    public async Task TitleWatched_ChangesOnlyTheNamedFiles_AllAtOnce_AndLogsOnce()
+    {
+        await using var world = await World.StartAsync();
+        var folder = world.Fixture.Folders.All().First();
+        var show = world.Fixture.Show("Severance", 201, 3);
+        var first = await world.Fixture.AddFileAsync(folder, "s1e1.mkv", show, (1, 1));
+        var second = await world.Fixture.AddFileAsync(folder, "s1e2.mkv", show, (1, 2));
+        var third = await world.Fixture.AddFileAsync(folder, "s1e3.mkv", show, (1, 3));
+
+        var response = await world.PutTitleWatchedAsync(show, $$"""{"watched":true,"fileIds":[{{first}},{{second}}]}""");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.True(world.Fixture.Progress.Get(world.Sam.Id, first)!.Watched);
+        Assert.True(world.Fixture.Progress.Get(world.Sam.Id, second)!.Watched);
+        Assert.Null(world.Fixture.Progress.Get(world.Sam.Id, third));
+        Assert.Equal("Severance", Assert.Single(Finished(world)).Detail);
+
+        await world.PutTitleWatchedAsync(show, $$"""{"watched":true,"fileIds":[{{first}},{{second}}]}""");
+        Assert.Single(Finished(world));
+    }
+
+    [Fact]
+    public async Task TitleWatched_AFileOfAnotherTitle_IsLeftAlone()
+    {
+        await using var world = await World.StartAsync();
+
+        await world.PutTitleWatchedAsync(world.Movie, $$"""{"watched":true,"fileIds":[{{world.ForbiddenFile}}]}""");
+
+        Assert.Null(world.Fixture.Progress.Get(world.Sam.Id, world.ForbiddenFile));
+        Assert.Empty(Finished(world));
+    }
+
+    [Fact]
+    public async Task TitleWatched_Unreachable_404_LikeUnknown()
+    {
+        await using var world = await World.StartAsync();
+        var ronin = world.Fixture.Movie("Ronin", 102);
+
+        var forbidden = await world.PutTitleWatchedAsync(ronin, $$"""{"watched":true,"fileIds":[{{world.ForbiddenFile}}]}""");
+        var unknown = await world.PutTitleWatchedAsync(99999, """{"watched":true,"fileIds":[]}""");
+
+        Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("""{"fileIds":[1]}""")]
+    [InlineData("""{"watched":true}""")]
+    [InlineData("not json")]
+    public async Task TitleWatched_BadBody_400(string body)
+    {
+        await using var world = await World.StartAsync();
+
+        var response = await world.PutTitleWatchedAsync(world.Movie, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 
     [Fact]
     public async Task Watched_Put_LogsFinished_OnlyOnARealChange()

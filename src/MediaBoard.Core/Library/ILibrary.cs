@@ -51,6 +51,9 @@ public interface ILibrary
 
     void SetWatched(int fileId, bool watched);
 
+    /// <summary>Marks these files of the title in one step, so a whole show is one change, and all of it or none of it lands.</summary>
+    void SetTitleWatched(int titleId, IReadOnlyCollection<int> fileIds, bool watched);
+
     /// <summary>
     /// Replaces the file's match with a TMDB title chosen by the user, and remembers the choice for the other
     /// episodes of the same show folder. Throws <see cref="MetadataUnavailableException"/> when TMDB cannot

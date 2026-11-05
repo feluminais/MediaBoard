@@ -192,6 +192,11 @@ internal sealed class FakeLibrary : ILibrary
         Files = d.Files.Select(f => f.FileId == fileId ? f with { Watched = watched, PositionS = watched ? f.PositionS : 0 } : f).ToList(),
     });
 
+    public void SetTitleWatched(int titleId, IReadOnlyCollection<int> fileIds, bool watched)
+    {
+        foreach (var fileId in fileIds) SetWatched(fileId, watched);
+    }
+
     /// <summary>The id of the title a fix match moves files to, for a TMDB id.</summary>
     public static int MatchedTitleId(int tmdbId) => 1000 + tmdbId;
 

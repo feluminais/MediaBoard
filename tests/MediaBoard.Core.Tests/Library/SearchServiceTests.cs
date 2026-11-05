@@ -236,6 +236,7 @@ public sealed class SearchServiceTests : IDisposable
         public void Rename(TargetKind kind, int id, string? displayName) => throw new NotSupportedException();
         public void SetHidden(TargetKind kind, int id, bool hidden) => throw new NotSupportedException();
         public void SetWatched(int fileId, bool watched) => throw new NotSupportedException();
+        public void SetTitleWatched(int titleId, IReadOnlyCollection<int> fileIds, bool watched) => throw new NotSupportedException();
         public Task FixMatchAsync(int fileId, int tmdbId, TitleKind kind, CancellationToken ct) => throw new NotSupportedException();
         public void MarkNotMedia(int fileId) => throw new NotSupportedException();
         public DeletePreview PreviewDelete(int titleId) => throw new NotSupportedException();

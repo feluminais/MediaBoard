@@ -222,6 +222,17 @@ public sealed class RemoteLibraryTests
     }
 
     [Fact]
+    public async Task SetTitleWatched_IsOneRequest_ThatReachesTheServer()
+    {
+        await using var world = await World.StartAsync();
+        var title = world.Heat;
+
+        world.Library.SetTitleWatched(title, [world.HeatFile], true);
+
+        Assert.True(world.Fixture.Progress.Get(world.Sam.Id, world.HeatFile)!.Watched);
+    }
+
+    [Fact]
     public async Task SetWatched_ReachesServer()
     {
         await using var world = await World.StartAsync();
@@ -230,7 +241,7 @@ public sealed class RemoteLibraryTests
 
         world.Library.SetWatched(world.HeatFile, true);
 
-        // The page that made the edit refreshes itself, and a show sends one of these per file.
+        // The page that made the edit refreshes itself.
         Assert.True(world.Fixture.Progress.Get(world.Sam.Id, world.HeatFile)!.Watched);
         Assert.Equal(0, changed);
         world.Library.SetWatched(world.HeatFile, false);

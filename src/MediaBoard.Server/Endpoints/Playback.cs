@@ -48,7 +48,7 @@ internal static class Playback
             {
                 // Only an entry that says watched needs the read: most entries are a player's position.
                 var finishing = entry.Watched == true && !IsWatched(shared, who.Account.Id, id);
-                if (shared.Progress.SaveIfNewer(who.Account.Id, id, entry) && finishing) LogFinished(log, who.Account.Id, file);
+                if (shared.Progress.SaveIfNewer(who.Account.Id, id, entry) && finishing) LogFinished(log, who.Account.Id, file.Title);
 
                 return Results.NoContent();
             }
@@ -71,7 +71,7 @@ internal static class Playback
             {
                 var wasWatched = IsWatched(shared, who.Account.Id, id);
                 shared.Owner.ForViewer(viewer).SetWatched(id, watched);
-                if (watched && !wasWatched) LogFinished(log, who.Account.Id, file);
+                if (watched && !wasWatched) LogFinished(log, who.Account.Id, file.Title);
 
                 return Results.NoContent();
             }
@@ -80,14 +80,37 @@ internal static class Playback
                 return ApiResults.Error(ApiErrorCode.NotFound);
             }
         });
+
+        // One request for a whole show: a viewer marking one would otherwise wait out a round trip per file.
+        api.MapPut("titles/{id:int}/watched", async (HttpContext context, int id) =>
+        {
+            var who = DeviceAuth.Viewer(context);
+            if (!shared.Access.CanReachTitle(who.Viewer, id)) return ApiResults.Error(ApiErrorCode.NotFound);
+
+            var body = await ApiResults.ReadJson<TitleWatchedRequest>(context);
+            if (body is not { Watched: { } watched, FileIds: { } fileIds }) return ApiResults.Error(ApiErrorCode.BadRequest);
+
+            try
+            {
+                var library = shared.Owner.ForViewer(who.Viewer);
+                var changed = library.MarkTitle(id, fileIds, watched);
+                if (watched && changed > 0 && library.Title(id) is { } title) LogFinished(log, who.Account.Id, title.Name);
+
+                return Results.NoContent();
+            }
+            catch (Exception e) when (ProgressStore.IsUnknownFile(e))
+            {
+                return ApiResults.Error(ApiErrorCode.NotFound);
+            }
+        });
     }
 
     // The viewer's change is already saved, so a log that can't be written must not answer as if it failed.
-    private static void LogFinished(SharingLog log, int userId, ReachableFile file)
+    private static void LogFinished(SharingLog log, int userId, string title)
     {
         try
         {
-            log.AddOncePerDay(SharingEvent.FinishedWatching, userId, file.Title);
+            log.AddOncePerDay(SharingEvent.FinishedWatching, userId, title);
         }
         catch (Exception e)
         {

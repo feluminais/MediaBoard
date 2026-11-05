@@ -60,25 +60,36 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
     /// Marks the file watched, keeping its position. Marking it unwatched also forgets the position, so the next play
     /// starts at the beginning instead of the end.
     /// </summary>
-    public void SetWatched(int userId, int fileId, bool watched)
+    public void SetWatched(int userId, int fileId, bool watched) => SetWatched(userId, [fileId], watched);
+
+    /// <summary>All of them or none, so a failure can't leave half a show marked.</summary>
+    public void SetWatched(int userId, IReadOnlyCollection<int> fileIds, bool watched)
     {
         using var connection = db.Open();
-        if (watched)
+        using var transaction = connection.BeginTransaction();
+        foreach (var fileId in fileIds)
         {
-            connection.Execute(
-                """
-                INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
-                VALUES (@userId, @fileId, 0, 0, 1, @now)
-                ON CONFLICT(user_id, file_id) DO UPDATE SET watched = 1
-                """,
-                new { userId, fileId, now = Now() });
+            if (watched)
+            {
+                connection.Execute(
+                    """
+                    INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
+                    VALUES (@userId, @fileId, 0, 0, 1, @now)
+                    ON CONFLICT(user_id, file_id) DO UPDATE SET watched = 1
+                    """,
+                    new { userId, fileId, now = Now() },
+                    transaction);
+            }
+            else
+            {
+                connection.Execute(
+                    "UPDATE progress SET watched = 0, position_s = 0 WHERE user_id = @userId AND file_id = @fileId",
+                    new { userId, fileId },
+                    transaction);
+            }
         }
-        else
-        {
-            connection.Execute(
-                "UPDATE progress SET watched = 0, position_s = 0 WHERE user_id = @userId AND file_id = @fileId",
-                new { userId, fileId });
-        }
+
+        transaction.Commit();
     }
 
     /// <summary>
