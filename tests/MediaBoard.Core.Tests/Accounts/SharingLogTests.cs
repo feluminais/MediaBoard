@@ -49,6 +49,17 @@ public sealed class SharingLogTests : IDisposable
     }
 
     [Fact]
+    public void Recent_SkipsAnUnknownKind()
+    {
+        _log.Add(SharingEvent.Joined, null, "known");
+        using (var connection = _db.Open())
+            connection.Execute("INSERT INTO sharing_log(at, kind, detail) VALUES ('2026-01-01T00:00:00Z', 'FromTheFuture', 'odd')");
+        _log.Add(SharingEvent.SignedIn, null, "also known");
+
+        Assert.Equal(["also known", "known"], _log.Recent(10).Select(e => e.Detail));
+    }
+
+    [Fact]
     public void Log_CapsAt5000()
     {
         for (var i = 1; i <= 5_200; i++) _log.Add(SharingEvent.SignedIn, null, "entry " + i);

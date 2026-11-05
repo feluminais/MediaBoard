@@ -38,13 +38,19 @@ public sealed class SharingLog(LibraryDatabase db, TimeProvider? time = null)
     public IReadOnlyList<SharingLogEntry> Recent(int limit)
     {
         using var connection = db.Open();
-        return connection.Query<Row>(
-                "SELECT id AS Id, at AS At, user_id AS UserId, kind AS Kind, detail AS Detail FROM sharing_log ORDER BY id DESC LIMIT @limit",
-                new { limit })
-            .Select(r => new SharingLogEntry(
+        var entries = new List<SharingLogEntry>();
+        foreach (var r in connection.Query<Row>(
+                     "SELECT id AS Id, at AS At, user_id AS UserId, kind AS Kind, detail AS Detail FROM sharing_log ORDER BY id DESC LIMIT @limit",
+                     new { limit }))
+        {
+            // A kind this version doesn't know (written by a newer one) is skipped instead of failing the whole read.
+            if (!Enum.TryParse<SharingEvent>(r.Kind, out var kind) || !Enum.IsDefined(kind)) continue;
+            entries.Add(new SharingLogEntry(
                 r.Id, DateTime.Parse(r.At, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                r.UserId is { } id ? (int)id : null, Enum.Parse<SharingEvent>(r.Kind), r.Detail))
-            .ToList();
+                r.UserId is { } id ? (int)id : null, kind, r.Detail));
+        }
+
+        return entries;
     }
 
     private sealed class Row

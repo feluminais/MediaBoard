@@ -76,6 +76,69 @@ public sealed class AccountStoreTests : IDisposable
     }
 
     [Fact]
+    public void Create_CyrillicNameIsCaseInsensitiveUnique()
+    {
+        _store.Create("Анна", null);
+
+        Assert.Throws<DuplicateNameException>(() => _store.Create("АННА", null));
+        Assert.Throws<DuplicateNameException>(() => _store.Create("  анна ", null));
+        Assert.Equal(2, _store.All().Count);
+    }
+
+    [Fact]
+    public void Create_RefusesEmptyAndTooLongNames()
+    {
+        Assert.Throws<ArgumentException>(() => _store.Create("   ", null));
+        Assert.Throws<ArgumentException>(() => _store.Create(new string('a', AccountStore.MaxNameLength + 1), null));
+        Assert.Equal(AccountStore.MaxNameLength, _store.Create(new string('b', AccountStore.MaxNameLength), null).Name.Length);
+    }
+
+    [Fact]
+    public void ByName_FindsCyrillicInAnotherCase()
+    {
+        var created = _store.Create("Анна", null);
+
+        Assert.Equal(created.Id, _store.ByName("АННА")!.Id);
+        Assert.Null(_store.ByName("Борис"));
+    }
+
+    [Fact]
+    public void ByName_TrimsSpaces()
+    {
+        var created = _store.Create("Anna", null);
+
+        Assert.Equal(created.Id, _store.ByName("  anna ")!.Id);
+    }
+
+    [Fact]
+    public void SetFolders_RefusesOwner()
+    {
+        Assert.Throws<InvalidOperationException>(() => _store.SetFolders(LibraryDatabase.OwnerId, []));
+
+        Assert.Null(_store.Get(LibraryDatabase.OwnerId)!.FolderIds);
+    }
+
+    [Fact]
+    public void SetDisabled_RefusesOwner()
+    {
+        Assert.Throws<InvalidOperationException>(() => _store.SetDisabled(LibraryDatabase.OwnerId, true));
+
+        Assert.False(_store.Get(LibraryDatabase.OwnerId)!.Disabled);
+    }
+
+    [Fact]
+    public void Get_ReturnsOnlyThatAccountsFolders()
+    {
+        var one = AddFolder("X:\\One");
+        var two = AddFolder("X:\\Two");
+        _store.Create("Anna", [one]);
+        var bob = _store.Create("Bob", [two]);
+
+        Assert.Equal([two], _store.Get(bob.Id)!.FolderIds);
+        Assert.Equal([two], _store.ByName("bob")!.FolderIds);
+    }
+
+    [Fact]
     public void Remove_RefusesOwner()
     {
         Assert.Throws<InvalidOperationException>(() => _store.Remove(LibraryDatabase.OwnerId));

@@ -2,10 +2,13 @@ namespace MediaBoard.Core.Accounts;
 
 /// <summary>
 /// Locks a name after 5 failures for 15 minutes and an address after 20 for an hour. Counters live in memory, so a
-/// restart clears them. Failures older than the lock period are forgotten. Any thread may call it.
+/// restart clears them. Failures older than the lock period are forgotten. Each tally holds at most
+/// <see cref="MaxEntries"/> keys, since names and addresses come from strangers. Any thread may call it.
 /// </summary>
 public sealed class SignInGuard
 {
+    public const int MaxEntries = 10_000;
+
     private readonly Lock _gate = new();
     private readonly Tally _names;
     private readonly Tally _addresses;
@@ -30,10 +33,10 @@ public sealed class SignInGuard
         }
     }
 
-    /// <summary>Forgets the name's failures. The address keeps its own, so one good account can't wash out a guessing run.</summary>
+    /// <summary>Forgets the name's failures but not an active lock. The address keeps its own failures.</summary>
     public void RecordSuccess(string name)
     {
-        lock (_gate) _names.Clear(name);
+        lock (_gate) _names.ClearFailures(name);
     }
 
     public IReadOnlyList<string> LockedNames()
@@ -50,10 +53,18 @@ public sealed class SignInGuard
         public void Fail(string key)
         {
             var now = time.GetUtcNow();
-            Prune(now);
-            if (!_entries.TryGetValue(key, out var entry)) _entries[key] = entry = new Entry(key);
+            if (!_entries.TryGetValue(key, out var entry))
+            {
+                if (_entries.Count >= MaxEntries) MakeRoom(now);
+                // Everything held is locked: a new key goes untracked rather than evicting a lock.
+                if (_entries.Count >= MaxEntries) return;
+                _entries[key] = entry = new Entry(key);
+            }
+
+            entry.Touched = now;
             if (entry.LockedUntil > now) return;
 
+            entry.Failures.RemoveAll(at => now - at >= period);
             entry.Failures.Add(now);
             if (entry.Failures.Count < limit) return;
 
@@ -61,22 +72,29 @@ public sealed class SignInGuard
             entry.LockedUntil = now + period;
         }
 
-        public void Clear(string key) => _entries.Remove(key);
+        public void ClearFailures(string key)
+        {
+            if (!_entries.TryGetValue(key, out var entry)) return;
+            entry.Failures.Clear();
+            if (entry.LockedUntil <= time.GetUtcNow()) _entries.Remove(key);
+        }
 
         public List<string> Locked()
         {
             var now = time.GetUtcNow();
-            Prune(now);
             return _entries.Values.Where(e => e.LockedUntil > now).Select(e => e.Key).Order(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        private void Prune(DateTimeOffset now)
+        // Runs only when the table is full: drops what has expired, then the oldest tenth of the unlocked rest, so
+        // the cost is spread over many inserts. A lock is never dropped.
+        private void MakeRoom(DateTimeOffset now)
         {
-            foreach (var entry in _entries.Values.ToList())
-            {
-                entry.Failures.RemoveAll(at => now - at >= period);
-                if (entry.Failures.Count == 0 && entry.LockedUntil <= now) _entries.Remove(entry.Key);
-            }
+            var unlocked = _entries.Values.Where(e => e.LockedUntil <= now).ToList();
+            var stale = unlocked.Where(e => now - e.Touched >= period).ToList();
+            var victims = stale.Count > 0
+                ? stale
+                : unlocked.OrderBy(e => e.Touched).Take(Math.Max(1, MaxEntries / 10)).ToList();
+            foreach (var entry in victims) _entries.Remove(entry.Key);
         }
     }
 
@@ -85,5 +103,6 @@ public sealed class SignInGuard
         public string Key { get; } = key;
         public List<DateTimeOffset> Failures { get; } = [];
         public DateTimeOffset LockedUntil { get; set; }
+        public DateTimeOffset Touched { get; set; }
     }
 }

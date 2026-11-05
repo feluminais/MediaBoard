@@ -13,6 +13,8 @@ namespace MediaBoard.Core.Accounts;
 /// </summary>
 public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
 {
+    public const int MaxNameLength = 64;
+
     private const int SqliteConstraintUnique = 2067;
 
     private const string Select =
@@ -21,14 +23,23 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
+    /// <summary>
+    /// Names are compared here, not by SQLite, whose NOCASE folds ASCII only: "Анна" and "АННА" must clash.
+    /// The check and the insert share one write transaction, so two creates can't both pass it.
+    /// </summary>
     /// <exception cref="DuplicateNameException">Another account has the name, ignoring case.</exception>
+    /// <exception cref="ArgumentException">The name is empty or longer than <see cref="MaxNameLength"/>.</exception>
     public Account Create(string name, IReadOnlyCollection<int>? folderIds)
     {
         name = name.Trim();
         ArgumentException.ThrowIfNullOrEmpty(name);
+        if (name.Length > MaxNameLength) throw new ArgumentException($"A name is at most {MaxNameLength} characters.", nameof(name));
 
         using var connection = db.Open();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        if (FindByName(connection, transaction, name) is not null)
+            throw new DuplicateNameException($"There is already an account named \"{name}\".");
+
         int id;
         try
         {
@@ -52,20 +63,21 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
     public IReadOnlyList<Account> All()
     {
         using var connection = db.Open();
-        var folders = FoldersByUser(connection);
+        var folders = FoldersByUser(connection, null);
         return connection.Query<Row>(Select + " ORDER BY id").Select(row => row.ToAccount(folders)).ToList();
     }
 
     public Account? Get(int id)
     {
         using var connection = db.Open();
-        return connection.QuerySingleOrDefault<Row>(Select + " WHERE id = @id", new { id })?.ToAccount(FoldersByUser(connection));
+        return GetOn(connection, id);
     }
 
+    /// <summary>Ignores case (in any script) and surrounding spaces.</summary>
     public Account? ByName(string name)
     {
         using var connection = db.Open();
-        return connection.QuerySingleOrDefault<Row>(Select + " WHERE name = @name", new { name })?.ToAccount(FoldersByUser(connection));
+        return FindByName(connection, null, name.Trim()) is { } id ? GetOn(connection, id) : null;
     }
 
     public string? PasswordHash(int id)
@@ -82,8 +94,11 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
     }
 
     /// <summary>Null gives access to all folders, including ones added later.</summary>
+    /// <exception cref="InvalidOperationException">The account is the owner, who always reaches every folder.</exception>
     public void SetFolders(int id, IReadOnlyCollection<int>? folderIds)
     {
+        RefuseOwner(id, "The owner always reaches every folder.");
+
         using var connection = db.Open();
         using var transaction = connection.BeginTransaction();
         connection.Execute("UPDATE users SET all_folders = @all WHERE id = @id", new { id, all = folderIds is null ? 1 : 0 }, transaction);
@@ -92,8 +107,11 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
         transaction.Commit();
     }
 
+    /// <exception cref="InvalidOperationException">The account is the owner.</exception>
     public void SetDisabled(int id, bool disabled)
     {
+        RefuseOwner(id, "The owner account cannot be disabled.");
+
         using var connection = db.Open();
         connection.Execute("UPDATE users SET disabled = @disabled WHERE id = @id", new { id, disabled = disabled ? 1 : 0 });
     }
@@ -102,7 +120,7 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
     /// <exception cref="InvalidOperationException">The account is the owner.</exception>
     public void Remove(int id)
     {
-        if (id == LibraryDatabase.OwnerId) throw new InvalidOperationException("The owner account cannot be removed.");
+        RefuseOwner(id, "The owner account cannot be removed.");
 
         using var connection = db.Open();
         connection.Execute("DELETE FROM users WHERE id = @id AND role <> 'owner'", new { id });
@@ -117,6 +135,22 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
     public Viewer ViewerOf(Account account) =>
         new(account.Id, account.FolderIds?.ToHashSet());
 
+    private static void RefuseOwner(int id, string message)
+    {
+        if (id == LibraryDatabase.OwnerId) throw new InvalidOperationException(message);
+    }
+
+    private static Account? GetOn(SqliteConnection connection, int id) =>
+        connection.QuerySingleOrDefault<Row>(Select + " WHERE id = @id", new { id })?.ToAccount(FoldersByUser(connection, id));
+
+    // The accounts table is small, so comparing in code costs nothing and handles every script.
+    private static int? FindByName(SqliteConnection connection, SqliteTransaction? transaction, string name)
+    {
+        foreach (var row in connection.Query<NameRow>("SELECT id AS Id, name AS Name FROM users", transaction: transaction))
+            if (string.Equals(row.Name, name, StringComparison.OrdinalIgnoreCase)) return (int)row.Id;
+        return null;
+    }
+
     private static void WriteFolders(SqliteConnection connection, SqliteTransaction transaction, int id, IReadOnlyCollection<int>? folderIds)
     {
         if (folderIds is null) return;
@@ -124,12 +158,20 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
             connection.Execute("INSERT INTO user_folders(user_id, folder_id) VALUES (@id, @folderId)", new { id, folderId }, transaction);
     }
 
-    private static Dictionary<int, List<int>> FoldersByUser(SqliteConnection connection) =>
-        connection.Query<FolderRow>("SELECT user_id AS UserId, folder_id AS FolderId FROM user_folders ORDER BY folder_id")
+    private static Dictionary<int, List<int>> FoldersByUser(SqliteConnection connection, int? userId) =>
+        connection.Query<FolderRow>(
+                "SELECT user_id AS UserId, folder_id AS FolderId FROM user_folders WHERE @userId IS NULL OR user_id = @userId ORDER BY folder_id",
+                new { userId })
             .GroupBy(x => x.UserId).ToDictionary(g => (int)g.Key, g => g.Select(x => (int)x.FolderId).ToList());
 
     private static DateTime ParseTime(string text) =>
         DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private sealed class NameRow
+    {
+        public long Id { get; set; }
+        public string Name { get; set; } = "";
+    }
 
     private sealed class FolderRow
     {

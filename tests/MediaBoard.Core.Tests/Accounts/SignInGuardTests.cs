@@ -67,6 +67,31 @@ public sealed class SignInGuardTests
     }
 
     [Fact]
+    public void Success_DoesNotLiftActiveLock()
+    {
+        Fail("anna", "10.0.0.1", 5);
+
+        _guard.RecordSuccess("anna");
+
+        Assert.True(_guard.IsLocked("anna", "10.0.0.9"));
+        Assert.Equal(["anna"], _guard.LockedNames());
+    }
+
+    [Fact]
+    public void Guard_CapsEntries_KeepsLockedOnes()
+    {
+        Fail("anna", "10.0.0.1", 5);
+
+        for (var i = 0; i < SignInGuard.MaxEntries * 2; i++) _guard.RecordFailure("name" + i, "addr" + i);
+
+        Assert.True(_guard.IsLocked("anna", "fresh"));
+        Assert.Equal(["anna"], _guard.LockedNames());
+        // Room was made for newcomers, so a new name can still be counted and locked.
+        Fail("late", "addr-late", 5);
+        Assert.True(_guard.IsLocked("late", "fresh"));
+    }
+
+    [Fact]
     public void Guard_ForgetsOldFailures()
     {
         Fail("anna", "10.0.0.1", 4);
