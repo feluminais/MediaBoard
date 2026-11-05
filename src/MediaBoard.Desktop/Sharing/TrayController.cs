@@ -110,8 +110,11 @@ public sealed class TrayController
         return true;
     }
 
+    /// <summary>Does nothing once the window has closed, since a second start can ask during exit.</summary>
     public void ShowWindow()
     {
+        if (_closed) return;
+
         if (!_window.IsVisible) _window.Show();
         if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
         _window.Activate();
@@ -120,8 +123,9 @@ public sealed class TrayController
     /// <summary>Asks whatever the reasons need asked, then closes the window for real. Saying no changes nothing.</summary>
     public async Task QuitAsync()
     {
-        // The tray menu still works behind an open dialog, and a second question would stack on the first.
-        if (_asking) return;
+        // The tray menu still works behind an open dialog. A second question would stack on the first, and a second
+        // close would pull the window out from under the player prompt.
+        if (_asking || _quitting) return;
 
         _asking = true;
         try

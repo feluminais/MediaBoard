@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using MediaBoard.Core.Accounts;
@@ -24,6 +26,7 @@ public enum CheckResult { Reachable, NotConclusive, NoAddress }
 /// <param name="invites">Where <see cref="CreateInvite"/> gets its codes.</param>
 /// <param name="streams">Who is watching.</param>
 /// <param name="hub">Where the status bar reads from, and where failures are logged.</param>
+/// <param name="searches">What the server keeps per viewer, dropped when it stops.</param>
 /// <param name="server">Builds the server. Called on the first start.</param>
 /// <param name="isPublicNetwork">Whether Windows treats this PC's connection as Public, or null to ask Windows.</param>
 /// <param name="loopbackOnly">For tests: see <see cref="SharingOptions.LoopbackOnly"/>.</param>
@@ -33,6 +36,7 @@ public sealed class SharingController(
     InviteStore invites,
     StreamRegistry streams,
     ActivityHub hub,
+    ViewerSearches searches,
     Func<SharingServer> server,
     Func<bool>? isPublicNetwork = null,
     bool loopbackOnly = false)
@@ -55,7 +59,7 @@ public sealed class SharingController(
 
     public SharingStatus Status => _state.Status;
 
-    /// <summary>Why sharing is <see cref="SharingStatus.Failed"/>, and what to do about it.</summary>
+    /// <summary>Why sharing is <see cref="SharingStatus.Failed"/> or a certificate replace failed, and what to do about it.</summary>
     public string? Problem => _state.Problem;
 
     /// <summary>Sharing is on, but something will get in the way of connections.</summary>
@@ -140,23 +144,28 @@ public sealed class SharingController(
 
     /// <summary>
     /// Makes a new certificate, so every device needs a new invite. The server comes back on the new one if it was on,
-    /// or if it was failing, since the old certificate may be why.
+    /// or if it was failing, since the old certificate may be why. The new one is made first: if that fails the status
+    /// stays as it was, streams play on, and <see cref="Problem"/> says what happened.
     /// </summary>
     public Task ReplaceCertificateAsync() => InTurnAsync(async () =>
     {
-        var restart = Status != SharingStatus.Off;
-        await StopAsync().ConfigureAwait(false);
         try
         {
             certificates.Replace().Dispose();
         }
         catch (Exception e) when (e is CryptographicException or IOException or UnauthorizedAccessException)
         {
-            Fail("Couldn't replace the sharing certificate. The old one is still in place.");
+            const string problem = "Couldn't replace the sharing certificate. The old one is still in place.";
+            Trace.TraceWarning($"Replacing the certificate failed: {e.GetType().Name}");
+            hub.Log(ActivityLevel.Error, problem);
+            Set(_state with { Problem = problem });
             return;
         }
 
+        var restart = Status != SharingStatus.Off;
+        await StopAsync().ConfigureAwait(false);
         if (restart) await StartAsync().ConfigureAwait(false);
+        else Set(new State(SharingStatus.Off));
     });
 
     private static string NameOf(SharingSettings sharing) => sharing.ServerName ?? $"{Environment.UserName}'s library";
@@ -170,21 +179,33 @@ public sealed class SharingController(
         if (!text.Contains("://", StringComparison.Ordinal)) text = "https://" + text;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return null;
 
-        return string.Create(CultureInfo.InvariantCulture, $"{uri.Host}:{(uri.IsDefaultPort ? port : uri.Port)}");
+        // Uri can't tell a typed :443 from no port at all, and a router can forward 443 just as well as any other.
+        var hostAndPort = text.Split('/')[2];
+        var typedPort = hostAndPort.EndsWith(string.Create(CultureInfo.InvariantCulture, $":{uri.Port}"), StringComparison.Ordinal);
+        return string.Create(CultureInfo.InvariantCulture, $"{uri.Host}:{(typedPort ? uri.Port : port)}");
     }
 
-    private Task InTurnAsync(Func<Task> change) => Task.Run(async () =>
+    private static string StartProblem(Exception failure, int port) => failure switch
+    {
+        PortInUseException => string.Create(CultureInfo.InvariantCulture, $"Another program is using port {port}. Close it or choose another port."),
+        IOException or SocketException or UnauthorizedAccessException or ArgumentOutOfRangeException =>
+            string.Create(CultureInfo.InvariantCulture, $"Sharing couldn't start on port {port}. Check the port and try again."),
+        _ => "Sharing couldn't start. Restart MediaBoard to try again.",
+    };
+
+    // The turn is taken here on the caller's thread, so changes run in the order they were asked for.
+    private async Task InTurnAsync(Func<Task> change)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await change().ConfigureAwait(false);
+            await Task.Run(change).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
-    });
+    }
 
     // Two loads of one PFX can share a key, and disposing either deletes it, so the live certificate is the one to read.
     private string CurrentFingerprint()
@@ -208,6 +229,7 @@ public sealed class SharingController(
     {
         var sharing = settings.Load().Sharing;
         Set(new State(SharingStatus.Starting));
+        var warning = OnPublicNetwork() ? PublicNetworkWarning : null;
 
         X509Certificate2 certificate;
         try
@@ -216,6 +238,7 @@ public sealed class SharingController(
         }
         catch (Exception e) when (e is CryptographicException or IOException or UnauthorizedAccessException)
         {
+            Trace.TraceWarning($"Opening the certificate failed: {e.GetType().Name}");
             Fail(CertificateProblem);
             return;
         }
@@ -229,9 +252,9 @@ public sealed class SharingController(
         catch (Exception e)
         {
             certificate.Dispose();
-            Fail(e is PortInUseException
-                ? string.Create(CultureInfo.InvariantCulture, $"Another program is using port {sharing.Port}. Close it or choose another port.")
-                : string.Create(CultureInfo.InvariantCulture, $"Sharing couldn't start on port {sharing.Port}. Check the port and try again."));
+            // The type alone: a message can hold a path.
+            Trace.TraceWarning($"Sharing didn't start: {e.GetType().Name}");
+            Fail(StartProblem(e, sharing.Port));
             return;
         }
 
@@ -240,7 +263,7 @@ public sealed class SharingController(
         _listening = true;
         streams.Changed += OnStreamsChanged;
         Remember(on: true);
-        Set(new State(SharingStatus.On, Warning: _isPublicNetwork() ? PublicNetworkWarning : null));
+        Set(new State(SharingStatus.On, Warning: warning));
     }
 
     // Called in turn. The server closes its own streams and events as it stops.
@@ -255,12 +278,28 @@ public sealed class SharingController(
         catch (Exception e)
         {
             // It clears its host before stopping it, so it's stopped either way.
-            hub.Log(ActivityLevel.Warning, $"Sharing didn't stop cleanly: {e.GetType().Name}");
+            Trace.TraceWarning($"Sharing didn't stop cleanly: {e.GetType().Name}");
+            hub.Log(ActivityLevel.Warning, "Sharing didn't stop cleanly.");
         }
 
         _listening = false;
         _certificate?.Dispose();
         _certificate = null;
+        searches.Clear();
+    }
+
+    // Only a warning hangs on this, so nothing it does may get in the way of starting.
+    private bool OnPublicNetwork()
+    {
+        try
+        {
+            return _isPublicNetwork();
+        }
+        catch (Exception e)
+        {
+            Trace.TraceWarning($"Reading the network profile failed: {e.GetType().Name}");
+            return false;
+        }
     }
 
     private void Fail(string problem)

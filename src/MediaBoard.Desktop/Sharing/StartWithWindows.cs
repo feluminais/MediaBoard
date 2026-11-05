@@ -33,19 +33,32 @@ public sealed class StartWithWindows(SettingsStore settings, IRunKey key, string
 
     public static bool IsTrayStart(IEnumerable<string>? args) => args?.Contains(TrayArgument, StringComparer.Ordinal) ?? false;
 
-    /// <returns>False when Windows refused, which is logged. The setting then stays as it was.</returns>
+    /// <returns>False when the key or the settings file refused, which is logged. The two then stay as they were.</returns>
     public bool Set(bool on)
     {
         try
         {
-            key.Set(on ? $"\"{program}\" {TrayArgument}" : null);
-            settings.Update(s => s with { Sharing = s.Sharing with { StartWithWindows = on } });
+            key.Set(CommandFor(on));
+            try
+            {
+                settings.Update(s => s with { Sharing = s.Sharing with { StartWithWindows = on } });
+            }
+            catch (Exception e) when (IsRefusal(e))
+            {
+                key.Set(CommandFor(!on));
+                throw;
+            }
+
             return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or SecurityException)
+        catch (Exception e) when (IsRefusal(e))
         {
             hub.Log(ActivityLevel.Error, "Couldn't change Start with Windows.");
             return false;
         }
     }
+
+    private static bool IsRefusal(Exception e) => e is IOException or UnauthorizedAccessException or SecurityException;
+
+    private string? CommandFor(bool on) => on ? $"\"{program}\" {TrayArgument}" : null;
 }

@@ -42,12 +42,13 @@ internal sealed class SharingWorld : IAsyncDisposable
                 sp.GetRequiredService<InviteStore>(),
                 sp.GetRequiredService<StreamRegistry>(),
                 sp.GetRequiredService<ActivityHub>(),
+                sp.GetRequiredService<ViewerSearches>(),
                 () =>
                 {
                     Interlocked.Increment(ref _serversBuilt);
-                    return sp.GetRequiredService<SharingServer>();
+                    return ServerFailure is { } failure ? throw failure : sp.GetRequiredService<SharingServer>();
                 },
-                () => OnPublicNetwork,
+                () => NetworkFailure is { } failure ? throw failure : OnPublicNetwork,
                 loopbackOnly: true));
         });
         Settings.Update(s => s with { Sharing = s.Sharing with { Port = Port } });
@@ -60,6 +61,12 @@ internal sealed class SharingWorld : IAsyncDisposable
     public int Port { get; } = FreePort();
 
     public bool OnPublicNetwork { get; set; }
+
+    /// <summary>What the network check throws, when set.</summary>
+    public Exception? NetworkFailure { get; set; }
+
+    /// <summary>What building the server throws, when set: a failure that has nothing to do with binding.</summary>
+    public Exception? ServerFailure { get; set; }
 
     public FakeRunKey RunKey { get; } = new();
 
@@ -74,6 +81,10 @@ internal sealed class SharingWorld : IAsyncDisposable
     public StreamRegistry Streams => Services.GetRequiredService<StreamRegistry>();
 
     public ActivityHub Hub => Services.GetRequiredService<ActivityHub>();
+
+    public AccountService Accounts => Services.GetRequiredService<AccountService>();
+
+    public ViewerSearches Searches => Services.GetRequiredService<ViewerSearches>();
 
     public Uri Ping => new($"https://127.0.0.1:{Port}/api/v1/ping");
 

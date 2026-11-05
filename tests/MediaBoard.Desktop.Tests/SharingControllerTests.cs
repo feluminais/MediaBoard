@@ -118,6 +118,70 @@ public sealed class SharingControllerTests
     }
 
     [Fact]
+    public async Task SetOn_FailureAwayFromBinding_DoesNotBlameThePort_AndTracesTheCause()
+    {
+        await using var world = new SharingWorld { ServerFailure = new NotSupportedException("Nothing to see.") };
+        world.OpenDatabase();
+        using var trace = new TraceCapture();
+
+        await world.Sharing.SetOnAsync(true);
+
+        Assert.Equal(SharingStatus.Failed, world.Sharing.Status);
+        Assert.DoesNotContain("port", world.Sharing.Problem, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(trace.Lines, line => line.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+        Assert.DoesNotContain(world.Hub.Recent, e => e.Message.Contains(nameof(NotSupportedException), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SetOn_NetworkCheckThrows_StillStarts()
+    {
+        await using var world = new SharingWorld { NetworkFailure = new UnauthorizedAccessException("No.") };
+        world.OpenDatabase();
+
+        await world.Sharing.SetOnAsync(true);
+
+        Assert.Equal(SharingStatus.On, world.Sharing.Status);
+        Assert.Null(world.Sharing.Warning);
+    }
+
+    [Fact]
+    public async Task Changes_RunInTheOrderTheyWereAsked()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+
+        for (var round = 0; round < 5; round++)
+        {
+            await Task.WhenAll(world.Sharing.SetOnAsync(true), world.Sharing.SetOnAsync(false), world.Sharing.SetOnAsync(true));
+
+            Assert.Equal(SharingStatus.On, world.Sharing.Status);
+            await world.PingAsync();
+
+            await Task.WhenAll(world.Sharing.SetOnAsync(false), world.Sharing.SetOnAsync(true), world.Sharing.SetOnAsync(false));
+
+            Assert.Equal(SharingStatus.Off, world.Sharing.Status);
+            await world.AssertRefusedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task StopForExit_DuringAStart_EndsStopped()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+
+        for (var round = 0; round < 5; round++)
+        {
+            await Task.WhenAll(world.Sharing.SetOnAsync(true), world.Sharing.StopForExitAsync());
+
+            Assert.Equal(SharingStatus.Off, world.Sharing.Status);
+            await world.AssertRefusedAsync();
+        }
+
+        Assert.True(world.Settings.Load().Sharing.On);
+    }
+
+    [Fact]
     public async Task SetOff_AfterFailure_ClearsTheProblem()
     {
         await using var world = new SharingWorld();
@@ -288,6 +352,9 @@ public sealed class SharingControllerTests
 
     [Theory]
     [InlineData("media.example.org:8443", "media.example.org:8443")] // a router can forward a different outside port
+    [InlineData("media.example.org:443", "media.example.org:443")] // the default for https, but the owner typed it
+    [InlineData("https://media.example.org:443/", "media.example.org:443")]
+    [InlineData("[2001:db8::1]:443", "[2001:db8::1]:443")]
     [InlineData("  media.example.org  ", "media.example.org:{port}")]
     [InlineData("https://media.example.org/", "media.example.org:{port}")]
     [InlineData("[2001:db8::1]", "[2001:db8::1]:{port}")]
@@ -424,6 +491,47 @@ public sealed class SharingControllerTests
     }
 
     [Fact]
+    public async Task ReplaceCertificate_FailsWhileOn_KeepsServingTheOldOne_AndSaysSo()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+        await world.Sharing.SetOnAsync(true);
+        await world.PingAsync();
+        var before = world.ServedFingerprint;
+        var body = await world.OpenBodyAsync("/api/v1/events", world.NewDevice().Token);
+        BlockCertificateSaves(world);
+
+        await world.Sharing.ReplaceCertificateAsync();
+
+        Assert.Equal(SharingStatus.On, world.Sharing.Status);
+        Assert.Contains("old one", world.Sharing.Problem);
+        await world.PingAsync();
+        Assert.Equal(before, world.ServedFingerprint);
+        using var read = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => body.ReadAsync(new byte[16], read.Token).AsTask()); // still open
+        Assert.Contains(world.Hub.Recent, e => e.Level == ActivityLevel.Error && e.Message == world.Sharing.Problem);
+    }
+
+    [Fact]
+    public async Task ReplaceCertificate_FailsWhileOff_StaysOff_EvenAskedTwice()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+        BlockCertificateSaves(world);
+
+        await world.Sharing.ReplaceCertificateAsync();
+
+        Assert.Equal(SharingStatus.Off, world.Sharing.Status);
+        Assert.Contains("old one", world.Sharing.Problem);
+
+        await world.Sharing.ReplaceCertificateAsync();
+
+        Assert.Equal(SharingStatus.Off, world.Sharing.Status);
+        Assert.False(world.Settings.Load().Sharing.On);
+        await world.AssertRefusedAsync();
+    }
+
+    [Fact]
     public async Task ReplaceCertificate_WhileOff_StaysOff()
     {
         await using var world = new SharingWorld();
@@ -471,6 +579,13 @@ public sealed class SharingControllerTests
         await world.Sharing.SetOnAsync(false);
 
         Assert.Null(world.Sharing.Warning);
+    }
+
+    // A folder in the certificate's place: creating the file works, moving it there doesn't.
+    private static void BlockCertificateSaves(SharingWorld world)
+    {
+        File.Delete(world.Paths.Certificate);
+        Directory.CreateDirectory(world.Paths.Certificate);
     }
 
     [AvaloniaFact]
@@ -522,6 +637,37 @@ public sealed class SharingControllerTests
         var second = searches.For(new Viewer(2, after?.ToHashSet()));
 
         Assert.NotSame(first, second); // a kept search would answer from the folders the person had before
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Searches_ClosedAccount_IsDropped(bool remove)
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+        var account = world.Accounts.AddPerson("Anna", null);
+        var viewer = new Viewer(account.Id, null);
+        var kept = world.Searches.For(viewer);
+        Assert.Same(kept, world.Searches.For(viewer));
+
+        if (remove) world.Accounts.Remove(account.Id);
+        else world.Accounts.Disable(account.Id, true);
+
+        Assert.NotSame(kept, world.Searches.For(viewer)); // the same object here would mean it stayed in memory
+    }
+
+    [Fact]
+    public async Task Searches_ServerStops_AllAreDropped()
+    {
+        await using var world = new SharingWorld();
+        world.OpenDatabase();
+        await world.Sharing.SetOnAsync(true);
+        var kept = world.Searches.For(new Viewer(2, null));
+
+        await world.Sharing.SetOnAsync(false);
+
+        Assert.NotSame(kept, world.Searches.For(new Viewer(2, null)));
     }
 
     // ---- Close to tray ----
@@ -650,6 +796,18 @@ public sealed class SharingControllerTests
     }
 
     [AvaloniaFact]
+    public void ShowWindow_AfterTheWindowClosed_DoesNothing()
+    {
+        var (window, tray, _) = Shell(new FakeTrayReason());
+        window.Show();
+        window.Close();
+
+        tray.ShowWindow(); // a second start asking during exit; a closed window can't be shown again
+
+        Assert.False(window.IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Tray_Open_ShowsTheWindow()
     {
         var reason = new FakeTrayReason();
@@ -703,6 +861,27 @@ public sealed class SharingControllerTests
         reason.Set(false);
         Ui.Flush();
         window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Quit_Twice_ClosesOnce()
+    {
+        var reason = new FakeTrayReason();
+        var (window, tray, _) = Shell(reason);
+        var closing = 0;
+        window.Closing += (_, e) =>
+        {
+            closing++;
+            e.Cancel = true; // the player prompt holds the close like this while its dialog is up
+        };
+        window.Show();
+        reason.Set(true);
+        Ui.Flush();
+
+        await tray.QuitAsync();
+        await tray.QuitAsync();
+
+        Assert.Equal(1, closing);
     }
 
     [AvaloniaFact]
@@ -823,10 +1002,45 @@ public sealed class SharingControllerTests
         Assert.Contains(world.Hub.Recent, e => e.Level == ActivityLevel.Error);
     }
 
+    [Fact]
+    public async Task StartWithWindows_SettingsWontSave_PutsTheKeyBack()
+    {
+        await using var world = new SharingWorld();
+        var start = new StartWithWindows(world.Settings, world.RunKey, @"C:\Apps\MediaBoard.exe", world.Hub);
+        using var locked = new FileStream(world.Paths.Settings, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        Assert.False(start.Set(true));
+
+        Assert.Null(world.RunKey.Command); // on again next sign-in, with the setting saying off, is the failure here
+        Assert.Contains(world.Hub.Recent, e => e.Level == ActivityLevel.Error);
+    }
+
     [Theory]
     [InlineData(new[] { "--tray" }, true)]
     [InlineData(new string[0], false)]
     [InlineData(new[] { "--other" }, false)]
     public void IsTrayStart_ReadsTheArgument(string[] args, bool expected) =>
         Assert.Equal(expected, StartWithWindows.IsTrayStart(args));
+
+    private sealed class TraceCapture : TraceListener
+    {
+        public TraceCapture() => Trace.Listeners.Add(this);
+
+        public List<string> Lines { get; } = [];
+
+        public override void Write(string? message)
+        {
+        }
+
+        public override void WriteLine(string? message)
+        {
+            lock (Lines) Lines.Add(message ?? "");
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Trace.Listeners.Remove(this);
+            base.Dispose(disposing);
+        }
+    }
 }

@@ -253,9 +253,16 @@ public static class Composition
             var titles = sp.GetRequiredService<TitleStore>();
             var access = sp.GetRequiredService<ViewerAccess>();
             var searches = new ViewerSearches(viewer => new SearchService(owner.ForViewer(viewer), provider, connectivity, titles, access, viewer));
-            return new SharedLibrary(
-                owner, access, sp.GetRequiredService<FileStore>(), sp.GetRequiredService<ProgressStore>(), searches.For, sp.GetRequiredService<ImageCache>());
+            sp.GetRequiredService<AccountService>().AccountClosed += searches.Forget;
+            return searches;
         });
+        services.AddSingleton(sp => new SharedLibrary(
+            sp.GetRequiredService<LocalLibrary>(),
+            sp.GetRequiredService<ViewerAccess>(),
+            sp.GetRequiredService<FileStore>(),
+            sp.GetRequiredService<ProgressStore>(),
+            sp.GetRequiredService<ViewerSearches>().For,
+            sp.GetRequiredService<ImageCache>()));
         services.AddSingleton(sp => new SharingServer(
             sp.GetRequiredService<AccountService>(),
             sp.GetRequiredService<AccountStore>(),
@@ -269,6 +276,7 @@ public static class Composition
             sp.GetRequiredService<InviteStore>(),
             sp.GetRequiredService<StreamRegistry>(),
             sp.GetRequiredService<ActivityHub>(),
+            sp.GetRequiredService<ViewerSearches>(),
             sp.GetRequiredService<SharingServer>));
         services.AddSingleton<ITrayReason>(sp => new SharingTrayReason(sp.GetRequiredService<SharingController>()));
 

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using MediaBoard.Desktop.Sharing;
 using MediaBoard.Desktop.Sizing;
 using MediaBoard.Desktop.ViewModels;
@@ -36,15 +37,17 @@ public partial class App : Application
             _ = new UiSizeController(window, _services.GetRequiredService<Core.Settings.SettingsStore>(), Resources);
             var dialogs = _services.GetRequiredService<Dialogs>();
             dialogs.Owner = window;
-            _tray = new TrayController(window, _services.GetServices<ITrayReason>(), question => dialogs.ConfirmAsync(question, "Quit"));
-            TrayIcon.SetIcons(this, [_tray.Icon]);
+            var tray = new TrayController(window, _services.GetServices<ITrayReason>(), question => dialogs.ConfirmAsync(question, "Quit"));
+            _tray = tray;
+            TrayIcon.SetIcons(this, [tray.Icon]);
+            Program.Instance?.Listen(() => Dispatcher.UIThread.Post(tray.ShowWindow));
             window.Closing += OnMainWindowClosing;
             desktop.Exit += OnExit;
 
             var host = _services.GetRequiredService<AppHost>();
             host.Start();
             // The lifetime shows whatever is set as MainWindow, so a start in the tray leaves it unset.
-            if (StartWithWindows.IsTrayStart(desktop.Args)) _ = _tray.StartHiddenAsync(host.SharingSettled);
+            if (StartWithWindows.IsTrayStart(desktop.Args)) _ = tray.StartHiddenAsync(host.SharingSettled);
             else desktop.MainWindow = window;
         }
 

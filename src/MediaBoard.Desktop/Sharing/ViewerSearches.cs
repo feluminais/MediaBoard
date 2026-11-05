@@ -26,6 +26,17 @@ public sealed class ViewerSearches(Func<Viewer, ISearchService> build)
         }
     }
 
+    /// <summary>Drops what's kept for an account that can't sign in any more. It won't make another request to replace it.</summary>
+    public void Forget(int userId)
+    {
+        lock (_gate) _kept.Remove(userId);
+    }
+
+    public void Clear()
+    {
+        lock (_gate) _kept.Clear();
+    }
+
     private static bool SameFolders(Viewer a, Viewer b) =>
         a.AllowedFolderIds is null || b.AllowedFolderIds is null
             ? a.AllowedFolderIds is null && b.AllowedFolderIds is null
