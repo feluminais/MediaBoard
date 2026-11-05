@@ -122,9 +122,9 @@ public sealed class LocalLibraryTests : IDisposable
     private void Played(int fileId, double position, double duration, bool watched, int hour, int minute = 0) =>
         Sql(
             """
-            INSERT INTO progress(file_id, position_s, duration_s, watched, last_played)
-            VALUES (@fileId, @position, @duration, @watched, @at)
-            ON CONFLICT(file_id) DO UPDATE SET position_s = excluded.position_s, duration_s = excluded.duration_s,
+            INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
+            VALUES (1, @fileId, @position, @duration, @watched, @at)
+            ON CONFLICT(user_id, file_id) DO UPDATE SET position_s = excluded.position_s, duration_s = excluded.duration_s,
                 watched = excluded.watched, last_played = excluded.last_played
             """,
             new { fileId, position, duration, watched = watched ? 1 : 0, at = Utc(hour, minute) });

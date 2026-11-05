@@ -12,6 +12,9 @@ public sealed record Progress(int FileId, double PositionS, double DurationS, bo
 /// </summary>
 public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider = null)
 {
+    // Every row belongs to the owner until the methods take a user id.
+    private const int UserId = LibraryDatabase.OwnerId;
+
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     public Progress? Get(int fileId)
@@ -19,7 +22,7 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         using var connection = db.Open();
         return connection.QuerySingleOrDefault<Row>(
             "SELECT file_id AS FileId, position_s AS PositionS, duration_s AS DurationS, watched AS Watched, " +
-            "last_played AS LastPlayed FROM progress WHERE file_id = @fileId", new { fileId })?.ToProgress();
+            "last_played AS LastPlayed FROM progress WHERE user_id = @UserId AND file_id = @fileId", new { UserId, fileId })?.ToProgress();
     }
 
     /// <summary>
@@ -31,14 +34,14 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         using var connection = db.Open();
         connection.Execute(
             """
-            INSERT INTO progress(file_id, position_s, duration_s, watched, last_played)
-            VALUES (@fileId, @positionS, @durationS, 0, @now)
-            ON CONFLICT(file_id) DO UPDATE SET
+            INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
+            VALUES (@UserId, @fileId, @positionS, @durationS, 0, @now)
+            ON CONFLICT(user_id, file_id) DO UPDATE SET
                 position_s = excluded.position_s,
                 duration_s = CASE WHEN excluded.duration_s > 0 THEN excluded.duration_s ELSE progress.duration_s END,
                 last_played = excluded.last_played
             """,
-            new { fileId, positionS, durationS, now = Now() });
+            new { UserId, fileId, positionS, durationS, now = Now() });
     }
 
     /// <summary>
@@ -52,15 +55,17 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         {
             connection.Execute(
                 """
-                INSERT INTO progress(file_id, position_s, duration_s, watched, last_played)
-                VALUES (@fileId, 0, 0, 1, @now)
-                ON CONFLICT(file_id) DO UPDATE SET watched = 1
+                INSERT INTO progress(user_id, file_id, position_s, duration_s, watched, last_played)
+                VALUES (@UserId, @fileId, 0, 0, 1, @now)
+                ON CONFLICT(user_id, file_id) DO UPDATE SET watched = 1
                 """,
-                new { fileId, now = Now() });
+                new { UserId, fileId, now = Now() });
         }
         else
         {
-            connection.Execute("UPDATE progress SET watched = 0, position_s = 0 WHERE file_id = @fileId", new { fileId });
+            connection.Execute(
+                "UPDATE progress SET watched = 0, position_s = 0 WHERE user_id = @UserId AND file_id = @fileId",
+                new { UserId, fileId });
         }
     }
 
@@ -73,10 +78,10 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         using var connection = db.Open();
         connection.Execute(
             """
-            INSERT INTO continue_dismissed(title_id, played_at) VALUES (@titleId, @playedAt)
-            ON CONFLICT(title_id) DO UPDATE SET played_at = excluded.played_at
+            INSERT INTO continue_dismissed(user_id, title_id, played_at) VALUES (@UserId, @titleId, @playedAt)
+            ON CONFLICT(user_id, title_id) DO UPDATE SET played_at = excluded.played_at
             """,
-            new { titleId, playedAt = FileStore.FormatTime(new DateTimeOffset(DateTime.SpecifyKind(playedAt, DateTimeKind.Utc))) });
+            new { UserId, titleId, playedAt = FileStore.FormatTime(new DateTimeOffset(DateTime.SpecifyKind(playedAt, DateTimeKind.Utc))) });
     }
 
     /// <summary>The ids of the episodes covered by a watched file, each once.</summary>
@@ -85,7 +90,8 @@ public sealed class ProgressStore(LibraryDatabase db, TimeProvider? timeProvider
         using var connection = db.Open();
         return connection.Query<int>(
             "SELECT DISTINCT fe.episode_id FROM file_episodes fe " +
-            "JOIN progress p ON p.file_id = fe.file_id WHERE p.watched = 1 ORDER BY fe.episode_id").ToList();
+            "JOIN progress p ON p.file_id = fe.file_id WHERE p.user_id = @UserId AND p.watched = 1 ORDER BY fe.episode_id",
+            new { UserId }).ToList();
     }
 
     private string Now() => FileStore.FormatTime(_time.GetUtcNow());

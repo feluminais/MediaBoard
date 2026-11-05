@@ -48,7 +48,7 @@ public sealed class LibraryScannerTests : IDisposable
     {
         using var conn = _db.Open();
         conn.Execute(
-            "INSERT INTO progress(file_id, position_s, duration_s, watched) VALUES (@fileId, 120, 600, 0)",
+            "INSERT INTO progress(user_id, file_id, position_s, duration_s, watched) VALUES (1, @fileId, 120, 600, 0)",
             new { fileId });
     }
 

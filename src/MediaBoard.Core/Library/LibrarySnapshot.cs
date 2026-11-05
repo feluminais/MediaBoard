@@ -172,7 +172,8 @@ internal sealed class LibrarySnapshot
         var byId = files.ToDictionary(f => f.Id);
 
         foreach (var row in connection.Query<ProgressDto>(
-                     "SELECT file_id AS FileId, position_s AS PositionS, duration_s AS DurationS, watched, last_played AS LastPlayed FROM progress"))
+                     "SELECT file_id AS FileId, position_s AS PositionS, duration_s AS DurationS, watched, last_played AS LastPlayed " +
+                     $"FROM progress WHERE user_id = {LibraryDatabase.OwnerId}"))
         {
             if (!byId.TryGetValue((int)row.FileId, out var file)) continue;
             file.Progress = new Progress(
@@ -198,7 +199,8 @@ internal sealed class LibrarySnapshot
                           || (overrides.TryGetValue((TargetKind.File, file.Id), out var o) && o.Hidden);
         }
 
-        var dismissed = connection.Query<DismissedDto>("SELECT title_id AS TitleId, played_at AS PlayedAt FROM continue_dismissed")
+        var dismissed = connection.Query<DismissedDto>("SELECT title_id AS TitleId, played_at AS PlayedAt " +
+                                                         $"FROM continue_dismissed WHERE user_id = {LibraryDatabase.OwnerId}")
             .ToDictionary(r => (int)r.TitleId, r => ParseTime(r.PlayedAt));
 
         return new LibrarySnapshot(folders, files, fileCountByFolder, titleCountByFolder, titles, overrides, dismissed);

@@ -29,12 +29,12 @@ public sealed class LibraryDatabaseTests : IDisposable
 
         using (var first = db.Open())
         {
-            Assert.Equal(3, first.ExecuteScalar<int>("PRAGMA user_version"));
+            Assert.Equal(4, first.ExecuteScalar<int>("PRAGMA user_version"));
             first.Execute("INSERT INTO folders(path, enabled, added_at) VALUES ('X:\\Media', 1, '2026-01-01')");
         }
 
         using var second = db.Open();
-        Assert.Equal(3, second.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(4, second.ExecuteScalar<int>("PRAGMA user_version"));
         // A second open must not re-run the schema.
         Assert.Equal(1, second.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
     }
@@ -46,7 +46,7 @@ public sealed class LibraryDatabaseTests : IDisposable
             conn.Execute("INSERT INTO folders(path, enabled, added_at) VALUES ('X:\\Media', 1, '2026-01-01')");
 
         using var again = new LibraryDatabase(DbPath).Open();
-        Assert.Equal(3, again.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(4, again.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal(1, again.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
     }
 
@@ -60,13 +60,14 @@ public sealed class LibraryDatabaseTests : IDisposable
                 "INSERT INTO files(folder_id, rel_path, size, mtime, first_seen, missing, parsed_json, status) " +
                 "VALUES (@folderId, 'a.mkv', 1, 1, '2026-01-01', 0, '{}', 'matched')", new { folderId });
             // What a database written before the parser version existed looks like.
+            SchemaV4Tests.DowngradeToV3(conn);
             conn.Execute("DROP TABLE meta; DROP TABLE continue_dismissed; PRAGMA user_version = 1;");
         }
 
         SqliteConnection.ClearAllPools();
         using var again = new LibraryDatabase(DbPath).Open();
 
-        Assert.Equal(3, again.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(4, again.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal("matched", again.ExecuteScalar<string>("SELECT status FROM files WHERE rel_path = 'a.mkv'"));
         Assert.Null(again.ExecuteScalar<string?>("SELECT value FROM meta WHERE key = 'parser_version'"));
     }
@@ -77,13 +78,14 @@ public sealed class LibraryDatabaseTests : IDisposable
         using (var conn = new LibraryDatabase(DbPath).Open())
         {
             conn.Execute(InsertFolder);
+            SchemaV4Tests.DowngradeToV3(conn);
             conn.Execute("DROP TABLE continue_dismissed; PRAGMA user_version = 2;");
         }
 
         SqliteConnection.ClearAllPools();
         using var again = new LibraryDatabase(DbPath).Open();
 
-        Assert.Equal(3, again.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(4, again.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal(1, again.ExecuteScalar<int>("SELECT COUNT(*) FROM folders"));
         Assert.Equal(0, again.ExecuteScalar<int>("SELECT COUNT(*) FROM continue_dismissed"));
     }
@@ -94,7 +96,7 @@ public sealed class LibraryDatabaseTests : IDisposable
         await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() =>
         {
             using var conn = new LibraryDatabase(DbPath).Open();
-            Assert.Equal(3, conn.ExecuteScalar<int>("PRAGMA user_version"));
+            Assert.Equal(4, conn.ExecuteScalar<int>("PRAGMA user_version"));
         })));
     }
 

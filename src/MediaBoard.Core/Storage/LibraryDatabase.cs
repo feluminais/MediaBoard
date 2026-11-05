@@ -10,8 +10,11 @@ namespace MediaBoard.Core.Storage;
 /// </summary>
 public sealed class LibraryDatabase
 {
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
     private const string SchemaResource = "Schema.sql";
+
+    /// <summary>The person at this PC. The migration creates the row, and it is never removed.</summary>
+    public const int OwnerId = 1;
 
     private readonly string _connectionString;
     private readonly object _initLock = new();
@@ -71,6 +74,7 @@ public sealed class LibraryDatabase
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
         using var connection = OpenConnection();
+        BackUpV3(connection);
         // Not deferred: BEGIN IMMEDIATE takes the write lock up front, so two instances
         // opening a new file cannot both apply the schema.
         using var transaction = connection.BeginTransaction(deferred: false);
@@ -99,10 +103,112 @@ public sealed class LibraryDatabase
                     "CREATE TABLE continue_dismissed (" +
                     "title_id INTEGER PRIMARY KEY REFERENCES titles(id) ON DELETE CASCADE, played_at TEXT NOT NULL)");
             }
+
+            if (version < 4) MigrateToV4(connection);
         }
 
         Execute(connection, $"PRAGMA user_version = {CurrentVersion}");
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// v3 to v4 moves every progress row to another table, so the file is copied first, once, and the copy is never
+    /// replaced. The WAL is folded in so the copy is the whole database.
+    /// </summary>
+    private void BackUpV3(SqliteConnection connection)
+    {
+        var version = ReadVersion(connection);
+        if (version is < 1 or > 3) return;
+
+        var backup = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(FilePath))!, "library.v3.bak");
+        if (File.Exists(backup)) return;
+
+        Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE)");
+        File.Copy(FilePath, backup, overwrite: false);
+    }
+
+    private static void MigrateToV4(SqliteConnection connection)
+    {
+        // SQLite can't change a primary key in place, so progress and continue_dismissed are rebuilt:
+        // create, copy, drop, rename. The owner row comes first because the copies point at it.
+        Execute(connection,
+            """
+            CREATE TABLE users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT,
+                role          TEXT    NOT NULL CHECK (role IN ('owner', 'viewer')),
+                disabled      INTEGER NOT NULL DEFAULT 0,
+                all_folders   INTEGER NOT NULL DEFAULT 1,
+                created_at    TEXT    NOT NULL,
+                last_seen     TEXT
+            );
+            INSERT INTO users(id, name, role, created_at) VALUES (1, 'Owner', 'owner', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+            CREATE TABLE user_folders (
+                user_id   INTEGER NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+                folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                PRIMARY KEY (user_id, folder_id)
+            );
+            CREATE INDEX ix_user_folders_folder ON user_folders(folder_id);
+
+            CREATE TABLE devices (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name         TEXT    NOT NULL,
+                token_hash   TEXT    NOT NULL UNIQUE,
+                created_at   TEXT    NOT NULL,
+                last_seen    TEXT,
+                last_address TEXT
+            );
+            CREATE INDEX ix_devices_user ON devices(user_id);
+
+            CREATE TABLE invites (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash  TEXT    NOT NULL UNIQUE,
+                created_at TEXT    NOT NULL,
+                expires_at TEXT    NOT NULL,
+                used_at    TEXT
+            );
+            CREATE INDEX ix_invites_user ON invites(user_id);
+
+            CREATE TABLE sharing_log (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                at      TEXT    NOT NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                kind    TEXT    NOT NULL,
+                detail  TEXT    NOT NULL
+            );
+
+            CREATE TABLE progress_v4 (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                file_id     INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+                position_s  REAL    NOT NULL DEFAULT 0,
+                duration_s  REAL    NOT NULL DEFAULT 0,
+                watched     INTEGER NOT NULL DEFAULT 0,
+                last_played TEXT,
+                PRIMARY KEY (user_id, file_id)
+            );
+            INSERT INTO progress_v4(user_id, file_id, position_s, duration_s, watched, last_played)
+                SELECT 1, file_id, position_s, duration_s, watched, last_played FROM progress;
+            DROP TABLE progress;
+            ALTER TABLE progress_v4 RENAME TO progress;
+            CREATE INDEX ix_progress_last_played ON progress(last_played);
+            CREATE INDEX ix_progress_file ON progress(file_id);
+
+            CREATE TABLE continue_dismissed_v4 (
+                user_id   INTEGER NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+                title_id  INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+                played_at TEXT    NOT NULL,
+                PRIMARY KEY (user_id, title_id)
+            );
+            INSERT INTO continue_dismissed_v4(user_id, title_id, played_at)
+                SELECT 1, title_id, played_at FROM continue_dismissed;
+            DROP TABLE continue_dismissed;
+            ALTER TABLE continue_dismissed_v4 RENAME TO continue_dismissed;
+            CREATE INDEX ix_continue_dismissed_title ON continue_dismissed(title_id);
+            """);
     }
 
     private static long ReadVersion(SqliteConnection connection)
