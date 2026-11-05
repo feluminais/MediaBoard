@@ -18,8 +18,6 @@ public enum StartupChoice
 /// <summary>Picks the mode before any composition exists, from nothing but the settings file and whether a library does.</summary>
 public static class ModeGate
 {
-    private const int FingerprintLength = 64;
-
     /// <summary>An existing library with no mode saved is someone who was here before modes, so they never see first run.</summary>
     public static StartupChoice Decide(SettingsReadResult read, bool databaseExists) => read switch
     {
@@ -35,7 +33,7 @@ public static class ModeGate
     /// on. There's nothing to repair it from, so it means a new invite.
     /// </summary>
     public static bool HasUsableEndpoint(StoredConnection connection) =>
-        connection.Endpoint is { Fingerprint: { Length: FingerprintLength } fingerprint, Addresses.Count: > 0 } && fingerprint.All(char.IsAsciiHexDigit);
+        connection.Endpoint is { Addresses.Count: > 0 } endpoint && ServerEndpoint.IsFingerprint(endpoint.Fingerprint);
 
     private static bool CanConnect(StoredConnection connection) => connection.ProtectedToken is not null && HasUsableEndpoint(connection);
 }

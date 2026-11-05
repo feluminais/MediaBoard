@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using MediaBoard.Core.Remote;
 
 namespace MediaBoard.Core.Accounts;
 
@@ -22,7 +23,6 @@ public sealed record InvitePayload(string ServerName, IReadOnlyList<string> Addr
 public static class InviteString
 {
     private const string Prefix = "mb1-";
-    private const int FingerprintLength = 64;
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
@@ -55,8 +55,7 @@ public static class InviteString
     // The JSON comes from a stranger's paste, so the record's non-null types promise nothing yet.
     private static bool IsComplete(InvitePayload payload) =>
         !string.IsNullOrEmpty(payload.ServerName)
-        && payload.Fingerprint is { Length: FingerprintLength }
-        && payload.Fingerprint.All(char.IsAsciiHexDigit)
+        && ServerEndpoint.IsFingerprint(payload.Fingerprint)
         && !string.IsNullOrEmpty(payload.Code)
         && payload.Addresses is { Count: > 0 }
         && payload.Addresses.All(address => !string.IsNullOrEmpty(address));
