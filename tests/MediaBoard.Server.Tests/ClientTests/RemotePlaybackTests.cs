@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using MediaBoard.Core.Activity;
 using MediaBoard.Core.Playback;
 using MediaBoard.Core.Players;
@@ -34,6 +36,11 @@ public sealed class RemotePlaybackTests
         /// <summary>What <see cref="GetPositionAsync"/> reports.</summary>
         public TimeSpan? Position { get; set; }
 
+        /// <summary>When set, <see cref="GetPositionAsync"/> answers only once this completes.</summary>
+        public TaskCompletionSource? PositionGate { get; set; }
+
+        public TaskCompletionSource Asked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void Raise(PlaybackEvent e) => Event?.Invoke(e);
@@ -44,7 +51,12 @@ public sealed class RemotePlaybackTests
             return Task.CompletedTask;
         }
 
-        public Task<TimeSpan?> GetPositionAsync(CancellationToken ct) => Task.FromResult(Position);
+        public async Task<TimeSpan?> GetPositionAsync(CancellationToken ct)
+        {
+            Asked.TrySetResult();
+            if (PositionGate is { } gate) await gate.Task;
+            return Position;
+        }
 
         public void Detach()
         {
@@ -63,14 +75,21 @@ public sealed class RemotePlaybackTests
 
         public event Action<int, ApiErrorCode>? StreamFailed;
 
+        public List<string> Handed { get; } = [];
+
+        public List<string> Released { get; } = [];
+
         public string UrlFor(int fileId, string fileName)
         {
-            var url = $"http://127.0.0.1:1/seg/{fileId}/{fileName}";
+            var url = $"http://127.0.0.1:1/{Handed.Count}/{fileId}/{fileName}";
             _files[url] = fileId;
+            Handed.Add(url);
             return url;
         }
 
         public int? FileOf(string locator) => _files.TryGetValue(locator, out var fileId) ? fileId : null;
+
+        public void Release(string url) => Released.Add(url);
 
         public void Fail(int fileId, ApiErrorCode code) => StreamFailed?.Invoke(fileId, code);
     }
@@ -80,18 +99,18 @@ public sealed class RemotePlaybackTests
         private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-remote-play-" + Guid.NewGuid().ToString("N"));
         private readonly StreamProxy? _proxy;
 
-        private World(LiveServer live, IStreamUrls? urls, TimeProvider? outboxTime)
+        private World(LiveServer live, IStreamUrls? urls, TimeProvider? outboxTime, int proxyPort, bool noPlayer)
         {
             Directory.CreateDirectory(_dir);
             Live = live;
             Client = live.NewClient();
-            _proxy = urls is null ? new StreamProxy(Client) : null;
+            _proxy = urls is null ? new StreamProxy(Client, proxyPort) : null;
             Urls = urls ?? _proxy!;
             Outbox = new ProgressOutbox(Client, Path.Combine(_dir, "pending-progress.json"), outboxTime ?? TimeProvider.System);
             Source = new RemotePlaybackSource(Client, Urls, Outbox);
             var settings = new SettingsStore(Path.Combine(_dir, "settings.json"));
             settings.Save(new AppSettings { DefaultPlayerId = "mpv" });
-            Service = new PlaybackService(Source, Outbox, new PlayerDetector(_ => true, () => [], Hub), settings, Hub, _ =>
+            Service = new PlaybackService(Source, Outbox, new PlayerDetector(_ => !noPlayer, () => [], Hub), settings, Hub, _ =>
             {
                 var player = new FakePlayer();
                 Players.Add(player);
@@ -122,10 +141,10 @@ public sealed class RemotePlaybackTests
 
         public string FilePath { get; private set; } = "";
 
-        public static async Task<World> StartAsync(IStreamUrls? urls = null, TimeProvider? outboxTime = null)
+        public static async Task<World> StartAsync(IStreamUrls? urls = null, TimeProvider? outboxTime = null, int proxyPort = 0, bool noPlayer = false)
         {
             var live = await LiveServer.StartAsync(Ct);
-            var world = new World(live, urls, outboxTime);
+            var world = new World(live, urls, outboxTime, proxyPort, noPlayer);
             (world.File, world.FilePath) = await live.AddFilmAsync("Heat (1995).mkv", FilmBytes);
             return world;
         }
@@ -210,6 +229,26 @@ public sealed class RemotePlaybackTests
 
         Assert.Empty(world.Players);
         Assert.Contains(world.Hub.Recent, entry => entry.Message == "Can't reach the server");
+    }
+
+    [Fact]
+    public async Task Play_ProxyCantBind_SaysSo()
+    {
+        var taken = new TcpListener(IPAddress.Loopback, 0);
+        taken.Start();
+        try
+        {
+            await using var world = await World.StartAsync(proxyPort: ((IPEndPoint)taken.LocalEndpoint).Port);
+
+            await world.PlayAsync();
+
+            Assert.Empty(world.Players);
+            Assert.Contains(world.Hub.Recent, entry => entry.Message == "Couldn't start the stream");
+        }
+        finally
+        {
+            taken.Stop();
+        }
     }
 
     [Fact]
@@ -350,6 +389,133 @@ public sealed class RemotePlaybackTests
         Assert.True(player.Closed.Task.IsCompleted);
         Assert.Null(world.Service.CurrentPlayer);
         Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task StreamFailed_DuringAStop_KeepsLastPosition()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+        var player = world.Player;
+        player.Raise(new PlaybackEvent.Loaded(TimeSpan.FromSeconds(Duration)));
+        player.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(115)));
+        player.PositionGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var stop = world.Service.StopAsync(closePlayer: true, Ct);
+        await player.Asked.Task.WaitAsync(Within, Ct);
+        urls.Fail(world.File, ApiErrorCode.StreamStopped);
+        player.Position = TimeSpan.FromSeconds(Duration);
+        player.PositionGate.SetResult();
+        await stop.WaitAsync(Within, Ct);
+
+        var waiting = world.Outbox.Waiting(world.File);
+        Assert.Equal(115, waiting?.PositionS);
+        Assert.NotEqual(true, waiting?.Watched);
+        Assert.Contains(world.Hub.Recent, entry => entry.Message == $"{world.Live.OwnerName} stopped this stream");
+    }
+
+    [Fact]
+    public async Task TooManyStreams_SaysSo()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+
+        urls.Fail(world.File, ApiErrorCode.TooManyStreams);
+
+        Assert.Contains(world.Hub.Recent, entry => entry.Message == "Too many streams on this account");
+    }
+
+    // ---- Giving back what was resolved, so the proxy listens only while something plays ----
+
+    [Theory]
+    [InlineData("Closed")]
+    [InlineData("Failed")]
+    [InlineData("Stopped")]
+    [InlineData("Abandoned")]
+    public async Task SessionEnd_GivesItsUrlBack(string how)
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+
+        Assert.Empty(urls.Released);
+        switch (how)
+        {
+            case "Closed":
+                world.Player.Raise(new PlaybackEvent.Closed());
+                break;
+            case "Failed":
+                world.Player.Raise(new PlaybackEvent.Failed("no"));
+                break;
+            case "Stopped":
+                await world.Service.StopAsync(closePlayer: true, Ct);
+                break;
+            default:
+                urls.Fail(world.File, ApiErrorCode.Unreachable);
+                break;
+        }
+
+        await WaitUntilAsync(() => urls.Released.Count > 0);
+        Assert.Equal(urls.Handed, urls.Released);
+    }
+
+    [Fact]
+    public async Task Ended_KeepsTheUrl_ThePlayerCanStillSeekBack()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+
+        world.Player.Raise(new PlaybackEvent.Ended());
+
+        Assert.Empty(urls.Released);
+    }
+
+    [Fact]
+    public async Task NoPlayer_GivesTheUrlBack()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls, noPlayer: true);
+
+        await world.PlayAsync();
+
+        Assert.Empty(world.Players);
+        Assert.Equal(urls.Handed, urls.Released);
+    }
+
+    [Fact]
+    public async Task Replay_GivesBackEveryUrlButTheOneInUse()
+    {
+        var urls = new FakeUrls();
+        await using var world = await World.StartAsync(urls);
+        await world.PlayAsync();
+
+        await world.PlayAsync();
+
+        // The first session's, and the one resolved before the stop made it stale.
+        var inUse = Assert.Single(world.Player.Starts).Locator;
+        Assert.Equal(3, urls.Handed.Count);
+        Assert.Equal(urls.Handed.Where(url => url != inUse).Order(StringComparer.Ordinal), urls.Released.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task RealProxy_SessionEnd_StopsListening_TheNextPlayWorks()
+    {
+        await using var world = await World.StartAsync();
+        await File.WriteAllBytesAsync(world.FilePath, [1, 2, 3, 4, 5], Ct);
+        await world.PlayAsync();
+        var first = new Uri(world.Player.Starts[0].Locator);
+
+        world.Player.Raise(new PlaybackEvent.Closed());
+
+        await WaitUntilAsync(() => !IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(listener => listener.Port == first.Port));
+
+        await world.PlayAsync();
+
+        using var player = new HttpClient();
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, await player.GetByteArrayAsync(world.Player.Starts[0].Locator, Ct));
     }
 
     [Fact]

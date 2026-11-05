@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Json;
+using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
 using MediaBoard.Core.Storage;
 using Microsoft.AspNetCore.Http;
@@ -284,14 +285,161 @@ public sealed class ProgressOutboxTests
         world.Clock.Advance(Every);
         await world.WaitForAsync(3);
 
-        // The same entry each time: a new time would beat what another device saved in the meantime.
-        Assert.Single(world.Received.Select(sent => sent.Entry).Distinct());
+        // The entry first, then beats the server counts and throws away.
+        var sent = world.Received.Select(received => received.Entry!).ToList();
+        Assert.All(sent, entry => Assert.Equal(10, entry.PositionS));
+        Assert.NotEqual(DateTimeOffset.UnixEpoch, sent[0].At);
+        Assert.Equal(DateTimeOffset.UnixEpoch, sent[1].At);
+        Assert.Equal(DateTimeOffset.UnixEpoch, sent[2].At);
 
         world.Outbox.Finished(FileId);
         world.Clock.Advance(Every);
         await World.SettleAsync();
 
         Assert.Equal(3, world.Received.Count);
+    }
+
+    /// <summary>The outbox against the real server and store, with a stream open so beats can be counted.</summary>
+    private sealed class RealWorld : IAsyncDisposable
+    {
+        private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-outbox-" + Guid.NewGuid().ToString("N"));
+        private int _changes;
+
+        private RealWorld(LiveServer live, int file, FakeTimeProvider clock)
+        {
+            Live = live;
+            File = file;
+            Clock = clock;
+            Client = live.NewClient();
+            Outbox = new ProgressOutbox(Client, Path.Combine(_dir, "pending-progress.json"), clock);
+        }
+
+        public LiveServer Live { get; }
+
+        public int File { get; }
+
+        public FakeTimeProvider Clock { get; }
+
+        public ApiClient Client { get; }
+
+        public ProgressOutbox Outbox { get; }
+
+        public int UserId => Live.Sam.Id;
+
+        public Progress? Stored => Live.Fixture.Progress.Get(UserId, File);
+
+        public int Finishes => Live.Fixture.Log.Recent(50).Count(entry => entry.Kind == SharingEvent.FinishedWatching);
+
+        public static async Task<RealWorld> StartAsync(DateTimeOffset viewerClock)
+        {
+            var live = await LiveServer.StartAsync(Ct);
+            var (file, _) = await live.AddFilmAsync("Heat (1995).mkv", 4096);
+            var world = new RealWorld(live, file, new FakeTimeProvider(viewerClock));
+            using (await world.Client.OpenStreamAsync(file, "bytes=0-0", Ct))
+            {
+                // The session stays after the response, until it has been quiet for 30 s.
+            }
+
+            live.Fixture.Streams.Changed += () => Interlocked.Increment(ref world._changes);
+            world.Outbox.Start();
+            return world;
+        }
+
+        /// <summary>Lets two beats through. The second proves the first has been answered, since sends run one at a time.</summary>
+        public async Task BeatTwiceAsync()
+        {
+            foreach (var _ in new[] { 1, 2 })
+            {
+                var before = Volatile.Read(ref _changes);
+                Clock.Advance(Every);
+                await WaitUntilAsync(() => Volatile.Read(ref _changes) > before);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Outbox.DisposeAsync();
+            Client.Dispose();
+            await Live.DisposeAsync();
+            if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(Within);
+        while (!condition()) await Task.Delay(10, timeout.Token);
+    }
+
+    [Fact]
+    public async Task Beat_AfterTheViewerUnwatches_RestoresNothing_AndLogsNoSecondFinish()
+    {
+        await using var world = await RealWorld.StartAsync(DateTimeOffset.UtcNow);
+        world.Outbox.SetWatched(world.File, true);
+        world.Outbox.Save(world.File, 500, 6000);
+        world.Outbox.Paused(world.File);
+        await WaitUntilAsync(() => world.Stored is { PositionS: 500, Watched: true });
+        Assert.Equal(1, world.Finishes);
+
+        await world.Client.SendAsync(HttpMethod.Put, $"files/{world.File}/watched", new WatchedRequest(false), Ct);
+
+        await world.BeatTwiceAsync();
+
+        Assert.Equal(0, world.Stored?.PositionS);
+        Assert.False(world.Stored?.Watched);
+        Assert.Equal(1, world.Finishes);
+    }
+
+    [Fact]
+    public async Task Beat_FromAFastClock_LosesToAnotherDevicesNewerSave()
+    {
+        await using var world = await RealWorld.StartAsync(DateTimeOffset.UtcNow.AddHours(1));
+        world.Outbox.Save(world.File, 500, 6000);
+        world.Outbox.Paused(world.File);
+        await WaitUntilAsync(() => world.Stored?.PositionS == 500);
+
+        Assert.True(world.Live.Fixture.Progress.SaveIfNewer(world.UserId, world.File, new ProgressEntry(800, 6000, null, DateTimeOffset.UtcNow)));
+
+        await world.BeatTwiceAsync();
+
+        Assert.Equal(800, world.Stored?.PositionS);
+    }
+
+    [Fact]
+    public async Task Start_OnAUiThread_DoesNotStayOnIt()
+    {
+        await using var world = await World.StartAsync();
+        var ui = new CountingContext();
+        var before = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(ui);
+        try
+        {
+            world.Outbox.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(before);
+        }
+
+        world.Outbox.Save(FileId, 10, 100);
+        world.Outbox.Paused(FileId);
+        await world.WaitForAsync(1);
+        await World.SettleAsync();
+
+        Assert.Equal(0, ui.Posts);
+    }
+
+    private sealed class CountingContext : SynchronizationContext
+    {
+        private int _posts;
+
+        public int Posts => Volatile.Read(ref _posts);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _posts);
+            base.Post(d, state);
+        }
     }
 
     [Fact]
@@ -412,5 +560,58 @@ public sealed class ProgressOutboxTests
         Assert.DoesNotContain(trace.Lines, line => line.Contains(world.PathOnDisk, StringComparison.OrdinalIgnoreCase));
         Assert.Empty(world.Received);
         Assert.Equal(10, world.NewOutbox().Waiting(FileId)?.PositionS);
+    }
+
+    [Theory]
+    [InlineData("[null]")]
+    [InlineData("null")]
+    public async Task FileHoldingNulls_IsCorrupt(string content)
+    {
+        await using var world = await World.StartAsync();
+        Directory.CreateDirectory(Path.GetDirectoryName(world.PathOnDisk)!);
+        await File.WriteAllTextAsync(world.PathOnDisk, content, Ct);
+        using var trace = new TraceCapture();
+
+        var outbox = world.NewOutbox();
+
+        Assert.Null(outbox.Waiting(FileId));
+        Assert.Single(trace.Lines, line => line.Contains("progress", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LockedFile_IsNotCorrupt_ItsEntriesSurviveAndGoOut()
+    {
+        await using var world = await World.StartAsync();
+        world.Outbox.Save(FileId, 10, 100);
+        var locked = new FileStream(world.PathOnDisk, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var afterRestart = world.NewOutbox();
+        afterRestart.Save(OtherFile, 5, 50);
+        await afterRestart.FlushAsync(Ct);
+
+        // Only what this run knows so far has gone out, and nothing replaced the file behind the lock.
+        Assert.Equal(Progress(OtherFile), Assert.Single(world.Received).Route);
+
+        await locked.DisposeAsync();
+        await afterRestart.FlushAsync(Ct);
+
+        Assert.Equal(10, Assert.Single(world.Received, sent => sent.Route == Progress(FileId)).Entry?.PositionS);
+        Assert.Null(afterRestart.Waiting(FileId));
+    }
+
+    [Fact]
+    public async Task LockedFile_ThenASave_KeepsTheNewerOfBoth()
+    {
+        await using var world = await World.StartAsync();
+        world.Outbox.Save(FileId, 10, 100);
+        var locked = new FileStream(world.PathOnDisk, FileMode.Open, FileAccess.Read, FileShare.None);
+        var afterRestart = world.NewOutbox();
+        Assert.Null(afterRestart.Waiting(FileId));
+
+        world.Clock.Advance(TimeSpan.FromSeconds(1));
+        afterRestart.Save(FileId, 20, 100);
+        await locked.DisposeAsync();
+
+        Assert.Equal(20, afterRestart.Waiting(FileId)?.PositionS);
     }
 }

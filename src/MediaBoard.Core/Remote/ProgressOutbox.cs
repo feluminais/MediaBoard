@@ -30,7 +30,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     private static readonly TimeSpan LastSendLimit = TimeSpan.FromSeconds(3);
 
     private readonly Lock _gate = new();
-    private readonly Dictionary<int, PendingProgress> _waiting = Load(path);
+    private readonly Dictionary<int, PendingProgress> _waiting = [];
     private readonly SemaphoreSlim _sending = new(1, 1);
 
     // True asks for the keep-alive too. Bounded, because a timer that fires through an outage must not queue up
@@ -42,13 +42,16 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     private Task? _loop;
     private PendingProgress? _last;
     private int? _paused;
+    private bool _read;
+    private bool _readFailed;
     private bool _writeFailed;
     private int _disposed;
 
     /// <summary>Starts the background sends. The first is one interval away.</summary>
     public void Start()
     {
-        _loop = RunAsync(_stop.Token);
+        // On the pool: called on a UI thread, the loop's awaits would come back to it for good.
+        _loop = Task.Run(() => RunAsync(_stop.Token));
         _timer = time.CreateTimer(_ => _rounds.Writer.TryWrite(true), null, Every, Every);
     }
 
@@ -56,6 +59,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     {
         lock (_gate)
         {
+            ReadFile();
             _waiting.TryGetValue(fileId, out var earlier);
             _last = new PendingProgress(fileId, positionS, durationS, earlier?.Watched, time.GetUtcNow());
             _waiting[fileId] = _last;
@@ -67,6 +71,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     {
         lock (_gate)
         {
+            ReadFile();
             _waiting.TryGetValue(fileId, out var earlier);
 
             // Unwatched forgets the position, as it does locally, and only the watched route does that on the server.
@@ -94,7 +99,11 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     /// <summary>What hasn't reached the server for this file, or null. A replay after a stop can run before the send.</summary>
     public PendingProgress? Waiting(int fileId)
     {
-        lock (_gate) return _waiting.GetValueOrDefault(fileId);
+        lock (_gate)
+        {
+            ReadFile();
+            return _waiting.GetValueOrDefault(fileId);
+        }
     }
 
     /// <summary>Sends what's waiting. A server that can't be reached keeps it for the next time.</summary>
@@ -125,21 +134,46 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
         _sending.Dispose();
     }
 
-    private static Dictionary<int, PendingProgress> Load(string path)
+    private static string Route(string format, PendingProgress entry) => string.Format(CultureInfo.InvariantCulture, format, entry.FileId);
+
+    /// <summary>
+    /// Called with _gate held, before anything uses the entries, and again until the file has been read. A file that's only
+    /// locked still holds entries, so <see cref="Write"/> waits for this: a corrupt one holds nothing and may be replaced.
+    /// </summary>
+    private void ReadFile()
     {
-        if (!File.Exists(path)) return [];
+        if (_read) return;
 
         try
         {
-            using var file = File.OpenRead(path);
-            var stored = JsonSerializer.Deserialize<List<PendingProgress>>(file, ApiJson.Options) ?? [];
-            return stored.DistinctBy(entry => entry.FileId).ToDictionary(entry => entry.FileId);
+            if (File.Exists(path))
+            {
+                using var file = File.OpenRead(path);
+                var stored = JsonSerializer.Deserialize<List<PendingProgress?>>(file, ApiJson.Options);
+                if (stored is null || stored.Contains(null)) throw new JsonException();
+
+                // What this run saved while the file was locked may be the newer.
+                foreach (var entry in stored.OfType<PendingProgress>())
+                {
+                    if (!_waiting.TryGetValue(entry.FileId, out var mine) || mine.At < entry.At) _waiting[entry.FileId] = entry;
+                }
+            }
+
+            _read = true;
         }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        catch (JsonException e)
         {
+            _read = true;
+
             // The type alone: a message can hold the path.
-            Trace.TraceWarning($"The saved progress outbox can't be read and starts empty: {e.GetType().Name}");
-            return [];
+            Trace.TraceWarning($"The saved progress outbox can't be understood and starts empty: {e.GetType().Name}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            if (_readFailed) return;
+
+            _readFailed = true;
+            Trace.TraceWarning($"The saved progress outbox can't be opened yet: {e.GetType().Name}");
         }
     }
 
@@ -176,11 +210,15 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             PendingProgress? beat;
             lock (_gate)
             {
+                ReadFile();
                 batch = [.. _waiting.Values];
 
-                // The server takes this as the heartbeat of a stream that sends no bytes while paused, and ends the
-                // stream after 30 s without one. Same entry, same time: a new time would beat another device's newer save.
-                beat = keepAlive && _last is { } last && last.FileId == _paused && !_waiting.ContainsKey(last.FileId) ? last : null;
+                // A paused stream sends no bytes, and the server ends one after 30 s without a report. It counts any report
+                // but keeps only the newest, so this one is dated to lose. A real one would be a write: it could put back
+                // what the viewer just unwatched, mark the file watched again or beat another device's newer save.
+                beat = keepAlive && _last is { } last && last.FileId == _paused && !_waiting.ContainsKey(last.FileId)
+                    ? last with { Watched = null, At = DateTimeOffset.UnixEpoch }
+                    : null;
             }
 
             foreach (var entry in batch)
@@ -216,8 +254,6 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             : api.SendAsync(HttpMethod.Put, Route("files/{0}/watched", entry), new WatchedRequest(entry.Watched), ct);
     }
 
-    private static string Route(string format, PendingProgress entry) => string.Format(CultureInfo.InvariantCulture, format, entry.FileId);
-
     // A save that came in during the send is newer than what was sent, so it stays.
     private void Forget(PendingProgress sent)
     {
@@ -234,6 +270,8 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     // refuses costs only the protection against a restart: the entry is still in memory, on its way to the server.
     private void Write()
     {
+        if (!_read) return;
+
         try
         {
             var directory = Path.GetDirectoryName(Path.GetFullPath(path));

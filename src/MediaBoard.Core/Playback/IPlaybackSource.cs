@@ -13,6 +13,14 @@ public interface IPlaybackSource
 
     /// <summary>Called under the session gate: must not block or use the network.</summary>
     PlayTarget? FindByLocator(string locator);
+
+    /// <summary>
+    /// A locator from <see cref="ResolveAsync"/> is done with: its session ended, or it never got one. Called once for
+    /// each, and never while a player can still read it. Must not block. A local file holds nothing.
+    /// </summary>
+    void Released(string locator)
+    {
+    }
 }
 
 /// <summary>Where <see cref="PlaybackService"/> saves progress. Called under the session gate: must not block or use the network.</summary>

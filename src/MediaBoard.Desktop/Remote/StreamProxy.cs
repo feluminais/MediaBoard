@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using MediaBoard.Core.Remote;
@@ -16,51 +17,35 @@ namespace MediaBoard.Desktop.Remote;
 /// What players read from on a viewer's PC: plain HTTP on loopback, relayed to the server over the pinned connection. So
 /// the token never reaches a player or its history, and a stop or an error on the server arrives somewhere the app can
 /// act on it, which matters because a player left without its stream reports the file as finished instead of failing.
-/// Only URLs handed out by <see cref="UrlFor"/> answer, and each holds a random segment that other programs on this PC
-/// can't guess. Bytes pass through memory only.
+/// Only URLs handed out by <see cref="UrlFor"/> and not yet released answer, and each holds its own random segment that
+/// other programs on this PC can't guess. It listens only while one of those exists, on a new port each time. Bytes pass
+/// through memory only.
 /// </summary>
 /// <param name="api">The server.</param>
-public sealed class StreamProxy(ApiClient api) : IStreamUrls, IAsyncDisposable
+/// <param name="port">The loopback port, or 0 for any free one.</param>
+public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsyncDisposable
 {
     private const int BufferBytes = 64 * 1024;
 
     // Leaving the app ends both, so an open response gets a moment and no more.
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(1);
 
-    private readonly string _segment = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
     private readonly ConcurrentDictionary<string, int> _files = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private WebApplication? _app;
     private string _origin = "";
+    private bool _disposed;
 
     public event Action<int, ApiErrorCode>? StreamFailed;
 
-    /// <summary>Starts listening on a random loopback port, unless it already is.</summary>
+    /// <summary>Starts listening, unless it already is. <see cref="UrlFor"/> does this by itself.</summary>
+    /// <exception cref="StreamUnavailableException">The proxy was disposed, or the address couldn't be bound.</exception>
     public async Task StartAsync()
     {
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_app is not null) return;
-
-            // The empty builder reads no configuration, so nothing can add a listener, and it logs nothing, so no URL lands in a log.
-            var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
-            builder.Services.AddRoutingCore();
-            builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel =>
-            {
-                kestrel.AddServerHeader = false;
-
-                // A paused player stops reading, and that is no reason to drop it.
-                kestrel.Limits.MinResponseDataRate = null;
-                kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1);
-            });
-
-            var app = builder.Build();
-            app.Run(ServeAsync);
-            await app.StartAsync().ConfigureAwait(false);
-
-            _origin = app.Urls.First();
-            _app = app;
+            await ListenAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -68,36 +53,33 @@ public sealed class StreamProxy(ApiClient api) : IStreamUrls, IAsyncDisposable
         }
     }
 
+    /// <exception cref="StreamUnavailableException">The proxy was disposed, or the address couldn't be bound.</exception>
     public string UrlFor(int fileId, string fileName)
     {
-        // Waited on because the interface is synchronous. Once per run, off the session gate, and a start takes milliseconds.
-        StartAsync().GetAwaiter().GetResult();
-
-        var url = string.Create(CultureInfo.InvariantCulture, $"{_origin}/{_segment}/{fileId}/{SafeName(fileName)}");
-        _files[url] = fileId;
-        return url;
+        // Waited on because the interface is synchronous, which is safe on the pool whatever the caller's thread is. This
+        // runs once per Play, off the session gate, and a start takes milliseconds.
+        return Task.Run(() => HandOutAsync(fileId, fileName)).GetAwaiter().GetResult();
     }
 
     public int? FileOf(string locator) => _files.TryGetValue(locator, out var fileId) ? fileId : null;
 
+    public void Release(string url)
+    {
+        if (_files.TryRemove(url, out _) && _files.IsEmpty) _ = Task.Run(StopIfUnusedAsync);
+    }
+
     public async ValueTask DisposeAsync()
     {
-        if (_app is { } app)
+        await _lifecycle.WaitAsync();
+        try
         {
-            using var timeout = new CancellationTokenSource(StopTimeout);
-            try
-            {
-                await app.StopAsync(timeout.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // A response still open. Disposing cuts it.
-            }
-
-            await app.DisposeAsync();
+            _disposed = true;
+            await StopAsync();
         }
-
-        _lifecycle.Dispose();
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 
     /// <summary>
@@ -166,53 +148,162 @@ public sealed class StreamProxy(ApiClient api) : IStreamUrls, IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(HttpContext context)
+    private async Task<string> HandOutAsync(int fileId, string fileName)
     {
-        if (!_files.TryGetValue(_origin + context.Request.Path, out var fileId))
+        await _lifecycle.WaitAsync();
+        try
+        {
+            await ListenAsync();
+
+            // Under the gate, so a stop that found nothing left can't run past a URL handed out behind it.
+            var segment = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+            var url = string.Create(CultureInfo.InvariantCulture, $"{_origin}/{segment}/{fileId}/{SafeName(fileName)}");
+            _files[url] = fileId;
+            return url;
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    // Called with _lifecycle held.
+    private async Task ListenAsync()
+    {
+        if (_disposed) throw new StreamUnavailableException();
+        if (_app is not null) return;
+
+        // The empty builder reads no configuration, so nothing can add a listener, and it logs nothing, so no URL lands in a log.
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
+        builder.Services.AddRoutingCore();
+        builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel =>
+        {
+            kestrel.AddServerHeader = false;
+
+            // A paused player stops reading, and that is no reason to drop it.
+            kestrel.Limits.MinResponseDataRate = null;
+            kestrel.Listen(IPAddress.Loopback, port, listen => listen.Protocols = HttpProtocols.Http1);
+        });
+
+        var app = builder.Build();
+        app.Run(context => ServeAsync(context, app.Lifetime.ApplicationStopping));
+        try
+        {
+            await app.StartAsync().ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException)
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+            throw new StreamUnavailableException(e);
+        }
+
+        _origin = app.Urls.First();
+        _app = app;
+    }
+
+    private async Task StopIfUnusedAsync()
+    {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            if (_files.IsEmpty) await StopAsync();
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    // Called with _lifecycle held.
+    private async Task StopAsync()
+    {
+        if (_app is not { } app) return;
+
+        _app = null;
+        using var timeout = new CancellationTokenSource(StopTimeout);
+        try
+        {
+            await app.StopAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // A response still open. Disposing cuts it.
+        }
+
+        await app.DisposeAsync();
+    }
+
+    private async Task ServeAsync(HttpContext context, CancellationToken stopping)
+    {
+        var url = _origin + context.Request.Path;
+        if (!_files.TryGetValue(url, out var fileId))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
         }
-
-        if (!HttpMethods.IsGet(context.Request.Method))
+        else if (HttpMethods.IsHead(context.Request.Method))
+        {
+            await AnswerHeadAsync(context, url, fileId);
+        }
+        else if (!HttpMethods.IsGet(context.Request.Method))
         {
             context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
-            return;
         }
+        else if (await OpenAsync(url, fileId, context.Request.Headers.Range.ToString(), context.RequestAborted) is { } upstream)
+        {
+            await RelayAsync(context, url, fileId, upstream, stopping);
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status502BadGateway;
+        }
+    }
 
-        if (await OpenAsync(fileId, context.Request.Headers.Range.ToString(), context.RequestAborted) is not { } upstream)
+    /// <summary>The stream route is GET only, and one byte of the file gives its length and type.</summary>
+    private async Task AnswerHeadAsync(HttpContext context, string url, int fileId)
+    {
+        using var upstream = await OpenAsync(url, fileId, "bytes=0-0", context.RequestAborted);
+        if (upstream is null)
         {
             context.Response.StatusCode = StatusCodes.Status502BadGateway;
             return;
         }
 
-        await RelayAsync(context, fileId, upstream);
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentLength = upstream.Content.Headers.ContentRange?.Length ?? upstream.Content.Headers.ContentLength;
+        context.Response.ContentType = upstream.Content.Headers.ContentType?.ToString();
+        context.Response.Headers.AcceptRanges = "bytes";
     }
 
-    /// <returns>The answer, or null when there is none: a failure, already raised, or the player leaving.</returns>
-    private async Task<HttpResponseMessage?> OpenAsync(int fileId, string range, CancellationToken player)
+    /// <returns>The answer, or null when there is none: a failure, already raised, or <paramref name="ct"/> ending the wait.</returns>
+    private async Task<HttpResponseMessage?> OpenAsync(string url, int fileId, string range, CancellationToken ct)
     {
         try
         {
-            return await api.OpenStreamAsync(fileId, range, player);
+            return await api.OpenStreamAsync(fileId, range, ct);
         }
-        catch (OperationCanceledException) when (player.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return null;
         }
         catch (ApiException e)
         {
-            StreamFailed?.Invoke(fileId, e.Code);
+            Fail(url, fileId, e.Code);
             return null;
         }
         catch (Exception e) when (e is ServerUnreachableException or IdentityChangedException)
         {
-            StreamFailed?.Invoke(fileId, ApiErrorCode.Unreachable);
+            Fail(url, fileId, ApiErrorCode.Unreachable);
             return null;
         }
     }
 
-    private async Task RelayAsync(HttpContext context, int fileId, HttpResponseMessage first)
+    // A URL already released belongs to a session that's over, and the same file may be playing again on a new one.
+    private void Fail(string url, int fileId, ApiErrorCode code)
+    {
+        if (_files.ContainsKey(url)) StreamFailed?.Invoke(fileId, code);
+    }
+
+    private async Task RelayAsync(HttpContext context, string url, int fileId, HttpResponseMessage first, CancellationToken stopping)
     {
         var current = first;
         try
@@ -232,17 +323,20 @@ public sealed class StreamProxy(ApiClient api) : IStreamUrls, IAsyncDisposable
                 sent += copied;
                 if (!cut) return;
 
-                // A cut carries no code, so asking again is the only way to learn why, and if the server has a reason it
-                // refuses. An answer that's cut before a byte arrives would go round for good.
+                // An answer that's cut before a byte arrives would go round for good.
                 if (asked && copied == 0)
                 {
-                    StreamFailed?.Invoke(fileId, ApiErrorCode.Unreachable);
+                    Fail(url, fileId, ApiErrorCode.Unreachable);
                     context.Abort();
                     return;
                 }
 
+                // A cut carries no code, so asking again is the only way to learn why, and if the server has a reason it
+                // refuses. This outlives the player's request on purpose: its session is still open, and a player that
+                // gives up here goes on to report the file as finished unless the failure is raised. The client's limit
+                // on headers ends the wait.
                 var at = start + sent;
-                var next = await OpenAsync(fileId, string.Create(CultureInfo.InvariantCulture, $"bytes={at}-{last}"), player);
+                var next = await OpenAsync(url, fileId, string.Create(CultureInfo.InvariantCulture, $"bytes={at}-{last}"), stopping);
                 if (next is null)
                 {
                     context.Abort();
@@ -255,7 +349,7 @@ public sealed class StreamProxy(ApiClient api) : IStreamUrls, IAsyncDisposable
                 if (next.StatusCode == HttpStatusCode.PartialContent && next.Content.Headers.ContentRange?.From == at) continue;
 
                 // The bytes promised to the player aren't there any more: the file shrank or was replaced.
-                StreamFailed?.Invoke(fileId, ApiErrorCode.FileMissing);
+                Fail(url, fileId, ApiErrorCode.FileMissing);
                 context.Abort();
                 return;
             }

@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using MediaBoard.Core.Remote;
 using MediaBoard.Desktop.Remote;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Time.Testing;
 
 namespace MediaBoard.Server.Tests.ClientTests;
 
@@ -58,13 +60,13 @@ public sealed class StreamProxyTests
     {
         private readonly TaskCompletionSource<(int FileId, ApiErrorCode Code)> _failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private Fake(ServerFixture fixture, FakeApi api, ConcurrentQueue<string> ranges, ConcurrentQueue<string> calls)
+        private Fake(ServerFixture fixture, FakeApi api, ConcurrentQueue<string> ranges, ConcurrentQueue<string> calls, TimeProvider? time)
         {
             Fixture = fixture;
             Api = api;
             Ranges = ranges;
             Calls = calls;
-            Client = new ApiClient(new ServerEndpoint("Library", [api.Address], CertificateStore.Fingerprint(fixture.NewCertificate())), () => Token, _ => { });
+            Client = new ApiClient(new ServerEndpoint("Library", [api.Address], CertificateStore.Fingerprint(fixture.NewCertificate())), () => Token, _ => { }, time);
             Proxy = new StreamProxy(Client);
             Proxy.StreamFailed += (fileId, code) =>
             {
@@ -87,12 +89,14 @@ public sealed class StreamProxyTests
 
         public StreamProxy Proxy { get; }
 
-        public HttpClient Player { get; } = new();
+        // No drain on dispose: a disposed body must drop the connection there and then, as a player does.
+        public HttpClient Player { get; } = new(new SocketsHttpHandler { MaxResponseDrainSize = 0 });
 
         public Task<(int FileId, ApiErrorCode Code)> Failed => _failed.Task.WaitAsync(Within, Ct);
 
         /// <param name="answer">Takes the context and which request this is, from 1.</param>
-        public static async Task<Fake> StartAsync(Func<HttpContext, int, Task> answer)
+        /// <param name="time">The client's clock, or null for the real one.</param>
+        public static async Task<Fake> StartAsync(Func<HttpContext, int, Task> answer, TimeProvider? time = null)
         {
             var fixture = new ServerFixture();
             var ranges = new ConcurrentQueue<string>();
@@ -104,7 +108,7 @@ public sealed class StreamProxyTests
                 calls.Enqueue(context.Request.Path);
                 return answer(context, Interlocked.Increment(ref count));
             });
-            var fake = new Fake(fixture, api, ranges, calls);
+            var fake = new Fake(fixture, api, ranges, calls, time);
             await fake.Proxy.StartAsync();
             return fake;
         }
@@ -178,7 +182,36 @@ public sealed class StreamProxyTests
         using var response = await world.PlayAsync(world.Url(), $"bytes={Film.Length + 1}-");
 
         Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, response.StatusCode);
+        Assert.Equal(Film.Length, response.Content.Headers.ContentRange?.Length);
         Assert.Empty(world.Failures);
+    }
+
+    [Fact]
+    public async Task Head_AnswersFromAOneByteRange_WithTheWholeLength()
+    {
+        await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
+        using var request = new HttpRequestMessage(HttpMethod.Head, world.Url());
+
+        using var response = await world.Player.SendAsync(request, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(Film.Length, response.Content.Headers.ContentLength);
+        Assert.Equal("video/x-matroska", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("bytes", response.Headers.AcceptRanges);
+        Assert.Null(response.Content.Headers.ContentRange);
+        Assert.Equal("bytes=0-0", Assert.Single(world.Ranges));
+    }
+
+    [Fact]
+    public async Task Head_Refused_RaisesStreamFailed()
+    {
+        await using var world = await Fake.StartAsync((context, _) => RefuseAsync(context, ApiErrorCode.StreamStopped));
+        using var request = new HttpRequestMessage(HttpMethod.Head, world.Url());
+
+        using var response = await world.Player.SendAsync(request, Ct);
+
+        Assert.False(response.IsSuccessStatusCode);
+        Assert.Equal((FileId, ApiErrorCode.StreamStopped), await world.Failed);
     }
 
     [Fact]
@@ -449,6 +482,300 @@ public sealed class StreamProxyTests
             await Task.Delay(100, context.RequestAborted);
             context.Abort();
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(CutCodes))]
+    public async Task UpstreamCut_PlayerLeavesDuringTheReRequest_StillReportsTheCode(ApiErrorCode code)
+    {
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var world = await Fake.StartAsync(async (context, request) =>
+        {
+            if (request == 1)
+            {
+                await SendThenCutAsync(context, 20_000);
+                return;
+            }
+
+            asked.TrySetResult();
+            await answer.Task;
+            await RefuseAsync(context, code);
+        });
+        var response = await world.PlayAsync(world.Url(), "bytes=0-");
+        var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[20_000], Ct);
+        await asked.Task.WaitAsync(Within, Ct);
+
+        // The player gives up while the server hasn't said why yet.
+        await body.DisposeAsync();
+        response.Dispose();
+        await Task.Delay(200, Ct);
+        answer.SetResult();
+
+        Assert.Equal((FileId, code), await world.Failed);
+    }
+
+    [Fact]
+    public async Task UpstreamCut_PlayerLeavesDuringTheReRequest_NoAnswer_ReportsUnreachableAtTheHeaderLimit()
+    {
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new FakeTimeProvider();
+        await using var world = await Fake.StartAsync(
+            async (context, request) =>
+            {
+                if (request == 1)
+                {
+                    await SendThenCutAsync(context, 20_000);
+                    return;
+                }
+
+                asked.TrySetResult();
+                await FakeApi.HangAsync(context);
+            },
+            clock);
+        var response = await world.PlayAsync(world.Url(), "bytes=0-");
+        var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[20_000], Ct);
+        await asked.Task.WaitAsync(Within, Ct);
+
+        await body.DisposeAsync();
+        response.Dispose();
+        await Task.Delay(200, Ct);
+        clock.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.Equal((FileId, ApiErrorCode.Unreachable), await world.Failed);
+    }
+
+    [Fact]
+    public async Task UpstreamCut_PlayerLeavesDuringTheReRequest_ServerAnswers_StaysSilent()
+    {
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var world = await Fake.StartAsync(async (context, request) =>
+        {
+            if (request == 1)
+            {
+                await SendThenCutAsync(context, 20_000);
+                return;
+            }
+
+            asked.TrySetResult();
+            await answer.Task;
+            await ServeAsync(context);
+            answered.TrySetResult();
+        });
+        var response = await world.PlayAsync(world.Url(), "bytes=0-");
+        var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[20_000], Ct);
+        await asked.Task.WaitAsync(Within, Ct);
+
+        await body.DisposeAsync();
+        response.Dispose();
+        await Task.Delay(200, Ct);
+        answer.SetResult();
+        await answered.Task.WaitAsync(Within, Ct);
+        await Task.Delay(200, Ct);
+
+        Assert.Empty(world.Failures);
+    }
+
+    [Fact]
+    public async Task UpstreamCut_ThatUrlReleasedMeanwhile_StaysSilent()
+    {
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var world = await Fake.StartAsync(async (context, request) =>
+        {
+            if (request == 1)
+            {
+                await SendThenCutAsync(context, 20_000);
+                return;
+            }
+
+            asked.TrySetResult();
+            await answer.Task;
+            await RefuseAsync(context, ApiErrorCode.StreamStopped);
+            refused.TrySetResult();
+        });
+        var keeper = world.Url("Next.mkv");
+        var url = world.Url();
+        var response = await world.PlayAsync(url, "bytes=0-");
+        var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[20_000], Ct);
+        await asked.Task.WaitAsync(Within, Ct);
+
+        // The session that read this URL is over, so the same file may be playing again by now.
+        world.Proxy.Release(url);
+        answer.SetResult();
+        await refused.Task.WaitAsync(Within, Ct);
+        await Task.Delay(200, Ct);
+        await body.DisposeAsync();
+        response.Dispose();
+
+        Assert.Equal(FileId, world.Proxy.FileOf(keeper));
+        Assert.Empty(world.Failures);
+    }
+
+    [Fact]
+    public async Task StreamFailed_IsRaisedBeforeThePlayersConnectionAborts()
+    {
+        await using var world = await Fake.StartAsync((context, request) =>
+            request == 1 ? SendThenCutAsync(context, 20_000) : RefuseAsync(context, ApiErrorCode.StreamStopped));
+        Task? playerRead = null;
+        bool? endedFirst = null;
+        var heard = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Proxy.StreamFailed += (_, _) =>
+        {
+            // The handler runs in the proxy's way: while it runs, the player must still be waiting.
+            Thread.Sleep(200);
+            endedFirst = playerRead?.IsCompleted;
+            heard.TrySetResult();
+        };
+
+        var response = await world.PlayAsync(world.Url(), "bytes=0-");
+        playerRead = response.Content.ReadAsByteArrayAsync(Ct);
+        await heard.Task.WaitAsync(Within, Ct);
+
+        Assert.False(endedFirst);
+        await Assert.ThrowsAnyAsync<Exception>(() => playerRead.WaitAsync(Within, Ct));
+        response.Dispose();
+    }
+
+    [Fact]
+    public async Task ConcurrentRequests_OneCut_LeavesTheOtherAlone()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var world = await Fake.StartAsync(async (context, request) =>
+        {
+            switch (request)
+            {
+                case 1:
+                    await SendThenCutAsync(context, 20_000);
+                    break;
+                case 2:
+                    await FakeApi.SendAsync(context, "still here");
+                    await release.Task;
+                    await FakeApi.SendAsync(context, ", and done");
+                    break;
+                default:
+                    await ServeAsync(context);
+                    break;
+            }
+        });
+        var url = world.Url();
+        using var cut = await world.PlayAsync(url, "bytes=0-");
+        await using var cutBody = await cut.Content.ReadAsStreamAsync(Ct);
+        await cutBody.ReadExactlyAsync(new byte[20_000], Ct);
+
+        using var other = await world.PlayAsync(url, "bytes=50000-");
+        await using var otherBody = await other.Content.ReadAsStreamAsync(Ct);
+        await otherBody.ReadExactlyAsync(new byte[10], Ct);
+
+        var rest = new byte[80_000];
+        await cutBody.ReadExactlyAsync(rest, Ct);
+        release.SetResult();
+        using var reader = new StreamReader(otherBody);
+
+        Assert.Equal(Film[20_000..], rest);
+        Assert.Equal(", and done", await reader.ReadToEndAsync(Ct));
+        Assert.Empty(world.Failures);
+    }
+
+    // ---- Listening only while something plays ----
+
+    private static bool Listening(string url)
+    {
+        var port = new Uri(url).Port;
+        return IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(listener => listener.Port == port);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(Within);
+        while (!condition()) await Task.Delay(10, timeout.Token);
+    }
+
+    [Fact]
+    public async Task LastUrlReleased_StopsListening_TheNextPlayListensAgain()
+    {
+        await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
+        var first = world.Url();
+        Assert.True(Listening(first));
+
+        world.Proxy.Release(first);
+
+        await WaitUntilAsync(() => !Listening(first));
+        Assert.Null(world.Proxy.FileOf(first));
+
+        var second = world.Url();
+        Assert.True(Listening(second));
+        using var response = await world.PlayAsync(second);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Release_WithAnotherUrlHeld_KeepsListening()
+    {
+        await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
+        var first = world.Url();
+        var second = world.Url();
+        Assert.NotEqual(first, second);
+
+        world.Proxy.Release(first);
+        await Task.Delay(200, Ct);
+
+        using var refused = await world.PlayAsync(first);
+        Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
+        using var response = await world.PlayAsync(second);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dispose_WithAnOpenResponse_EndsItAndSaysNothing()
+    {
+        await using var world = await Fake.StartAsync(async (context, _) =>
+        {
+            await FakeApi.SendAsync(context, "start");
+            await FakeApi.HangAsync(context);
+        });
+        using var response = await world.PlayAsync(world.Url());
+        await using var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[5], Ct);
+
+        await world.Proxy.DisposeAsync().AsTask().WaitAsync(Within, Ct);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => body.CopyToAsync(Stream.Null, Ct).WaitAsync(Within, Ct));
+        Assert.Empty(world.Failures);
+    }
+
+    [Fact]
+    public async Task UrlFor_AfterDispose_SaysTheStreamIsUnavailable()
+    {
+        await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
+        await world.Proxy.DisposeAsync();
+
+        Assert.Throws<StreamUnavailableException>(() => world.Url());
+        await Assert.ThrowsAsync<StreamUnavailableException>(world.Proxy.StartAsync);
+    }
+
+    [Fact]
+    public async Task Port_InUse_SaysTheStreamIsUnavailable()
+    {
+        await using var fixture = new ServerFixture();
+        using var client = new ApiClient(new ServerEndpoint("Library", ["127.0.0.1:1"], CertificateStore.Fingerprint(fixture.NewCertificate())), () => Token, _ => { });
+        var taken = new TcpListener(IPAddress.Loopback, 0);
+        taken.Start();
+        await using var proxy = new StreamProxy(client, ((IPEndPoint)taken.LocalEndpoint).Port);
+
+        Assert.Throws<StreamUnavailableException>(() => proxy.UrlFor(FileId, "Heat.mkv"));
+
+        // Nothing stuck: the proxy tries again when the port is free.
+        var free = ((IPEndPoint)taken.LocalEndpoint).Port;
+        taken.Stop();
+        Assert.Contains($":{free}/", proxy.UrlFor(FileId, "Heat.mkv"), StringComparison.Ordinal);
     }
 
     [Fact]

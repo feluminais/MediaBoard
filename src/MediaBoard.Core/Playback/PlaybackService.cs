@@ -67,6 +67,9 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     private readonly Lock _stateGate = new();
     private Playing? _current;
 
+    // A session on its way out, still waiting for its final position: a stream that fails now must still stop that save.
+    private Playing? _stopping;
+
     public PlaybackService(
         IPlaybackSource source,
         IProgressSink progress,
@@ -105,6 +108,10 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         catch (ServerUnreachableException)
         {
             _hub.Log(ActivityLevel.Warning, "Can't reach the server", "Their PC may be off or asleep, or sharing is off");
+        }
+        catch (StreamUnavailableException)
+        {
+            _hub.Log(ActivityLevel.Warning, "Couldn't start the stream", "Try again");
         }
         catch (Exception e) when (e is ApiException or IdentityChangedException)
         {
@@ -227,7 +234,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     public async Task AbandonAsync(int fileId, string reason)
     {
         Playing? playing;
-        lock (_stateGate) playing = _current;
+        lock (_stateGate) playing = _current ?? _stopping;
         if (playing is null) return;
 
         lock (playing.Gate)
@@ -241,6 +248,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         ClearCurrent(playing);
         _hub.Log(ActivityLevel.Warning, reason);
         await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        Release(playing);
         ProgressChanged?.Invoke();
     }
 
@@ -274,7 +282,11 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
 
         var player = _detector.Resolve(_settings.Load());
-        if (player is null) return;
+        if (player is null)
+        {
+            _source.Released(target.Locator);
+            return;
+        }
 
         // The old session is closed only now: a file or player that cannot start leaves it playing.
         var stoppedFileId = await StopCurrentAsync(ct).ConfigureAwait(false);
@@ -282,7 +294,16 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         // Stopping saved a fresher position and may have marked the file watched, so the resolved progress is stale.
         if (stoppedFileId == target.FileId)
         {
-            target = await _source.ResolveAsync(fileId, ct).ConfigureAwait(false);
+            var stale = target;
+            try
+            {
+                target = await _source.ResolveAsync(fileId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _source.Released(stale.Locator);
+            }
+
             if (target is null)
             {
                 LogFileMissing(null);
@@ -308,11 +329,12 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
         catch (ArgumentException)
         {
+            _source.Released(target.Locator);
             LogCouldNotStart(player);
             return;
         }
 
-        var playing = new Playing(fileId, target.Title, player.Name, session)
+        var playing = new Playing(fileId, target.Title, player.Name, session, target.Locator)
         {
             Duration = target.DurationS ?? saved?.DurationS ?? 0,
             Marked = saved?.Watched ?? false,
@@ -396,7 +418,11 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
         ClearCurrent(playing);
         // Not awaited: this runs on the player's event thread, which must not wait on the session.
-        _ = Task.Run(() => DisposeQuietlyAsync(playing.Session));
+        _ = Task.Run(async () =>
+        {
+            await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+            Release(playing);
+        });
 
         ProgressChanged?.Invoke();
         if (end == EndKind.Closed && !playing.Session.TracksProgress && playing.FileId is { } fileId) AskFinished?.Invoke(fileId, playing.Title);
@@ -523,19 +549,23 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         {
             playing = _current;
             _current = null;
+            _stopping = playing;
             if (playing is not null) _hub.SetPlayer(null);
         }
 
         if (playing is null) return null;
 
         var position = await FreshPositionAsync(playing, ct).ConfigureAwait(false);
-        if (SaveAt(playing, position, final: true)) ProgressChanged?.Invoke();
+        var saved = SaveAt(playing, position, final: true);
+        lock (_stateGate) _stopping = null;
+        if (saved) ProgressChanged?.Invoke();
 
         int? fileId;
         lock (playing.Gate) fileId = playing.FileId;
 
         if (!closePlayer) playing.Session.Detach();
         await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        Release(playing);
         return fileId;
     }
 
@@ -593,6 +623,12 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         lock (playing.Gate) playing.Final = true;
         ClearCurrent(playing);
         await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
+        Release(playing);
+    }
+
+    private void Release(Playing playing)
+    {
+        if (playing.Locator is { } locator) _source.Released(locator);
     }
 
     private void ClearCurrent(Playing playing)
@@ -625,12 +661,15 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
     private enum EndKind { None, Closed, Failed }
 
-    private sealed class Playing(int? fileId, string title, string playerName, IPlayerSession session)
+    private sealed class Playing(int? fileId, string title, string playerName, IPlayerSession session, string? locator = null)
     {
         public readonly Lock Gate = new();
 
         public string PlayerName => playerName;
         public IPlayerSession Session => session;
+
+        // What the session started on, and gives back at its end. Null for a player it attached to.
+        public string? Locator => locator;
 
         // Everything below is guarded by Gate. The file changes when the player moves on to another one; it is
         // null while the player has a file that is not in the library, or none.

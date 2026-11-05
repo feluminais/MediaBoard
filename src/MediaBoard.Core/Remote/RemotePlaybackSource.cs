@@ -5,14 +5,24 @@ using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Core.Remote;
 
+/// <summary>This PC can't serve a stream: the app is closing, or the loopback address couldn't be bound.</summary>
+public sealed class StreamUnavailableException(Exception? innerException = null) : Exception("A stream can't be served from this PC.", innerException);
+
 /// <summary>Turns a shared file into a URL a player can open, and says when what's behind that URL breaks.</summary>
 public interface IStreamUrls
 {
-    /// <summary>Called before a session starts. The first call may start what serves the URL.</summary>
+    /// <summary>
+    /// Called before a session starts, and may start what serves the URL. Each call gives a new URL, which
+    /// <see cref="Release"/> gives back.
+    /// </summary>
+    /// <exception cref="StreamUnavailableException">It can't be served.</exception>
     string UrlFor(int fileId, string fileName);
 
     /// <summary>The file behind a URL from <see cref="UrlFor"/>, or null. Answers from memory: it runs under the session gate.</summary>
     int? FileOf(string locator);
+
+    /// <summary>Nothing will use this URL again: its session ended or never began. Must not block.</summary>
+    void Release(string url);
 
     /// <summary>
     /// A file's stream can't go on, which a player won't show: it plays out its buffer and reports the file as finished.
@@ -53,6 +63,7 @@ public sealed class RemotePlaybackSource : IPlaybackSource
     /// <exception cref="ServerUnreachableException">No answer.</exception>
     /// <exception cref="IdentityChangedException">The server's certificate changed.</exception>
     /// <exception cref="ApiException">The server refused.</exception>
+    /// <exception cref="StreamUnavailableException">This PC can't serve the stream.</exception>
     public async Task<PlayTarget?> ResolveAsync(int fileId, CancellationToken ct)
     {
         // Read before asking: a send that finishes during the request could leave neither answer with the entry in it.
@@ -84,6 +95,8 @@ public sealed class RemotePlaybackSource : IPlaybackSource
     public PlayTarget? FindByLocator(string locator) =>
         _urls.FileOf(locator) is { } fileId ? _targets.GetValueOrDefault(fileId) : null;
 
+    public void Released(string locator) => _urls.Release(locator);
+
     /// <summary>The server settles two devices by the newest entry, so an entry older than its answer has lost already.</summary>
     private static Progress? Overlay(Progress? saved, PendingProgress? waiting)
     {
@@ -105,6 +118,7 @@ public sealed class RemotePlaybackSource : IPlaybackSource
         ApiErrorCode.FileMissing => _targets.TryGetValue(fileId, out var target) ? $"File missing: {target.Title}" : "File missing",
         ApiErrorCode.DriveUnavailable => "The drive with this file isn't available",
         ApiErrorCode.Unreachable => "Can't reach the server",
+        ApiErrorCode.TooManyStreams => "Too many streams on this account",
         _ => "The stream ended",
     };
 }
