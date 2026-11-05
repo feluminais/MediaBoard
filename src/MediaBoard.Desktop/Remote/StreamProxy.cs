@@ -36,7 +36,7 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
     private string _origin = "";
     private bool _disposed;
 
-    public event Action<int, ApiErrorCode>? StreamFailed;
+    public event Action<int, string, ApiErrorCode>? StreamFailed;
 
     /// <summary>Starts listening, unless it already is. <see cref="UrlFor"/> does this by itself.</summary>
     /// <exception cref="StreamUnavailableException">The proxy was disposed, or the address couldn't be bound.</exception>
@@ -300,7 +300,7 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
     // A URL already released belongs to a session that's over, and the same file may be playing again on a new one.
     private void Fail(string url, int fileId, ApiErrorCode code)
     {
-        if (_files.ContainsKey(url)) StreamFailed?.Invoke(fileId, code);
+        if (_files.ContainsKey(url)) StreamFailed?.Invoke(fileId, url, code);
     }
 
     private async Task RelayAsync(HttpContext context, string url, int fileId, HttpResponseMessage first, CancellationToken stopping)

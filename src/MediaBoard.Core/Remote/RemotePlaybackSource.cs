@@ -26,9 +26,10 @@ public interface IStreamUrls
 
     /// <summary>
     /// A file's stream can't go on, which a player won't show: it plays out its buffer and reports the file as finished.
-    /// Raised on a request's thread, and again by every request that meets the same failure.
+    /// Gives the file, the URL, which says which session it was, and the code. Raised on a request's thread, and again by
+    /// every request that meets the same failure.
     /// </summary>
-    event Action<int, ApiErrorCode>? StreamFailed;
+    event Action<int, string, ApiErrorCode>? StreamFailed;
 }
 
 /// <summary>
@@ -55,10 +56,10 @@ public sealed class RemotePlaybackSource : IPlaybackSource
     }
 
     /// <summary>
-    /// A stream failed: the file, and what to tell the viewer. This goes to <see cref="PlaybackService.AbandonAsync"/>.
+    /// A stream failed: the file, its URL and what to tell the viewer. This goes to <see cref="PlaybackService.AbandonAsync"/>.
     /// Raised on a request's thread.
     /// </summary>
-    public event Action<int, string>? StreamLost;
+    public event Action<int, string, string>? StreamLost;
 
     /// <exception cref="ServerUnreachableException">No answer.</exception>
     /// <exception cref="IdentityChangedException">The server's certificate changed.</exception>
@@ -92,6 +93,8 @@ public sealed class RemotePlaybackSource : IPlaybackSource
         return target;
     }
 
+    public bool PlayerCanLoseItsStream => true;
+
     public PlayTarget? FindByLocator(string locator) =>
         _urls.FileOf(locator) is { } fileId ? _targets.GetValueOrDefault(fileId) : null;
 
@@ -110,7 +113,7 @@ public sealed class RemotePlaybackSource : IPlaybackSource
         return new Progress(waiting.FileId, position, duration, waiting.Watched ?? saved?.Watched ?? false, at);
     }
 
-    private void OnStreamFailed(int fileId, ApiErrorCode code) => StreamLost?.Invoke(fileId, ReasonFor(fileId, code));
+    private void OnStreamFailed(int fileId, string url, ApiErrorCode code) => StreamLost?.Invoke(fileId, url, ReasonFor(fileId, code));
 
     private string ReasonFor(int fileId, ApiErrorCode code) => code switch
     {

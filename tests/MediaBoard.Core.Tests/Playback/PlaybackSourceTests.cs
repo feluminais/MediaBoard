@@ -80,6 +80,22 @@ public sealed class PlaybackSourceTests : IDisposable
         Assert.Equal("mpv", _hub.Current.PlayerName);
     }
 
+    // A file on this PC can't lose its stream, so an early Ended changes nothing about what the player is believed on.
+    [Fact]
+    public async Task EarlyEnded_LocalSource_StillTakesTheFreshPosition()
+    {
+        _source.Add(new PlayTarget(7, Url, "Local", 6000, Saved: null, Missing: false));
+        await _service.PlayAsync(7, fromStart: false, CancellationToken.None);
+        var session = _sessions[^1];
+        session.Raise(new PlaybackEvent.Position(TimeSpan.FromSeconds(120)));
+        session.Raise(new PlaybackEvent.Ended());
+        session.Position = TimeSpan.FromSeconds(300);
+
+        await _service.StopAsync(closePlayer: true, CancellationToken.None);
+
+        Assert.Equal((7, 300d, 6000d), _sink.Saves[^1]);
+    }
+
     [Fact]
     public async Task PlayOtherFile_ResolvesOnce()
     {

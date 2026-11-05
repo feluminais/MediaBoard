@@ -391,6 +391,24 @@ public sealed class ProgressOutboxTests
     }
 
     [Fact]
+    public async Task Beat_AfterAnUnwatchBeforeTheFirstSend_WritesNothing()
+    {
+        await using var world = await RealWorld.StartAsync(DateTimeOffset.UtcNow);
+
+        // No row on the server yet, so a beat dated 1970 would be stored as the first one.
+        world.Outbox.Save(world.File, 500, 6000);
+        world.Outbox.SetWatched(world.File, false);
+        world.Outbox.Paused(world.File);
+        await WaitUntilAsync(() => world.Outbox.Waiting(world.File) is null);
+
+        world.Clock.Advance(Every);
+        world.Clock.Advance(Every);
+        await World.SettleAsync();
+
+        Assert.Null(world.Stored);
+    }
+
+    [Fact]
     public async Task Beat_FromAFastClock_LosesToAnotherDevicesNewerSave()
     {
         await using var world = await RealWorld.StartAsync(DateTimeOffset.UtcNow.AddHours(1));

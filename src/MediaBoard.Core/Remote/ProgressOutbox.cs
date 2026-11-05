@@ -74,8 +74,10 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             ReadFile();
             _waiting.TryGetValue(fileId, out var earlier);
 
-            // Unwatched forgets the position, as it does locally, and only the watched route does that on the server.
+            // Unwatched forgets the position, as it does locally, and only the watched route does that on the server. With
+            // no row there yet, a beat would be stored after all, so the position goes from here too.
             _waiting[fileId] = new PendingProgress(fileId, watched ? earlier?.PositionS : null, earlier?.DurationS ?? 0, watched, time.GetUtcNow());
+            if (!watched && _last?.FileId == fileId) _last = null;
             Write();
         }
     }

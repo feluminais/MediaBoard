@@ -68,7 +68,7 @@ public sealed class StreamProxyTests
             Calls = calls;
             Client = new ApiClient(new ServerEndpoint("Library", [api.Address], CertificateStore.Fingerprint(fixture.NewCertificate())), () => Token, _ => { }, time);
             Proxy = new StreamProxy(Client);
-            Proxy.StreamFailed += (fileId, code) =>
+            Proxy.StreamFailed += (fileId, _, code) =>
             {
                 Failures.Enqueue((fileId, code));
                 _failed.TrySetResult((fileId, code));
@@ -391,7 +391,7 @@ public sealed class StreamProxyTests
         using var client = live.NewClient();
         await using var proxy = new StreamProxy(client);
         var failed = new TaskCompletionSource<(int, ApiErrorCode)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        proxy.StreamFailed += (fileId, code) => failed.TrySetResult((fileId, code));
+        proxy.StreamFailed += (fileId, _, code) => failed.TrySetResult((fileId, code));
         using var player = new HttpClient();
         using var response = await player.GetAsync(proxy.UrlFor(id, "Heat (1995).mkv"), HttpCompletionOption.ResponseHeadersRead, Ct);
         await using var body = await response.Content.ReadAsStreamAsync(Ct);
@@ -627,7 +627,7 @@ public sealed class StreamProxyTests
         Task? playerRead = null;
         bool? endedFirst = null;
         var heard = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        world.Proxy.StreamFailed += (_, _) =>
+        world.Proxy.StreamFailed += (_, _, _) =>
         {
             // The handler runs in the proxy's way: while it runs, the player must still be waiting.
             Thread.Sleep(200);
@@ -749,6 +749,51 @@ public sealed class StreamProxyTests
 
         await Assert.ThrowsAnyAsync<Exception>(() => body.CopyToAsync(Stream.Null, Ct).WaitAsync(Within, Ct));
         Assert.Empty(world.Failures);
+    }
+
+    [Theory]
+    [InlineData("Dispose")]
+    [InlineData("LastUrlReleased")]
+    public async Task Stopping_DuringAHeldReRequest_EndsItAndSaysNothing(string how)
+    {
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gaveUp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var world = await Fake.StartAsync(async (context, request) =>
+        {
+            if (request == 1)
+            {
+                await SendThenCutAsync(context, 20_000);
+                return;
+            }
+
+            context.RequestAborted.Register(gaveUp.SetResult);
+            asked.TrySetResult();
+            await FakeApi.HangAsync(context);
+        });
+        var url = world.Url();
+        using var response = await world.PlayAsync(url, "bytes=0-");
+        await using var body = await response.Content.ReadAsStreamAsync(Ct);
+        await body.ReadExactlyAsync(new byte[20_000], Ct);
+        await asked.Task.WaitAsync(Within, Ct);
+
+        if (how == "Dispose") await world.Proxy.DisposeAsync().AsTask().WaitAsync(Within, Ct);
+        else world.Proxy.Release(url);
+
+        await gaveUp.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Assert.Empty(world.Failures);
+    }
+
+    [Fact]
+    public async Task StreamFailed_SaysWhichUrl()
+    {
+        await using var world = await Fake.StartAsync((context, _) => RefuseAsync(context, ApiErrorCode.StreamStopped));
+        var heard = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Proxy.StreamFailed += (_, url, _) => heard.TrySetResult(url);
+        var url = world.Url();
+
+        using var response = await world.PlayAsync(url);
+
+        Assert.Equal(url, await heard.Task.WaitAsync(Within, Ct));
     }
 
     [Fact]

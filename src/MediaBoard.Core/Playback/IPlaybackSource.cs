@@ -15,8 +15,16 @@ public interface IPlaybackSource
     PlayTarget? FindByLocator(string locator);
 
     /// <summary>
-    /// A locator from <see cref="ResolveAsync"/> is done with: its session ended, or it never got one. Called once for
-    /// each, and never while a player can still read it. Must not block. A local file holds nothing.
+    /// Whether the player reads over a link that can break without it saying so. A player that lost its stream reports
+    /// Ended early and then claims the whole file, so <see cref="PlaybackService"/> stops believing its positions after an
+    /// Ended that doesn't count as watched, until it plays again. A file on this PC can't go that way.
+    /// </summary>
+    bool PlayerCanLoseItsStream => false;
+
+    /// <summary>
+    /// A locator from <see cref="ResolveAsync"/> is done with: its session ended, or it never got one. One can arrive twice
+    /// when a stop and a failed stream end the same session, which must change nothing the second time. Must not block.
+    /// A local file holds nothing.
     /// </summary>
     void Released(string locator)
     {

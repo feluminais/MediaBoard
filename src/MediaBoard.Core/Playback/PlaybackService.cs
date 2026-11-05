@@ -70,6 +70,10 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     // A session on its way out, still waiting for its final position: a stream that fails now must still stop that save.
     private Playing? _stopping;
 
+    // A launch-only program's locator after it exited. Some hand the file to a running instance and exit at once, so its
+    // exit says nothing about whether the locator is still being read. The next Play or the end of the app gives it back.
+    private string? _lingering;
+
     public PlaybackService(
         IPlaybackSource source,
         IProgressSink progress,
@@ -227,15 +231,17 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     /// Ends the session on <paramref name="fileId"/> because its stream failed. A player left without its stream raises no
     /// error: it plays out its buffer, then reports Ended and the file's full length. So from here nothing it says counts,
     /// the position saved before the failure stands, and the player is closed. Doesn't wait for a Play in progress, so the
-    /// session stops listening at once; does nothing if that file isn't what's playing.
+    /// session stops listening at once. Does nothing unless <paramref name="url"/> is what the session playing that file
+    /// started on: an old session's URL can fail late, while the same file plays again on a new one.
     /// </summary>
     /// <param name="fileId">The file whose stream failed.</param>
+    /// <param name="url">The URL it failed on.</param>
     /// <param name="reason">What to tell the viewer.</param>
-    public async Task AbandonAsync(int fileId, string reason)
+    public async Task AbandonAsync(int fileId, string url, string reason)
     {
         Playing? playing;
         lock (_stateGate) playing = _current ?? _stopping;
-        if (playing is null) return;
+        if (playing is null || playing.Locator != url) return;
 
         lock (playing.Gate)
         {
@@ -259,6 +265,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         try
         {
             await StopCurrentAsync(CancellationToken.None).ConfigureAwait(false);
+            ReleaseLingering();
         }
         finally
         {
@@ -349,6 +356,8 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             _hub.SetPlayer(player.Name);
         }
 
+        ReleaseLingering();
+
         try
         {
             await session.StartAsync(target.Locator, startAt, ct).ConfigureAwait(false);
@@ -417,11 +426,14 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
 
         ClearCurrent(playing);
+        var lingers = end == EndKind.Closed && !playing.Session.TracksProgress;
+        if (lingers) Linger(playing);
+
         // Not awaited: this runs on the player's event thread, which must not wait on the session.
         _ = Task.Run(async () =>
         {
             await DisposeQuietlyAsync(playing.Session).ConfigureAwait(false);
-            Release(playing);
+            if (!lingers) Release(playing);
         });
 
         ProgressChanged?.Invoke();
@@ -465,6 +477,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         playing.Title = target?.Title ?? "";
         playing.Duration = target?.DurationS ?? saved?.DurationS ?? 0;
         playing.LastPosition = null;
+        playing.EndedEarly = false;
         playing.Marked = saved?.Watched ?? false;
         // The player starts a file it opened itself at the start, so a saved position stays until it is passed.
         playing.CanSave = saved is null || saved.PositionS <= RealPositionS;
@@ -482,7 +495,14 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
                 if (loaded.Duration > TimeSpan.Zero) playing.Duration = loaded.Duration.TotalSeconds;
                 break;
 
+            case PlaybackEvent.Playing:
+                playing.EndedEarly = false;
+                break;
+
             case PlaybackEvent.Position position:
+                // MPC-HC's answer to asking for the position comes this way too, so the claim would get in here.
+                if (playing.EndedEarly) break;
+
                 playing.LastPosition = position.At.TotalSeconds;
                 if (playing.LastPosition > RealPositionS) playing.CanSave = true;
                 SaveLastPosition(playing);
@@ -495,11 +515,11 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
 
             case PlaybackEvent.Ended:
                 SaveLastPosition(playing);
-                if (!playing.Marked && WatchRules.EndedCountsAsWatched(playing.LastPosition, playing.Duration))
-                {
-                    MarkWatched(playing);
-                }
+                var counts = WatchRules.EndedCountsAsWatched(playing.LastPosition, playing.Duration);
+                if (counts && !playing.Marked) MarkWatched(playing);
 
+                // A player that lost its stream without anyone hearing of it now claims the whole file, for as long as it sits here.
+                playing.EndedEarly = !counts && _source.PlayerCanLoseItsStream;
                 Finish(playing);
                 break;
 
@@ -598,7 +618,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
             playing.Final = final;
             try
             {
-                if (position is { } at)
+                if (position is { } at && !playing.EndedEarly)
                 {
                     playing.LastPosition = at.TotalSeconds;
                     if (at.TotalSeconds > RealPositionS) playing.CanSave = true;
@@ -629,6 +649,30 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
     private void Release(Playing playing)
     {
         if (playing.Locator is { } locator) _source.Released(locator);
+    }
+
+    private void Linger(Playing playing)
+    {
+        string? older;
+        lock (_stateGate)
+        {
+            older = _lingering;
+            _lingering = playing.Locator;
+        }
+
+        if (older is not null) _source.Released(older);
+    }
+
+    private void ReleaseLingering()
+    {
+        string? lingering;
+        lock (_stateGate)
+        {
+            lingering = _lingering;
+            _lingering = null;
+        }
+
+        if (lingering is not null) _source.Released(lingering);
     }
 
     private void ClearCurrent(Playing playing)
@@ -677,6 +721,9 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         public string Title = title;
         public double Duration;
         public double? LastPosition;
+
+        // Set by an Ended that didn't count, when the player can lose its stream. Until it plays again, it isn't believed.
+        public bool EndedEarly;
         public bool CanSave;
         public bool Marked;
         public bool Final;
