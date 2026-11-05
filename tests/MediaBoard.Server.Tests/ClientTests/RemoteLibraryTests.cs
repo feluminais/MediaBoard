@@ -70,7 +70,7 @@ public sealed class RemoteLibraryTests
             var clock = new FakeTimeProvider();
             var fixture = new ServerFixture(time: clock);
             var port = ServerFixture.FreePort();
-            await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
+            await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
             var world = new World(fixture, port) { Clock = clock };
             var folder = fixture.AddFolder("films");
             world.Heat = fixture.Movie("Heat", 101);
@@ -95,7 +95,7 @@ public sealed class RemoteLibraryTests
         public RemoteImages NewImages(TimeProvider? time = null) => new(Client, _imagesDir, time);
 
         public Task StartAgainAsync() =>
-            Fixture.Server.StartAsync(new SharingOptions(Port, ServerFixture.ServerName, Fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
+            Fixture.Server.StartAsync(new SharingOptions(Port, Fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
 
         /// <summary>A client for a port nothing listens on.</summary>
         public ApiClient DeadClient()

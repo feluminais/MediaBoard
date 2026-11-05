@@ -563,7 +563,7 @@ public sealed class AccountServiceTests : IDisposable
         var threads = Enumerable.Range(0, results.Length).Select(i => new Thread(() =>
         {
             results[i] = _service.SignIn("Guest" + i, Bad, "Phone", Address).Failure;
-            if (results[i] == RedeemFailure.Locked) Interlocked.Increment(ref refused);
+            if (results[i] == RedeemFailure.Busy) Interlocked.Increment(ref refused);
         })).ToList();
         foreach (var thread in threads) thread.Start();
 
@@ -576,9 +576,77 @@ public sealed class AccountServiceTests : IDisposable
         Assert.True(allRefused);
         Assert.Equal(1, checksBeforeRelease);
         Assert.Equal(9, _checks);
-        Assert.Equal(12, results.Count(r => r == RedeemFailure.Locked));
+        Assert.Equal(12, results.Count(r => r == RedeemFailure.Busy));
         Assert.Equal(8, results.Count(r => r == RedeemFailure.WrongPassword));
         Assert.Empty(Logged(SharingEvent.SignInLocked));
+    }
+
+    [Fact]
+    public void Locked_IsSaidWithoutQueueing_EvenAtAFullGate()
+    {
+        Trip("Anna");
+        using var inside = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        _whileChecking = () =>
+        {
+            inside.Set();
+            release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        };
+        var threads = Enumerable.Range(0, 9).Select(i => new Thread(() => _service.SignIn("Guest" + i, Bad, "Phone", "198.51.100." + i))).ToList();
+        foreach (var thread in threads) thread.Start();
+        Assert.True(inside.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        var full = SpinWait.SpinUntil(
+            () => _service.SignIn("Stranger", Bad, "Phone", "203.0.113.1").Failure == RedeemFailure.Busy, TimeSpan.FromSeconds(10));
+
+        var locked = _service.SignIn("Anna", Good, "Phone", "203.0.113.2").Failure;
+
+        release.Set();
+        foreach (var thread in threads) thread.Join();
+        Assert.True(full);
+        Assert.Equal(RedeemFailure.Locked, locked);
+    }
+
+    [Fact]
+    public void Owner_WithNoPassword_FailsLikeAWrongPassword()
+    {
+        var owner = _accounts.Get(LibraryDatabase.OwnerId)!;
+
+        var result = _service.SignIn(owner.Name, Good, "Phone", Address);
+
+        Assert.Null(result.Issued);
+        Assert.Equal(RedeemFailure.WrongPassword, result.Failure);
+    }
+
+    [Fact]
+    public void NewPasswords_HashTwoAtOnce_AndPastTheQueueItIsBusy()
+    {
+        var account = _service.AddPerson("Anna", null);
+        var code = _invites.Create(account.Id);
+        var hashing = 0;
+        var most = 0;
+        using var release = new ManualResetEventSlim();
+        _whileHashing = () =>
+        {
+            var now = Interlocked.Increment(ref hashing);
+            lock (release) most = Math.Max(most, now);
+            release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            Interlocked.Decrement(ref hashing);
+        };
+
+        // Two hash and 8 wait; the other 6 must come straight back.
+        var busy = 0;
+        var threads = Enumerable.Range(0, 16).Select(_ => new Thread(() =>
+        {
+            if (_service.Redeem(code, Good, "Phone", Address).Failure == RedeemFailure.Busy) Interlocked.Increment(ref busy);
+        })).ToList();
+        foreach (var thread in threads) thread.Start();
+
+        var allBusy = SpinWait.SpinUntil(() => Volatile.Read(ref busy) == 6, TimeSpan.FromSeconds(10));
+        release.Set();
+        foreach (var thread in threads) thread.Join();
+
+        Assert.True(allBusy);
+        Assert.Equal(2, most);
     }
 
     // What the log may hold

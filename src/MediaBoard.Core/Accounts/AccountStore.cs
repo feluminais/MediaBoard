@@ -146,8 +146,9 @@ public sealed class AccountStore(LibraryDatabase db, TimeProvider? time = null)
         connection.Execute("UPDATE users SET last_seen = @now WHERE id = @id", new { id, now = FileStore.FormatTime(_time.GetUtcNow()) });
     }
 
+    /// <summary>The viewer a device of this account acts as.</summary>
     public Viewer ViewerOf(Account account) =>
-        new(account.Id, account.FolderIds?.ToHashSet());
+        new(account.Id, account.FolderIds?.ToHashSet(), OverNetwork: true);
 
     private static void RefuseOwner(int id, string message)
     {

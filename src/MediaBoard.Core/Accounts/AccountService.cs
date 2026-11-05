@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 
 namespace MediaBoard.Core.Accounts;
 
-public enum RedeemFailure { InviteDead, PasswordTooShort, WrongPassword, Locked, AccountDisabled }
+public enum RedeemFailure { InviteDead, PasswordTooShort, WrongPassword, Locked, AccountDisabled, Busy }
 
 /// <summary>Holds <see cref="Issued"/> on success and <see cref="Failure"/> otherwise.</summary>
 public sealed record RedeemResult(IssuedDevice? Issued, RedeemFailure? Failure);
@@ -34,12 +34,18 @@ internal sealed record PasswordWork(Func<string, string> Hash, Func<string, stri
 public sealed class AccountService(
     LibraryDatabase db, AccountStore accounts, DeviceStore devices, InviteStore invites, SignInGuard guard, SharingLog log)
 {
-    // One check runs, 8 wait. That limits the hashing strangers can cause; a new account's password is hashed outside
-    // the gate, but reaching that takes a live invite.
+    // One check runs, 8 wait. That limits the hashing strangers can cause.
     private const int MaxAtGate = 9;
 
+    // A new account's password is hashed outside that gate, since nothing depends on its order, but whoever holds a live
+    // invite could otherwise start one hash per connection.
+    private const int HashingAtOnce = 2;
+    private const int MaxAtHashing = HashingAtOnce + 8;
+
     private readonly Lock _gate = new();
+    private readonly SemaphoreSlim _hashing = new(HashingAtOnce, HashingAtOnce);
     private int _atGate;
+    private int _atHashing;
 
     /// <summary>Raised after an account's tokens are dead, with the id of the account whose sessions must end.</summary>
     public event Action<int>? AccountClosed;
@@ -185,9 +191,34 @@ public sealed class AccountService(
     {
         if (password is null || password.Length < Passwords.MinLength) return new RedeemResult(null, RedeemFailure.PasswordTooShort);
 
-        var result = Join(account.Id, code, null, Work.Hash(password), deviceName, address);
+        if (HashInTurn(password) is not { } hash) return new RedeemResult(null, RedeemFailure.Busy);
+
+        var result = Join(account.Id, code, null, hash, deviceName, address);
         if (result.Issued is not null) log.Add(SharingEvent.Joined, account.Id, deviceName);
         return result;
+    }
+
+    /// <returns>Null when too many are waiting already.</returns>
+    private string? HashInTurn(string password)
+    {
+        try
+        {
+            if (Interlocked.Increment(ref _atHashing) > MaxAtHashing) return null;
+
+            _hashing.Wait();
+            try
+            {
+                return Work.Hash(password);
+            }
+            finally
+            {
+                _hashing.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _atHashing);
+        }
     }
 
     private RedeemResult RedeemKnown(Account account, string code, string? password, string deviceName, string address)
@@ -210,9 +241,12 @@ public sealed class AccountService(
     /// <param name="address">Null when there is no remote address to count against.</param>
     private PasswordCheck CheckPassword(string? name, string password, string? address)
     {
+        // Ahead of the queue, so a locked caller can't hold a place in it. The check inside still decides.
+        if (guard.IsLocked(name, address)) return new PasswordCheck(RedeemFailure.Locked, null, null);
+
         try
         {
-            if (Interlocked.Increment(ref _atGate) > MaxAtGate) return new PasswordCheck(RedeemFailure.Locked, null, null);
+            if (Interlocked.Increment(ref _atGate) > MaxAtGate) return new PasswordCheck(RedeemFailure.Busy, null, null);
 
             lock (_gate)
             {

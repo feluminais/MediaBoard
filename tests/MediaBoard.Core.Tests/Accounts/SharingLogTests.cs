@@ -49,6 +49,20 @@ public sealed class SharingLogTests : IDisposable
     }
 
     [Fact]
+    public void AddOncePerDay_KeepsOneEntryForAnAccountAndDetail_UntilADayHasPassed()
+    {
+        _log.AddOncePerDay(SharingEvent.FinishedWatching, LibraryDatabase.OwnerId, "Heat");
+        _log.AddOncePerDay(SharingEvent.FinishedWatching, LibraryDatabase.OwnerId, "Heat");
+        _log.AddOncePerDay(SharingEvent.FinishedWatching, LibraryDatabase.OwnerId, "Ronin");
+        Assert.Equal(2, Rows());
+
+        _clock.Advance(TimeSpan.FromHours(24));
+        _log.AddOncePerDay(SharingEvent.FinishedWatching, LibraryDatabase.OwnerId, "Heat");
+
+        Assert.Equal(3, Rows());
+    }
+
+    [Fact]
     public void Recent_SkipsAnUnknownKind()
     {
         _log.Add(SharingEvent.Joined, null, "known");

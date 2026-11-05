@@ -17,7 +17,7 @@ using ListenOptions = Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions;
 
 namespace MediaBoard.Server;
 
-public sealed record SharingOptions(int Port, string ServerName, X509Certificate2 Certificate)
+public sealed record SharingOptions(int Port, X509Certificate2 Certificate)
 {
     /// <summary>For tests: only this PC can connect, and so Windows Firewall has nothing to ask about.</summary>
     public bool LoopbackOnly { get; init; }
@@ -58,9 +58,6 @@ public sealed class SharingServer(
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private WebApplication? _app;
 
-    /// <summary>What <c>ping</c> answers with. <see cref="StartAsync"/> sets it from its options.</summary>
-    public string ServerName { get; set; } = "";
-
     public bool IsRunning => Volatile.Read(ref _app) is not null;
 
     /// <exception cref="PortInUseException">Something else holds the port.</exception>
@@ -72,7 +69,6 @@ public sealed class SharingServer(
         {
             if (_app is not null) throw new InvalidOperationException("The server is already running.");
 
-            ServerName = options.ServerName;
             var app = BuildHost(options);
             try
             {
@@ -127,7 +123,7 @@ public sealed class SharingServer(
     {
         app.Use(AnswerBadBodies);
 
-        Public.Map(app.MapGroup(Api), this, service, accounts);
+        Public.Map(app.MapGroup(Api), service, accounts);
 
         var auth = new DeviceAuth(devices, accounts, _time);
         var authenticated = app.MapGroup("").AddEndpointFilter(auth).WithMetadata(auth);

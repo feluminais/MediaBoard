@@ -81,14 +81,14 @@ public sealed class ApiClientTests
         {
             var fixture = new ServerFixture();
             var port = ServerFixture.FreePort();
-            await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
+            await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
             var live = new Live(fixture, port) { Sam = fixture.NewPerson("Sam") };
             live.Phone = fixture.Join(live.Sam);
             return live;
         }
 
         public Task StartAgainAsync() =>
-            Fixture.Server.StartAsync(new SharingOptions(Port, ServerFixture.ServerName, Fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
+            Fixture.Server.StartAsync(new SharingOptions(Port, Fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
 
         public ApiClient Client(Action<ConnectionEvent>? report = null) =>
             new(Endpoint(Fingerprint, Address), () => Phone.Token, report ?? (_ => { }));
@@ -176,7 +176,7 @@ public sealed class ApiClientTests
 
         var reply = await client.GetAsync<PingReply>("ping", Ct);
 
-        Assert.Equal(ServerFixture.ServerName, reply.Name);
+        Assert.Equal(ApiVersion.Current, reply.Version);
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class ApiClientTests
         await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), $"localhost:{api.Port}"), () => Token, _ => { });
 
-        Assert.Equal("Fake", (await client.GetAsync<PingReply>("ping", Ct)).Name);
+        await client.GetAsync<PingReply>("ping", Ct);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed class ApiClientTests
         await using var live = await Live.StartAsync();
         using var client = new ApiClient(Endpoint(live.Fingerprint.ToUpperInvariant(), live.Address), () => null, _ => { });
 
-        Assert.Equal(ServerFixture.ServerName, (await client.GetAsync<PingReply>("ping", Ct)).Name);
+        await client.GetAsync<PingReply>("ping", Ct);
     }
 
     [Fact]
@@ -322,7 +322,7 @@ public sealed class ApiClientTests
         await using var api = await FakeApi.ForEventsAsync(fixture.NewCertificate(), FakeApi.HangAsync);
         using var client = new ApiClient(Endpoint(FingerprintOf(fixture), $"[::1]:{api.Port}"), () => Token, _ => { });
 
-        Assert.Equal("Fake", (await client.GetAsync<PingReply>("ping", Ct)).Name);
+        await client.GetAsync<PingReply>("ping", Ct);
     }
 
     [Fact]
@@ -331,7 +331,7 @@ public sealed class ApiClientTests
         await using var live = await Live.StartAsync();
         using var client = new ApiClient(Endpoint(live.Fingerprint, "::1:47880:", "http s://", live.Address), () => null, _ => { });
 
-        Assert.Equal(ServerFixture.ServerName, (await client.GetAsync<PingReply>("ping", Ct)).Name);
+        await client.GetAsync<PingReply>("ping", Ct);
     }
 
     // ---- Addresses and timeouts ----
@@ -500,7 +500,7 @@ public sealed class ApiClientTests
 
         uiThread.Start();
 
-        Assert.Equal(ServerFixture.ServerName, (await finished.Task.WaitAsync(Within, Ct)).Name);
+        Assert.Equal(ApiVersion.Current, (await finished.Task.WaitAsync(Within, Ct)).Version);
     }
 
     /// <summary>A UI thread busy waiting on the caller: nothing posted to it ever runs.</summary>

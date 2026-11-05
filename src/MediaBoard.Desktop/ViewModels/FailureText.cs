@@ -9,6 +9,7 @@ public static class FailureText
     public const string IdentityChanged = "This server's identity changed. Ask for a new invite.";
     public const string InviteDead = "This invite no longer works. Ask for a new one.";
     public const string Locked = "Too many tries. Wait 15 minutes.";
+    public const string Busy = "The server is busy. Try again in a moment.";
     public const string FileMissing = "File missing";
     public const string NothingShared = "Nothing is shared with you yet.";
     public const string LoadFailed = "Couldn't load this page.";

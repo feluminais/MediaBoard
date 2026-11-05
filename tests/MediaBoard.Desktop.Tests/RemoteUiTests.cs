@@ -711,7 +711,7 @@ public sealed class RemoteUiTests : IDisposable
         builder.Services.AddRoutingCore();
         builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel => kestrel.ListenLocalhost(port, listen => listen.UseHttps(certificate)));
         await using var older = builder.Build();
-        older.Run(context => Results.Json(new PingReply(ApiVersion.Current - 1, "Older"), ApiJson.Options).ExecuteAsync(context));
+        older.Run(context => Results.Json(new PingReply(ApiVersion.Current - 1), ApiJson.Options).ExecuteAsync(context));
         await older.StartAsync(Ct);
 
         ConnectionMonitor? monitor = null;

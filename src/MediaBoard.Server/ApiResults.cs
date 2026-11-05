@@ -33,7 +33,7 @@ internal static class ApiResults
         ApiErrorCode.InviteDead => StatusCodes.Status410Gone,
         ApiErrorCode.WrongPassword or ApiErrorCode.Disabled or ApiErrorCode.StreamStopped => StatusCodes.Status403Forbidden,
         ApiErrorCode.Locked or ApiErrorCode.TooManyStreams => StatusCodes.Status429TooManyRequests,
-        ApiErrorCode.DriveUnavailable => StatusCodes.Status503ServiceUnavailable,
+        ApiErrorCode.DriveUnavailable or ApiErrorCode.Busy => StatusCodes.Status503ServiceUnavailable,
         ApiErrorCode.TooLarge => StatusCodes.Status413PayloadTooLarge,
         _ => StatusCodes.Status400BadRequest,
     };

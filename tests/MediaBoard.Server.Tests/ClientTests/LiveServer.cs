@@ -34,7 +34,7 @@ internal sealed class LiveServer : IAsyncDisposable
     {
         var fixture = new ServerFixture();
         var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()) { LoopbackOnly = true }, ct);
+        await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()) { LoopbackOnly = true }, ct);
         var live = new LiveServer(fixture, port) { Sam = fixture.NewPerson("Sam") };
         live.Phone = fixture.Join(live.Sam);
         return live;

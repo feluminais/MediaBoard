@@ -20,6 +20,7 @@ public sealed class ApiException(ApiErrorCode code) : Exception(PlainWords(code)
         ApiErrorCode.InviteDead => "This invite no longer works.",
         ApiErrorCode.WrongPassword => "Wrong password.",
         ApiErrorCode.Locked => "Too many tries.",
+        ApiErrorCode.Busy => "The server is busy.",
         ApiErrorCode.Disabled => "This account is disabled.",
         ApiErrorCode.PasswordTooShort => "That password is too short.",
         ApiErrorCode.FileMissing => "The file is missing.",

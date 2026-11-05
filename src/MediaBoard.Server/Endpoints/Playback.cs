@@ -87,7 +87,7 @@ internal static class Playback
     {
         try
         {
-            log.Add(SharingEvent.FinishedWatching, userId, file.Title);
+            log.AddOncePerDay(SharingEvent.FinishedWatching, userId, file.Title);
         }
         catch (Exception e)
         {

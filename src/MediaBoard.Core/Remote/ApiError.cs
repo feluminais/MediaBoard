@@ -21,6 +21,9 @@ public enum ApiErrorCode
     VersionMismatch,
     BadRequest,
 
+    /// <summary>Too many sign-ins at once. Nothing is wrong with the name or the password, so a moment later it can work.</summary>
+    Busy,
+
     /// <summary>Never sent: what a viewer's proxy reports when a stream broke and no answer said why.</summary>
     Unreachable,
 }

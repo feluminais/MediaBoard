@@ -66,7 +66,7 @@ public sealed class ServerFixture : IAsyncDisposable
             viewer => new SearchService(Owner.ForViewer(viewer), Provider, Connectivity, Titles, Access, viewer),
             new ImageCache(http, Connectivity, ImagesDir));
         Streams = new StreamRegistry(time, new SleepRecorder(), logs?.CreateLogger("Streams"));
-        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, Log, logs, time) { ServerName = ServerName };
+        Server = new SharingServer(Service, Accounts, Devices, shared, Streams, Log, logs, time);
     }
 
     public LibraryDatabase Db { get; }

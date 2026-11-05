@@ -151,7 +151,7 @@ internal sealed class LibrarySnapshot
         var library = shared?.Get() ?? LibraryBase.Read(db);
         var allFolders = library.Folders;
         // Only the owner sees every folder, switched off ones included; a viewer's list holds what they can play.
-        var folders = viewer.IsOwner ? allFolders : allFolders.Where(f => f.Enabled && viewer.CanReach(f.Id)).ToList();
+        var folders = viewer.SeesHidden ? allFolders : allFolders.Where(f => f.Enabled && viewer.CanReach(f.Id)).ToList();
         var overrides = library.Overrides;
         var titles = library.Titles;
         var files = library.Files.Where(f => viewer.CanReach(f.FolderId)).Select(f => f.CopyWithoutProgress()).ToList();

@@ -35,6 +35,23 @@ public sealed class SharingLog(LibraryDatabase db, TimeProvider? time = null)
             "DELETE FROM sharing_log WHERE id NOT IN (SELECT id FROM sharing_log ORDER BY id DESC LIMIT @Cap)", new { Cap });
     }
 
+    /// <summary>
+    /// For what a viewer can repeat at will, such as marking a title watched and back: the log has a cap, and one viewer
+    /// mustn't be able to push everything else out of it.
+    /// </summary>
+    public void AddOncePerDay(SharingEvent kind, int userId, string detail)
+    {
+        using (var connection = db.Open())
+        {
+            var repeated = connection.ExecuteScalar<bool>(
+                "SELECT EXISTS(SELECT 1 FROM sharing_log WHERE kind = @kind AND user_id = @userId AND detail = @detail AND at > @since)",
+                new { kind = kind.ToString(), userId, detail, since = FileStore.FormatTime(_time.GetUtcNow().AddDays(-1)) });
+            if (repeated) return;
+        }
+
+        Add(kind, userId, detail);
+    }
+
     /// <summary>The newest entries first.</summary>
     public IReadOnlyList<SharingLogEntry> Recent(int limit)
     {

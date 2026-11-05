@@ -75,6 +75,7 @@ public sealed partial class AccountViewModel : ObservableObject
     {
         ApiErrorCode.WrongPassword => "Wrong password. Try again.",
         ApiErrorCode.Locked => FailureText.Locked,
+        ApiErrorCode.Busy => FailureText.Busy,
         ApiErrorCode.PasswordTooShort => TooShort,
         _ => "The server turned this down. Try again.",
     };

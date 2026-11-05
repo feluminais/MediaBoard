@@ -54,7 +54,7 @@ public sealed class SearchService(
     private int? ReachableTitleId(SearchCandidate candidate)
     {
         var id = titles.ByTmdb(candidate.TmdbId, candidate.Kind)?.Id;
-        if (id is null || viewer is not { IsOwner: false }) return id;
+        if (id is null || viewer is not { SeesHidden: false }) return id;
 
         ArgumentNullException.ThrowIfNull(access);
         return access.CanReachTitle(viewer, id.Value) ? id : null;

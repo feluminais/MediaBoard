@@ -100,6 +100,17 @@ public sealed class LibraryEndpointTests
         Assert.Empty(viewer);
     }
 
+    [Fact]
+    public async Task OwnerDevice_CannotReachAHiddenTitle_ByItsId()
+    {
+        await using var world = await World.CreateAsync();
+        world.Fixture.Owner.SetHidden(TargetKind.Title, world.Heat, hidden: true);
+
+        var (status, _) = await world.SendAsync("GET", $"/api/v1/titles/{world.Heat}", world.OwnerToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, status);
+    }
+
     [Theory]
     [InlineData("?kind=anime")]
     [InlineData("")]

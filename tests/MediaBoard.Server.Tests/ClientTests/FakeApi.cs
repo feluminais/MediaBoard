@@ -66,7 +66,7 @@ internal sealed class FakeApi : IAsyncDisposable
         StartAsync(
             certificate,
             context => context.Request.Path.Value!.EndsWith("/ping", StringComparison.Ordinal)
-                ? Results.Json(new PingReply(version, "Fake"), ApiJson.Options).ExecuteAsync(context)
+                ? Results.Json(new PingReply(version), ApiJson.Options).ExecuteAsync(context)
                 : events(context),
             port);
 

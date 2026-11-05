@@ -151,7 +151,7 @@ public sealed class LoadMeasureTests
 
         // ---- 6. A TLS handshake on loopback ----
         var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
+        await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()) { LoopbackOnly = true }, Ct);
         var client = fixture.TlsClient();
         var url = new Uri($"https://127.0.0.1:{port}/api/v1/ping");
         (await client.GetAsync(url, Ct)).Dispose();

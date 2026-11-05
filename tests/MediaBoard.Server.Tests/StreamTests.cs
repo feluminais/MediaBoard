@@ -69,7 +69,7 @@ public sealed class StreamTests
         {
             var fixture = new ServerFixture(logs);
             var port = ServerFixture.FreePort();
-            await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()), Ct);
+            await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()), Ct);
             var world = new World(fixture) { Client = fixture.TlsClient(), _base = $"https://127.0.0.1:{port}" };
             await world.FillAsync();
             await MakeBigAsync(world.FilePath);
@@ -590,7 +590,7 @@ public sealed class StreamTests
         await using var world = await World.OnSocketAsync();
         await world.Fixture.Server.StopAsync();
         var port = ServerFixture.FreePort();
-        await world.Fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, world.Fixture.NewCertificate()), Ct);
+        await world.Fixture.Server.StartAsync(new SharingOptions(port, world.Fixture.NewCertificate()), Ct);
         var token = world.Token;
         using var request = world.Fixture.Request("GET", $"https://127.0.0.1:{port}/api/v1/files/{world.File}/stream", token);
         var response = await world.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Ct);

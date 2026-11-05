@@ -20,13 +20,37 @@ public sealed class PublicEndpointTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Ping_ReturnsVersionAndName_WithoutToken()
+    public async Task Ping_ReturnsOnlyTheVersion_WithoutToken()
     {
         await using var fixture = await ServerFixture.StartTestHostAsync();
 
-        var reply = await fixture.Client.GetFromJsonAsync<PingReply>(Ping, ApiJson.Options, Ct);
+        var body = await fixture.Client.GetStringAsync(new Uri(Ping, UriKind.RelativeOrAbsolute), Ct);
 
-        Assert.Equal(new PingReply(ApiVersion.Current, ServerFixture.ServerName), reply);
+        // The default server name holds the owner's Windows user name, and a scanner gets this answer with no token.
+        Assert.Equal($$"""{"version":{{ApiVersion.Current}}}""", body);
+    }
+
+    [Fact]
+    public async Task Redeem_KeepsControlAndDirectionCharactersOutOfTheDeviceName()
+    {
+        await using var fixture = await ServerFixture.StartTestHostAsync();
+        var person = fixture.NewPerson("Anna");
+
+        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "Pho‮ne\n" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Phone", Assert.Single(fixture.Devices.ForUser(person.Id)).Name);
+    }
+
+    [Fact]
+    public async Task Redeem_ADeviceNameOfOnlySuchCharacters_IsRefused()
+    {
+        await using var fixture = await ServerFixture.StartTestHostAsync();
+        var person = fixture.NewPerson("Anna");
+
+        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "‮\n" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     // The owner can remove the account between the device being issued and the answer, which no request can line up.

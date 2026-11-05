@@ -372,7 +372,7 @@ public sealed class EventsTests
         var logs = new HostTests.LogCapture();
         await using var fixture = new ServerFixture(logs);
         var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, fixture.NewCertificate()), Ct);
+        await fixture.Server.StartAsync(new SharingOptions(port, fixture.NewCertificate()), Ct);
         var phone = fixture.Devices.Issue(fixture.NewPerson().Id, "Phone", "198.51.100.1");
         var events = await ListenAsync(fixture, fixture.TlsClient(), $"https://127.0.0.1:{port}", phone.Token);
 
@@ -389,10 +389,10 @@ public sealed class EventsTests
     {
         await using var fixture = new ServerFixture();
         var certificate = fixture.NewCertificate();
-        await fixture.Server.StartAsync(new SharingOptions(ServerFixture.FreePort(), ServerFixture.ServerName, certificate), Ct);
+        await fixture.Server.StartAsync(new SharingOptions(ServerFixture.FreePort(), certificate), Ct);
         await fixture.Server.StopAsync();
         var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(new SharingOptions(port, ServerFixture.ServerName, certificate), Ct);
+        await fixture.Server.StartAsync(new SharingOptions(port, certificate), Ct);
         var phone = fixture.Devices.Issue(fixture.NewPerson().Id, "Phone", "198.51.100.1");
         var events = await ListenAsync(fixture, fixture.TlsClient(), $"https://127.0.0.1:{port}", phone.Token);
 

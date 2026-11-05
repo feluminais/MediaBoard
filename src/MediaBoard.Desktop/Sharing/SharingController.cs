@@ -269,7 +269,7 @@ public sealed class SharingController(
         try
         {
             _server ??= server();
-            var options = new SharingOptions(sharing.Port, NameOf(sharing), certificate) { LoopbackOnly = loopbackOnly };
+            var options = new SharingOptions(sharing.Port, certificate) { LoopbackOnly = loopbackOnly };
             await _server.StartAsync(options, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception e)

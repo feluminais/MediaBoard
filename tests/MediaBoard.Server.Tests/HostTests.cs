@@ -202,15 +202,14 @@ public sealed class HostTests
     }
 
     [Fact]
-    public async Task Ping_NamesTheServerFromTheOptions()
+    public async Task Ping_AnswersWithTheVersion()
     {
         await using var fixture = new ServerFixture();
-        var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(Options(fixture, port) with { ServerName = "Family library" }, Ct);
+        var port = await StartAsync(fixture);
 
         var reply = await fixture.TlsClient().GetFromJsonAsync<PingReply>(Url(port, "/api/v1/ping"), ApiJson.Options, Ct);
 
-        Assert.Equal("Family library", reply!.Name);
+        Assert.Equal(ApiVersion.Current, reply!.Version);
     }
 
     [Fact]
@@ -288,7 +287,7 @@ public sealed class HostTests
     private static Uri Url(int port, string route) => new($"https://127.0.0.1:{port}{route}");
 
     private static SharingOptions Options(ServerFixture fixture, int port) =>
-        new(port, ServerFixture.ServerName, fixture.NewCertificate());
+        new(port, fixture.NewCertificate());
 
     private static async Task<int> StartAsync(ServerFixture fixture)
     {

@@ -56,19 +56,22 @@ public sealed class SharingControllerTests
         Assert.Equal(SharingStatus.On, world.Sharing.Status);
         Assert.Equal([SharingStatus.Starting, SharingStatus.On], seen);
         Assert.True(world.Settings.Load().Sharing.On);
-        Assert.Equal($"{Environment.UserName}'s library", (await world.PingAsync()).Name);
+        await world.PingAsync();
     }
 
-    [Fact]
-    public async Task SetOn_UsesTheChosenServerName()
+    [Theory]
+    [InlineData("The den", "The den")]
+    [InlineData(null, null)]
+    public async Task Invite_CarriesTheServerName(string? chosen, string? expected)
     {
         await using var world = new SharingWorld();
         world.OpenDatabase();
-        world.SetSharing(s => s with { ServerName = "The den" });
-
+        world.SetSharing(s => s with { ServerName = chosen, HomeAddress = "192.168.1.5" });
         await world.Sharing.SetOnAsync(true);
 
-        Assert.Equal("The den", (await world.PingAsync()).Name);
+        Assert.True(InviteString.TryDecode(world.Sharing.CreateInvite(LibraryDatabase.OwnerId), out var invite));
+
+        Assert.Equal(expected ?? $"{Environment.UserName}'s library", invite.ServerName);
     }
 
     [Fact]

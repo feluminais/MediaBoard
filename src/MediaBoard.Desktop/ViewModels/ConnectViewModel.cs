@@ -152,6 +152,7 @@ public sealed partial class ConnectViewModel : ObservableObject, IDisposable
     {
         ApiErrorCode.InviteDead => FailureText.InviteDead,
         ApiErrorCode.Locked => FailureText.Locked,
+        ApiErrorCode.Busy => FailureText.Busy,
         ApiErrorCode.Disabled => "This account is disabled. Ask the person who invited you.",
         ApiErrorCode.PasswordTooShort => TooShortText,
         ApiErrorCode.WrongPassword when step == ConnectStep.SignIn => "Wrong name or password.",

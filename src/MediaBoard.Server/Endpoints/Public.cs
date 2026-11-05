@@ -1,3 +1,4 @@
+using System.Globalization;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
 using Microsoft.AspNetCore.Builder;
@@ -11,14 +12,14 @@ internal static class Public
 {
     private const int MaxDeviceName = 64;
 
-    public static void Map(IEndpointRouteBuilder api, SharingServer server, AccountService accounts, AccountStore store)
+    public static void Map(IEndpointRouteBuilder api, AccountService accounts, AccountStore store)
     {
-        api.MapGet("ping", () => ApiResults.Ok(new PingReply(ApiVersion.Current, server.ServerName)));
+        api.MapGet("ping", () => ApiResults.Ok(new PingReply(ApiVersion.Current)));
 
         api.MapPost("invites/redeem", async (HttpContext context) =>
         {
             var body = await ApiResults.ReadJson<RedeemRequest>(context);
-            if (body is not { Code: { } code, DeviceName: { } deviceName } || !IsDeviceName(deviceName))
+            if (body is not { Code: { } code, DeviceName: { } sent } || CleanDeviceName(sent) is not { } deviceName)
                 return ApiResults.Error(ApiErrorCode.BadRequest);
 
             var address = ClientAddress.Of(context);
@@ -30,7 +31,7 @@ internal static class Public
         api.MapPost("sign-in", async (HttpContext context) =>
         {
             var body = await ApiResults.ReadJson<SignInRequest>(context);
-            if (body is not { Name: { } name, Password: { } password, DeviceName: { } deviceName } || !IsDeviceName(deviceName))
+            if (body is not { Name: { } name, Password: { } password, DeviceName: { } sent } || CleanDeviceName(sent) is not { } deviceName)
                 return ApiResults.Error(ApiErrorCode.BadRequest);
 
             var address = ClientAddress.Of(context);
@@ -45,10 +46,17 @@ internal static class Public
         RedeemFailure.PasswordTooShort => ApiErrorCode.PasswordTooShort,
         RedeemFailure.Locked => ApiErrorCode.Locked,
         RedeemFailure.AccountDisabled => ApiErrorCode.Disabled,
+        RedeemFailure.Busy => ApiErrorCode.Busy,
         _ => ApiErrorCode.WrongPassword,
     };
 
-    private static bool IsDeviceName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= MaxDeviceName;
+    // The name lands on the owner's page and in the log, and a caller wrote it: direction overrides could make it read as
+    // something else.
+    private static string? CleanDeviceName(string name)
+    {
+        var kept = string.Concat(name.Where(c => !char.IsControl(c) && char.GetUnicodeCategory(c) != UnicodeCategory.Format)).Trim();
+        return kept.Length is > 0 and <= MaxDeviceName ? kept : null;
+    }
 
     internal static IResult Answer(IssuedDevice? issued, RedeemFailure? failure, AccountStore store)
     {
