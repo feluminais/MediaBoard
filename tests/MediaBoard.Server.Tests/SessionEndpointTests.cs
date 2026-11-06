@@ -167,6 +167,24 @@ public sealed class SessionEndpointTests
     }
 
     [Fact]
+    public async Task ADeviceUnusedFor90Days_IsSignedOut_AndTheOthersAreNot()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
+        await using var world = await World.StartAsync(clock);
+
+        clock.Advance(TimeSpan.FromDays(89));
+        Assert.Equal(HttpStatusCode.OK, (await world.GetMeAsync(world.Phone.Token)).StatusCode);
+
+        // The phone was used yesterday. The laptop reaches its 90 days.
+        clock.Advance(TimeSpan.FromDays(1));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await world.GetMeAsync(world.Laptop.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await world.GetMeAsync(world.Phone.Token)).StatusCode);
+
+        Assert.Null(world.Fixture.Devices.Get(world.Laptop.Device.Id));
+        Assert.Contains(world.Fixture.Log.Recent(10), e => e.Kind == SharingEvent.SignedOut && e.Detail == "Laptop");
+    }
+
+    [Fact]
     public async Task Request_NotesLastSeen_AtMostOnceAMinute()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));

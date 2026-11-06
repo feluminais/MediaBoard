@@ -20,6 +20,9 @@ internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, Sha
     // A playing client reports every 10 s, and the Sharing page needs nothing finer than this.
     private static readonly TimeSpan NoteSeenEvery = TimeSpan.FromMinutes(1);
 
+    // A forgotten or stolen device stops by itself, and coming back after this long takes only the password.
+    private static readonly TimeSpan IdleLimit = TimeSpan.FromDays(90);
+
     public static RequestViewer Viewer(HttpContext context) => (RequestViewer)context.Items[typeof(RequestViewer)]!;
 
     public ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -43,6 +46,19 @@ internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, Sha
         if (moved) LogMoved(viewer, address);
     }
 
+    private void Retire(Device device)
+    {
+        devices.Revoke(device.Id);
+        try
+        {
+            log.AddOncePerDay(SharingEvent.SignedOut, device.UserId, device.Name);
+        }
+        catch (Exception e)
+        {
+            Trace.TraceWarning($"Logging an expired device failed: {e.GetType().Name}");
+        }
+    }
+
     // A token used from somewhere else is the one sign the owner gets that it may have been copied. The request is fine
     // either way, so a log that can't be written doesn't fail it.
     private void LogMoved(RequestViewer viewer, string address)
@@ -63,6 +79,12 @@ internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, Sha
         if (!header.StartsWith(Scheme, StringComparison.OrdinalIgnoreCase)) return null;
 
         if (devices.ByToken(header[Scheme.Length..].Trim()) is not { } device) return null;
+        if (time.GetUtcNow().UtcDateTime - (device.LastSeen ?? device.CreatedAt) >= IdleLimit)
+        {
+            Retire(device);
+            return null;
+        }
+
         if (accounts.Get(device.UserId) is not { Disabled: false } account) return null;
 
         return new RequestViewer(accounts.ViewerOf(account), account, device);
