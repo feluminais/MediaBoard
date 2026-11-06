@@ -200,12 +200,13 @@ public sealed class MetadataRefresherTests : IDisposable
         var first = StoreAged(Film(1, "A"), daysAgo: 45);
         StoreAged(Film(2, "B"), daysAgo: 50);
         if (reason == UnavailableReason.Offline) _networkUp = false; // else the retry probe flips it back online
+        var fetched = _titles.Get(first)!.FetchedAt; // the offline retry moves the clock, so read it now
         var provider = new FailingProvider(reason);
 
         await Refresher(provider).RefreshStaleAsync(Ct);
 
         Assert.Equal(1, provider.TitleCalls);
-        Assert.Equal(Now.AddDays(-45), _titles.Get(first)!.FetchedAt);
+        Assert.Equal(fetched, _titles.Get(first)!.FetchedAt);
         Assert.Empty(_hub.Recent);
         if (reason == UnavailableReason.Offline) Assert.False(_connectivity.IsOnline);
     }
