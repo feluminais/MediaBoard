@@ -10,6 +10,35 @@ public sealed class SignInGuardTests
 
     public SignInGuardTests() => _guard = new SignInGuard(_clock);
 
+    [Fact]
+    public void RecentFailures_CountsByAddress_LatestFirst_ForAnHour()
+    {
+        Fail("anna", "203.0.113.5", 2);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Fail("boris", "198.51.100.7", 1);
+
+        var recent = _guard.RecentFailures(5);
+
+        Assert.Equal(["198.51.100.7", "203.0.113.5"], recent.Select(f => f.Address));
+        Assert.Equal([1, 2], recent.Select(f => f.Count));
+        Assert.All(recent, f => Assert.False(f.Locked));
+        Assert.Single(_guard.RecentFailures(1));
+
+        _clock.Advance(TimeSpan.FromHours(1));
+        Assert.Empty(_guard.RecentFailures(5));
+
+        Fail("anna", "203.0.113.5", 1);
+        Assert.Equal(1, Assert.Single(_guard.RecentFailures(5)).Count);
+    }
+
+    [Fact]
+    public void RecentFailures_SaysWhenAnAddressIsLocked()
+    {
+        Fail("anna", "203.0.113.5", 20);
+
+        Assert.True(Assert.Single(_guard.RecentFailures(5)).Locked);
+    }
+
     private void Fail(string name, string address, int times)
     {
         for (var i = 0; i < times; i++) _guard.RecordFailure(name, address);

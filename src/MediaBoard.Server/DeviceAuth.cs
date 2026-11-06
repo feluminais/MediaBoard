@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Library;
 using MediaBoard.Core.Remote;
@@ -12,7 +13,7 @@ public sealed record RequestViewer(Viewer Viewer, Account Account, Device Device
 /// Lets through only a live device token of an enabled account. Every protected route inherits this filter from one
 /// group, and it doubles as that group's metadata, which is how the access table tells a route is inside.
 /// </summary>
-internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, TimeProvider time) : IEndpointFilter
+internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, SharingLog log, TimeProvider time) : IEndpointFilter
 {
     private const string Scheme = "Bearer ";
 
@@ -33,10 +34,27 @@ internal sealed class DeviceAuth(DeviceStore devices, AccountStore accounts, Tim
 
     private void NoteSeen(RequestViewer viewer, HttpContext context)
     {
-        if (time.GetUtcNow().UtcDateTime - viewer.Device.LastSeen < NoteSeenEvery) return;
+        var address = ClientAddress.Of(context);
+        var moved = viewer.Device.LastAddress is { } last && last != address && address != ClientAddress.Unknown;
+        if (!moved && time.GetUtcNow().UtcDateTime - viewer.Device.LastSeen < NoteSeenEvery) return;
 
-        devices.Touch(viewer.Device.Id, ClientAddress.Of(context));
+        devices.Touch(viewer.Device.Id, address);
         accounts.Touch(viewer.Account.Id);
+        if (moved) LogMoved(viewer, address);
+    }
+
+    // A token used from somewhere else is the one sign the owner gets that it may have been copied. The request is fine
+    // either way, so a log that can't be written doesn't fail it.
+    private void LogMoved(RequestViewer viewer, string address)
+    {
+        try
+        {
+            log.AddOncePerDay(SharingEvent.NewAddress, viewer.Account.Id, $"{viewer.Device.Name} connected from {address}");
+        }
+        catch (Exception e)
+        {
+            Trace.TraceWarning($"Logging a new address failed: {e.GetType().Name}");
+        }
     }
 
     private RequestViewer? Identify(HttpContext context)

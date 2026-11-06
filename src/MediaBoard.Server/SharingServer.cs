@@ -126,7 +126,7 @@ public sealed class SharingServer(
 
         Public.Map(app.MapGroup(Api), service, accounts);
 
-        var auth = new DeviceAuth(devices, accounts, _time);
+        var auth = new DeviceAuth(devices, accounts, log, _time);
         var authenticated = app.MapGroup("").AddEndpointFilter(auth).WithMetadata(auth);
         var api = authenticated.MapGroup(Api);
         Session.Map(api, service, accounts);

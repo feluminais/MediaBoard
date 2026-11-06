@@ -1122,6 +1122,33 @@ public sealed class SharingViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task WrongPasswords_ShowWithTheirAddresses()
+    {
+        await using var world = new SharingWorld();
+        var guard = world.Services.GetRequiredService<SignInGuard>();
+        guard.RecordFailure("anna", "203.0.113.5");
+        guard.RecordFailure("boris", "203.0.113.5");
+        guard.RecordFailure("carl", "198.51.100.7");
+
+        var page = await OpenLoaded(world);
+
+        Assert.True(page.HasFailedSignIns);
+        Assert.Contains("2 from 203.0.113.5", page.FailedSignInsText, StringComparison.Ordinal);
+        Assert.Contains("1 from 198.51.100.7", page.FailedSignInsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("anna", page.FailedSignInsText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [AvaloniaFact]
+    public async Task NoWrongPasswords_ShowsNothing()
+    {
+        await using var world = new SharingWorld();
+
+        var page = await OpenLoaded(world);
+
+        Assert.False(page.HasFailedSignIns);
+    }
+
+    [AvaloniaFact]
     public async Task LockedName_Shows()
     {
         await using var world = new SharingWorld();
@@ -1187,6 +1214,7 @@ public sealed class SharingViewModelTests
     [InlineData(SharingEvent.FinishedWatching, "Movie", "Anna finished Movie")]
     [InlineData(SharingEvent.StreamStopped, "Movie", "Anna's stream was stopped: Movie")]
     [InlineData(SharingEvent.SignedOut, "Phone", "Anna's Phone was signed out")]
+    [InlineData(SharingEvent.NewAddress, "Phone connected from 203.0.113.5", "Anna's Phone connected from 203.0.113.5")]
     [InlineData(SharingEvent.Disabled, "", "Anna was disabled")]
     [InlineData(SharingEvent.PasswordReset, "", "Anna's password was reset")]
     public async Task Activity_SaysEachKindInPlainWords(SharingEvent kind, string detail, string words)

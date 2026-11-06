@@ -4,7 +4,7 @@ using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Core.Accounts;
 
-public enum SharingEvent { Joined, SignedIn, SignInLocked, StartedWatching, FinishedWatching, StreamStopped, SignedOut, Disabled, PasswordReset, Removed }
+public enum SharingEvent { Joined, SignedIn, SignInLocked, StartedWatching, FinishedWatching, StreamStopped, SignedOut, Disabled, PasswordReset, Removed, NewAddress }
 
 /// <param name="UserId">Null once the account was removed.</param>
 /// <param name="At">In UTC.</param>

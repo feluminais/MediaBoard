@@ -10,13 +10,15 @@ namespace MediaBoard.Server;
 /// </summary>
 internal static class ClientAddress
 {
+    public const string Unknown = "unknown";
+
     private const int InterfaceIdBytes = 8;
 
     public static string Of(HttpContext context) => Of(context.Connection.RemoteIpAddress);
 
     public static string Of(IPAddress? address)
     {
-        if (address is null) return "unknown";
+        if (address is null) return Unknown;
         if (address.IsIPv4MappedToIPv6) return address.MapToIPv4().ToString();
         if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
 

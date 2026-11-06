@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
+using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
 using Microsoft.Extensions.Logging;
 
@@ -111,6 +112,25 @@ public sealed class HostTests
         await fixture.Server.StartAsync(Options(fixture, port), Ct);
 
         Assert.True(fixture.Server.IsRunning);
+    }
+
+    [Fact]
+    public async Task ATokenFromANewAddress_IsLogged_OnceForThatAddress()
+    {
+        await using var fixture = new ServerFixture();
+        var issued = fixture.Join(fixture.NewPerson("Sam"));
+        var port = await StartAsync(fixture);
+        var before = fixture.Devices.Get(issued.Device.Id)!.LastAddress;
+
+        foreach (var _ in new[] { 1, 2 })
+        {
+            using var request = fixture.Request("GET", $"https://127.0.0.1:{port}/api/v1/me", issued.Token);
+            (await fixture.TlsClient().SendAsync(request, Ct)).EnsureSuccessStatusCode();
+        }
+
+        var entry = Assert.Single(fixture.Log.Recent(20), e => e.Kind == SharingEvent.NewAddress);
+        Assert.Contains("127.0.0.1", entry.Detail, StringComparison.Ordinal);
+        Assert.NotEqual(before, fixture.Devices.Get(issued.Device.Id)!.LastAddress);
     }
 
     [Fact]

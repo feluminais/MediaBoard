@@ -172,7 +172,7 @@ public sealed class SessionEndpointTests
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
         await using var world = await World.StartAsync(clock);
         var issuedAt = clock.GetUtcNow().UtcDateTime;
-        world.Fixture.RemoteAddress = IPAddress.Parse("203.0.113.9");
+        world.Fixture.RemoteAddress = IPAddress.Parse("198.51.100.1"); // the same one: a new address is noted at once
 
         clock.Advance(TimeSpan.FromSeconds(59));
         await world.GetMeAsync(world.Phone.Token);
@@ -182,6 +182,7 @@ public sealed class SessionEndpointTests
         Assert.Null(world.Fixture.Accounts.Get(world.Sam.Id)!.LastSeen);
 
         clock.Advance(TimeSpan.FromSeconds(1));
+        world.Fixture.RemoteAddress = IPAddress.Parse("203.0.113.9");
         await world.GetMeAsync(world.Phone.Token);
 
         var seenAt = clock.GetUtcNow().UtcDateTime;

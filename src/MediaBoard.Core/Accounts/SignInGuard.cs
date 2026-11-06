@@ -1,5 +1,9 @@
 namespace MediaBoard.Core.Accounts;
 
+/// <summary>Wrong passwords from one address lately.</summary>
+/// <param name="Locked">The address is locked out right now.</param>
+public sealed record FailedSignIns(string Address, int Count, DateTimeOffset Last, bool Locked);
+
 /// <summary>
 /// Locks a name after 5 failures for 15 minutes and an address after 20 for an hour. Counters live in memory, so a
 /// restart clears them. Failures older than the lock period are forgotten. Each tally holds at most
@@ -48,6 +52,13 @@ public sealed class SignInGuard
         lock (_gate) return _names.Locked();
     }
 
+    /// <summary>The addresses with wrong passwords in the last hour, the latest first. Names stay out: one could be a password typed in the wrong box.</summary>
+    /// <param name="most">How many addresses to give.</param>
+    public IReadOnlyList<FailedSignIns> RecentFailures(int most)
+    {
+        lock (_gate) return _addresses.Recent(most);
+    }
+
     private sealed class Tally(int limit, TimeSpan period, TimeProvider time)
     {
         private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
@@ -65,6 +76,8 @@ public sealed class SignInGuard
                 _entries[key] = entry = new Entry(key);
             }
 
+            if (now - entry.Touched >= period) entry.Recent = 0;
+            entry.Recent++;
             entry.Touched = now;
             if (entry.LockedUntil > now) return;
 
@@ -89,6 +102,13 @@ public sealed class SignInGuard
             return _entries.Values.Where(e => e.LockedUntil > now).Select(e => e.Key).Order(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
+        public List<FailedSignIns> Recent(int most)
+        {
+            var now = time.GetUtcNow();
+            return _entries.Values.Where(e => e.Recent > 0 && now - e.Touched < period).OrderByDescending(e => e.Touched).Take(most)
+                .Select(e => new FailedSignIns(e.Key, e.Recent, e.Touched, e.LockedUntil > now)).ToList();
+        }
+
         // Runs only when the table is full: drops what has expired, then the oldest tenth of the unlocked rest, so
         // the cost is spread over many inserts. A lock is never dropped.
         private void MakeRoom(DateTimeOffset now)
@@ -108,5 +128,6 @@ public sealed class SignInGuard
         public List<DateTimeOffset> Failures { get; } = [];
         public DateTimeOffset LockedUntil { get; set; }
         public DateTimeOffset Touched { get; set; }
+        public int Recent { get; set; }
     }
 }

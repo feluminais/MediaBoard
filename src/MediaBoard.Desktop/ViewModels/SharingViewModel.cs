@@ -62,6 +62,7 @@ public sealed partial class SharingViewModel : PageViewModel
 {
     public const string OffLine = "Sharing is off. Nothing can connect.";
 
+    private const int MostFailedAddresses = 5;
     private const int ActivityLimit = 50;
     private const string NoAddressPrompt = "Invites need an address. Enter one here and save.";
     private const string ActionFailed = "That didn't work. See the activity panel.";
@@ -217,6 +218,13 @@ public sealed partial class SharingViewModel : PageViewModel
 
     public bool HasNoActivity => IsLoaded && Activity.Count == 0;
 
+    /// <summary>Who has been getting passwords wrong in the last hour, or null when nobody has.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFailedSignIns))]
+    public partial string? FailedSignInsText { get; private set; }
+
+    public bool HasFailedSignIns => FailedSignInsText is not null;
+
     // The page reloads as it opens, so a library change only concerns it while it's open.
     public override bool RefreshesWhileHidden => false;
 
@@ -253,6 +261,7 @@ public sealed partial class SharingViewModel : PageViewModel
             accounts,
             _s.Library.Folders(),
             _s.Guard.LockedNames(),
+            _s.Guard.RecentFailures(MostFailedAddresses),
             _s.Invites.PendingCounts(),
             ReadActivity(accounts, ActivityLimit),
             openRows.ToDictionary(id => id, _s.Devices.ForUser),
@@ -274,6 +283,7 @@ public sealed partial class SharingViewModel : PageViewModel
 
         var removedNear = ApplyPeople(data);
         ApplyActivity(data);
+        FailedSignInsText = FailuresLine(data.Failures);
         ApplyStatus();
         IsLoaded = true;
         LoadProblem = null;
@@ -953,6 +963,11 @@ public sealed partial class SharingViewModel : PageViewModel
 
     private SharingActivityRow ActivityRow(SharingLogEntry entry, string? name) => new(entry.Id, WhenText(entry.At), Words(entry, name));
 
+    private static string? FailuresLine(IReadOnlyList<FailedSignIns> failures) => failures.Count == 0
+        ? null
+        : "Wrong passwords in the last hour: "
+          + string.Join(", ", failures.Select(f => string.Create(CultureInfo.InvariantCulture, $"{f.Count} from {f.Address}{(f.Locked ? " (blocked)" : "")}")));
+
     private static string Words(SharingLogEntry entry, string? name)
     {
         var who = name ?? "Someone";
@@ -967,6 +982,7 @@ public sealed partial class SharingViewModel : PageViewModel
             SharingEvent.FinishedWatching => $"{who} finished {entry.Detail}",
             SharingEvent.StreamStopped => $"{whose} stream was stopped: {entry.Detail}",
             SharingEvent.SignedOut => $"{whose} {entry.Detail} was signed out",
+            SharingEvent.NewAddress => $"{whose} {entry.Detail}",
             SharingEvent.Disabled => $"{who} was disabled",
             SharingEvent.PasswordReset => $"{whose} password was reset",
             SharingEvent.Removed => $"{entry.Detail} was removed",
@@ -1072,6 +1088,7 @@ public sealed partial class SharingViewModel : PageViewModel
         IReadOnlyList<Account> Accounts,
         IReadOnlyList<FolderRow> Folders,
         IReadOnlyList<string> Locked,
+        IReadOnlyList<FailedSignIns> Failures,
         IReadOnlyDictionary<int, int> PendingInvites,
         List<(SharingLogEntry Entry, string? Name)> Activity,
         Dictionary<int, IReadOnlyList<Device>> Devices,

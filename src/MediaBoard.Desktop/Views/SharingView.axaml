@@ -330,6 +330,8 @@
                         </Button>
                         <TextBlock Classes="rowTitle" Text="Activity" />
                     </DockPanel>
+                    <SelectableTextBlock Text="{Binding FailedSignInsText}" TextWrapping="Wrap" IsTabStop="False"
+                                         IsVisible="{Binding HasFailedSignIns}" />
                     <TextBlock Classes="muted" Text="Nothing yet." IsVisible="{Binding HasNoActivity}" />
                     <ItemsControl ItemsSource="{Binding Activity}">
                         <ItemsControl.ItemsPanel>
