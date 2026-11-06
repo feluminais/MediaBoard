@@ -112,6 +112,10 @@ public sealed partial class SharingViewModel : PageViewModel
 
     public string FirewallNote => "The first time sharing starts, Windows asks about the firewall. Allow Private networks.";
 
+    public string ListeningWarning =>
+        "While sharing is on, it listens on every network this PC is connected to, and anyone on those networks can try to " +
+        "sign in. In the firewall, allow Private networks only.";
+
     /// <summary>Starts or stops sharing when the owner flips it. Follows the controller otherwise.</summary>
     [ObservableProperty]
     public partial bool IsOn { get; set; }

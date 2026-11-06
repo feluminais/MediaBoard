@@ -83,6 +83,26 @@ public sealed class SharingViewTests
     }
 
     [AvaloniaFact]
+    public async Task EveryNetworkWarning_ShowsWithSharingOffAndOn()
+    {
+        await using var world = new SharingWorld();
+        var page = SharingViewModelTests.Build(world);
+        page.Opened();
+        var window = await Show(page);
+
+        var warning = window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "ListeningWarning");
+        Assert.Contains("every network", warning.Text, StringComparison.Ordinal);
+        Assert.Contains("Private networks only", warning.Text, StringComparison.Ordinal);
+        Assert.True(warning.IsEffectivelyVisible);
+
+        await world.Sharing.SetOnAsync(true);
+        await Ui.WaitUntil(() => page.StatusLine.StartsWith("Sharing on", StringComparison.Ordinal));
+        Settle(window);
+
+        Assert.True(warning.IsEffectivelyVisible);
+    }
+
+    [AvaloniaFact]
     public async Task HundredAccounts_TabReachesEveryRow()
     {
         await using var world = new SharingWorld();
