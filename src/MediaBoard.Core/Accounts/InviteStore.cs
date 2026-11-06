@@ -9,14 +9,14 @@ namespace MediaBoard.Core.Accounts;
 public sealed record PendingInvite(int Id, int UserId, DateTime CreatedAt, DateTime ExpiresAt);
 
 /// <summary>
-/// One-use invites that die after 7 days. Only a hash of each code is stored. Each call opens its own connection,
+/// One-use invites that die after 24 hours. Only a hash of each code is stored. Each call opens its own connection,
 /// so any thread may call it.
 /// </summary>
 public sealed class InviteStore(LibraryDatabase db, TimeProvider? time = null)
 {
     private const int CodeBytes = 16;
 
-    private static readonly TimeSpan Life = TimeSpan.FromDays(7);
+    private static readonly TimeSpan Life = TimeSpan.FromHours(24);
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 

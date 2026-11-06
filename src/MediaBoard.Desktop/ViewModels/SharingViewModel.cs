@@ -921,7 +921,7 @@ public sealed partial class SharingViewModel : PageViewModel
 
     private InviteStep InviteFor(string name, bool isOwner, string invite)
     {
-        var life = "It works once, within 7 days. You won't see it again, but you can make another.";
+        var life = "It works once, within 24 hours. You won't see it again, but you can make another.";
         if (SwitchedOnButNotRunning) life += " Sharing isn't running, so it won't work until sharing starts.";
         else if (_s.Controller.Status != SharingStatus.On) life += " Sharing is off, so it won't work until you turn it on.";
         return isOwner

@@ -104,7 +104,7 @@ the app must stay running, in the tray at least, for people to connect. It works
 2. Turn sharing on. It listens on port `47880` over HTTPS. The first time, Windows asks about the firewall: allow Private
    networks. To be reachable from outside your home, forward that port on your router.
 3. Choose **Add person**, pick the folders they may see, and create an invite. It already carries your addresses, so just
-   send it. An invite lasts 7 days and works once.
+   send it. An invite lasts 24 hours and works once.
 4. They unzip MediaBoard (built with `scripts/Publish.ps1`; it needs no .NET installed), choose **Connect to a server**,
    paste the invite and pick a password.
 

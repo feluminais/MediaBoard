@@ -69,11 +69,11 @@ public sealed class InviteStoreTests : IDisposable
     }
 
     [Fact]
-    public void Invite_ExpiresAfter7Days()
+    public void Invite_ExpiresAfter24Hours()
     {
         var code = _invites.Create(_anna);
 
-        _clock.Advance(TimeSpan.FromDays(7) - TimeSpan.FromSeconds(1));
+        _clock.Advance(TimeSpan.FromHours(24) - TimeSpan.FromSeconds(1));
         Assert.Equal(_anna, _invites.Peek(code));
         Assert.Single(_invites.Pending(_anna));
 
@@ -93,7 +93,7 @@ public sealed class InviteStoreTests : IDisposable
 
         Assert.Equal(2, _invites.PendingCounts()[_anna]);
 
-        _clock.Advance(TimeSpan.FromDays(7));
+        _clock.Advance(TimeSpan.FromHours(24));
 
         Assert.Empty(_invites.PendingCounts());
     }
@@ -158,6 +158,6 @@ public sealed class InviteStoreTests : IDisposable
 
         Assert.Equal(_anna, invite.UserId);
         Assert.Equal(_clock.GetUtcNow().UtcDateTime, invite.CreatedAt);
-        Assert.Equal(_clock.GetUtcNow().UtcDateTime.AddDays(7), invite.ExpiresAt);
+        Assert.Equal(_clock.GetUtcNow().UtcDateTime.AddHours(24), invite.ExpiresAt);
     }
 }
