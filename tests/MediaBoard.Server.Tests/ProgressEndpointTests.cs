@@ -454,6 +454,8 @@ public sealed class ProgressEndpointTests
     [InlineData("{\"positionS\":\"Infinity\",\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1e999,\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"durationS\":1e999,\"at\":\"2026-11-05T12:00:00Z\"}")]
+    [InlineData("{\"positionS\":1e12,\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
+    [InlineData("{\"positionS\":1,\"durationS\":1e12,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"durationS\":3000}")]
     [InlineData("{\"durationS\":3000,\"at\":\"2026-11-05T12:00:00Z\"}")]
     [InlineData("{\"positionS\":1,\"at\":\"2026-11-05T12:00:00Z\"}")]

@@ -122,8 +122,8 @@ internal static class Playback
     private static bool IsWatched(SharedLibrary shared, int userId, int fileId) => shared.Progress.Get(userId, fileId)?.Watched == true;
 
     private static bool IsSound(ProgressEntry entry) =>
-        double.IsFinite(entry.PositionS) && entry.PositionS >= 0
-        && double.IsFinite(entry.DurationS) && entry.DurationS >= 0;
+        double.IsFinite(entry.PositionS) && entry.PositionS is >= 0 and <= ProgressEntry.MaxSeconds
+        && double.IsFinite(entry.DurationS) && entry.DurationS is >= 0 and <= ProgressEntry.MaxSeconds;
 
     private static IResult Stream(HttpContext context, int id, SharedLibrary shared, StreamRegistry streams, StreamWatch watch)
     {

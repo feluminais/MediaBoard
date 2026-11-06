@@ -156,7 +156,8 @@ public sealed class SharingServer(
         authenticated.MapFallback("{*path}", () => ApiResults.Error(ApiErrorCode.NotFound));
     }
 
-    private void LogStarted(StreamSession session) => log.Add(SharingEvent.StartedWatching, session.UserId, session.Title);
+    // Once a day per title: a token cycling through files could otherwise push everything else out of the capped log.
+    private void LogStarted(StreamSession session) => log.AddOncePerDay(SharingEvent.StartedWatching, session.UserId, session.Title);
 
     // Kestrel enforces the limit as a body is read, which a chunked body needs. A declared length can be refused at once.
     private static async Task AnswerBadBodies(HttpContext context, RequestDelegate next)

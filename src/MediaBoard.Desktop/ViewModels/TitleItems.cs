@@ -2,6 +2,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediaBoard.Core.Library;
+using MediaBoard.Core.Storage;
 
 namespace MediaBoard.Desktop.ViewModels;
 
@@ -271,12 +272,12 @@ public sealed partial class EpisodeItem : EditableItem
     private Task PlayAsync() => FileId is { } file && CanPlay ? _page.PlayFileAsync(file) : Task.CompletedTask;
 }
 
-internal static class TimeText
+public static class TimeText
 {
     /// <summary>"23:10", or "1:02:10" from an hour on.</summary>
     public static string Format(double seconds)
     {
-        var time = TimeSpan.FromSeconds(Math.Max(0, Math.Floor(seconds)));
+        var time = TimeSpan.FromSeconds(Math.Clamp(Math.Floor(seconds), 0, ProgressEntry.MaxSeconds));
         return time.TotalHours >= 1
             ? string.Create(CultureInfo.InvariantCulture, $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}")
             : string.Create(CultureInfo.InvariantCulture, $"{time.Minutes}:{time.Seconds:00}");

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using MediaBoard.Core.Parsing;
 using MediaBoard.Core.Remote;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -84,11 +85,12 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
 
     /// <summary>
     /// Plain ASCII letters, digits, dots and dashes, which need no encoding in any player, and the real extension, which
-    /// spares MPC-HC a probe.
+    /// spares MPC-HC a probe. Only a video's: the name comes from the server, and a player handed a playlist extension
+    /// would follow the links inside it to any host or file share.
     /// </summary>
     private static string SafeName(string fileName)
     {
-        var extension = Safe(Path.GetExtension(fileName));
+        var extension = MediaFileRules.IsVideo(fileName) ? Safe(Path.GetExtension(fileName)) : ".mkv";
         var stem = Safe(Path.GetFileNameWithoutExtension(fileName)).Trim('.');
 
         // A segment of dots would be walked up by whatever cleans the URL.
@@ -110,7 +112,11 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
     {
         to.StatusCode = (int)from.StatusCode;
         to.ContentLength = from.Content.Headers.ContentLength;
-        to.ContentType = from.Content.Headers.ContentType?.ToString();
+
+        // A player reads the type to decide how to treat the bytes, so a server can't call them a playlist.
+        var type = from.Content.Headers.ContentType?.MediaType;
+        to.ContentType = type?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true ? type : "application/octet-stream";
+        to.Headers.XContentTypeOptions = "nosniff";
         to.Headers.AcceptRanges = "bytes";
         if (from.Content.Headers.ContentRange is { } range) to.Headers.ContentRange = range.ToString();
     }

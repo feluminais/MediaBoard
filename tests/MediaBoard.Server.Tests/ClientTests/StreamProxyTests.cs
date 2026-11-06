@@ -245,8 +245,8 @@ public sealed class StreamProxyTests
     [InlineData("Голота S01E05 [Ukr.Eng].mkv", "S01E05Ukr.Eng.mkv")]
     [InlineData("Heat (1995)-remux.mp4", "Heat1995-remux.mp4")]
     [InlineData("...mkv", "file.mkv")]
-    [InlineData("Голота.мкв", "file")]
-    [InlineData("noextension", "noextension")]
+    [InlineData("Голота.мкв", "file.mkv")]
+    [InlineData("noextension", "noextension.mkv")]
     public async Task Cyrillic_FileName_GivesAsciiUrl_KeepsExtension_MapsBack(string fileName, string safe)
     {
         await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
@@ -258,6 +258,34 @@ public sealed class StreamProxyTests
         Assert.Equal(FileId, world.Proxy.FileOf(url));
         using var response = await world.PlayAsync(url);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("list.m3u8", "list.mkv")]
+    [InlineData("list.pls", "list.mkv")]
+    [InlineData("list.asx", "list.mkv")]
+    [InlineData("noextension", "noextension.mkv")]
+    public async Task AServersFileName_CantHandThePlayerAPlaylist(string fileName, string safe)
+    {
+        await using var world = await Fake.StartAsync((context, _) => ServeAsync(context));
+
+        Assert.EndsWith($"/{FileId}/{safe}", world.Url(fileName), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AServersContentType_CantHandThePlayerAPlaylist()
+    {
+        await using var world = await Fake.StartAsync((context, _) =>
+        {
+            context.Response.ContentType = "audio/x-mpegurl";
+            context.Response.ContentLength = 2;
+            return context.Response.WriteAsync("ab", Ct);
+        });
+
+        using var response = await world.PlayAsync(world.Url());
+
+        Assert.Equal("application/octet-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("nosniff", response.Headers.GetValues("X-Content-Type-Options"));
     }
 
     [Fact]

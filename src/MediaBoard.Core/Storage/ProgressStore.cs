@@ -17,7 +17,11 @@ public sealed record ProgressEntry(
     [property: JsonRequired] double PositionS,
     [property: JsonRequired] double DurationS,
     bool? Watched,
-    [property: JsonRequired] DateTimeOffset At);
+    [property: JsonRequired] DateTimeOffset At)
+{
+    /// <summary>Longer than any video. A position comes from another PC, and past this it would overflow the clock text that shows it.</summary>
+    public const double MaxSeconds = 10 * 24 * 60 * 60;
+}
 
 /// <summary>
 /// Where each file was left and whether it counts as watched. Writes are single upserts, so any thread may call them.

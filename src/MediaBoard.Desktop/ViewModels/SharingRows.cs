@@ -3,6 +3,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Library;
+using MediaBoard.Core.Storage;
 using MediaBoard.Server;
 
 namespace MediaBoard.Desktop.ViewModels;
@@ -39,7 +40,7 @@ public sealed partial class WatchingRow(StreamSession session) : ObservableObjec
 
     private static string Clock(double seconds)
     {
-        var time = TimeSpan.FromSeconds(Math.Max(seconds, 0));
+        var time = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, ProgressEntry.MaxSeconds));
         return time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
     }
 }

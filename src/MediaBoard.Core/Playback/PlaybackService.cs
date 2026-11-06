@@ -352,7 +352,7 @@ public sealed class PlaybackService : IPlaybackService, IAsyncDisposable
         }
 
         var saved = target.Saved;
-        var startAt = !fromStart && saved is { Watched: false, PositionS: > 0 }
+        var startAt = !fromStart && saved is { Watched: false, PositionS: > 0 and <= ProgressEntry.MaxSeconds }
             ? TimeSpan.FromSeconds(saved.PositionS)
             : (TimeSpan?)null;
 
