@@ -164,6 +164,34 @@ public sealed class ImageCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task HasRoom_MeasuresTheFolder_AtMostOnceAMinute()
+    {
+        Directory.CreateDirectory(_dir);
+        await File.WriteAllBytesAsync(Path.Combine(_dir, "w342a.jpg"), new byte[10], Ct);
+        _http = new HttpClient(Serving(Image));
+        var cache = new ImageCache(_http, _connectivity, _dir, _clock, maxBytes: 20);
+        Assert.True(cache.HasRoom());
+
+        await File.WriteAllBytesAsync(Path.Combine(_dir, "w342b.jpg"), new byte[10], Ct);
+        Assert.True(cache.HasRoom());
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.False(cache.HasRoom());
+    }
+
+    [Fact]
+    public async Task Has_SaysWhatIsOnDisk()
+    {
+        Directory.CreateDirectory(_dir);
+        await File.WriteAllBytesAsync(Path.Combine(_dir, "w342abc123.jpg"), Image, Ct);
+        var cache = CacheWith(Serving(Image));
+
+        Assert.True(cache.Has("/abc123.jpg", 342));
+        Assert.False(cache.Has("/abc123.jpg", 780));
+        Assert.False(cache.Has("/other.jpg", 342));
+    }
+
+    [Fact]
     public async Task NotFound_IsAskedAgainAfterFiveMinutes()
     {
         var handler = StubHandler.Status(HttpStatusCode.NotFound);

@@ -101,6 +101,19 @@ public sealed class LibraryEndpointTests
     }
 
     [Fact]
+    public async Task Search_PastItsShareOfTmdb_SaysBusy()
+    {
+        await using var world = await World.CreateAsync();
+
+        for (var i = 0; i < 120; i++) Assert.Equal(HttpStatusCode.OK, (await world.SendAsync("GET", "/api/v1/search?q=heat")).Status);
+
+        var (status, body) = await world.SendAsync("GET", "/api/v1/search?q=heat");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
+        Assert.Equal(ApiErrorCode.Busy, JsonSerializer.Deserialize<ApiErrorBody>(body, ApiJson.Options)!.Code);
+    }
+
+    [Fact]
     public async Task OwnerDevice_CannotReachAHiddenTitle_ByItsId()
     {
         await using var world = await World.CreateAsync();

@@ -6,7 +6,12 @@ namespace MediaBoard.Core.Metadata;
 /// Poster files kept on disk, so the library looks complete offline. A poster is downloaded once, the first
 /// time it is asked for while online, and read from disk after that.
 /// </summary>
-public sealed class ImageCache(HttpClient http, Connectivity connectivity, string imagesDir, TimeProvider? time = null)
+/// <param name="http">Fetches from TMDB.</param>
+/// <param name="connectivity">Says whether to try.</param>
+/// <param name="imagesDir">The folder.</param>
+/// <param name="time">The clock, or null for the real one.</param>
+/// <param name="maxBytes">Past this the folder has no room for viewers' requests. This PC's own posters still download.</param>
+public sealed class ImageCache(HttpClient http, Connectivity connectivity, string imagesDir, TimeProvider? time = null, long maxBytes = 5L * 1024 * 1024 * 1024)
 {
     private const string BaseUrl = "https://image.tmdb.org/t/p/";
     private const int MaxRememberedFailures = 1_000;
@@ -14,9 +19,34 @@ public sealed class ImageCache(HttpClient http, Connectivity connectivity, strin
     private static readonly TimeSpan FailureMemory = TimeSpan.FromMinutes(5);
     private static readonly char[] InvalidNameChars = Path.GetInvalidFileNameChars();
 
+    private static readonly TimeSpan SizeMeasureEvery = TimeSpan.FromMinutes(1);
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Lock _sizeGate = new();
+    private long _size;
+    private long _sizeMeasuredAt;
+    private bool _sizeMeasured;
     private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> _downloads = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _failed = new();
+
+    /// <summary>Whether this poster is on disk already, so handing it out costs nothing.</summary>
+    public bool Has(string posterPath, int width) =>
+        LocalName(posterPath, width) is { } name && File.Exists(Path.Combine(imagesDir, name));
+
+    /// <summary>Whether the folder is under its limit. Measured at most once a minute, since it walks every file.</summary>
+    public bool HasRoom()
+    {
+        var now = _time.GetTimestamp();
+        lock (_sizeGate)
+        {
+            if (_sizeMeasured && _time.GetElapsedTime(_sizeMeasuredAt, now) < SizeMeasureEvery) return _size < maxBytes;
+
+            _size = Directory.Exists(imagesDir) ? new DirectoryInfo(imagesDir).EnumerateFiles().Sum(file => file.Length) : 0;
+            _sizeMeasured = true;
+            _sizeMeasuredAt = now;
+            return _size < maxBytes;
+        }
+    }
 
     /// <summary>How many failed names are held. A viewer can ask for any name, so this has a limit.</summary>
     internal int RememberedFailures => _failed.Count;

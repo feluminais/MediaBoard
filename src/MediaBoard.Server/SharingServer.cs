@@ -131,7 +131,7 @@ public sealed class SharingServer(
         var api = authenticated.MapGroup(Api);
         Session.Map(api, service, accounts);
         Library.Map(api, library);
-        Search.Map(api, library);
+        Search.Map(api, library, _time);
 
         var watch = new StreamWatch(streams, service, accounts, devices, library);
         Playback.Map(api, library, streams, watch, log);
