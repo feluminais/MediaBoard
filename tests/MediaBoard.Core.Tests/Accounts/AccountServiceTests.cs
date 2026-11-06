@@ -939,16 +939,60 @@ public sealed class AccountServiceTests : IDisposable
     }
 
     [Fact]
-    public void ChangePassword_SwapsThePassword_KeepingDevices()
+    public void ChangePassword_SwapsThePassword_KeepingOnlyTheDeviceThatChangedIt()
     {
         var account = Joined();
-        var device = SignedIn(account);
+        var mine = SignedIn(account);
+        var other = SignedIn(account);
+        var signedOut = new List<int>();
+        _service.DeviceSignedOut += signedOut.Add;
 
-        _service.ChangePassword(account.Id, Good, "a brand new password");
+        _service.ChangePassword(account.Id, Good, "a brand new password", mine.Device.Id);
 
         Assert.Equal(RedeemFailure.WrongPassword, _service.SignIn("Anna", Good, "Phone", Address).Failure);
         Assert.NotNull(_service.SignIn("Anna", "a brand new password", "Phone", Address).Issued);
-        Assert.NotNull(_devices.ByToken(device.Token));
+        Assert.NotNull(_devices.ByToken(mine.Token));
+        Assert.Null(_devices.ByToken(other.Token));
+        Assert.Contains(other.Device.Id, signedOut);
+        Assert.DoesNotContain(mine.Device.Id, signedOut);
+        Assert.Contains(Logged(SharingEvent.SignedOut), e => e.UserId == account.Id);
+    }
+
+    [Fact]
+    public void ChangePassword_ARefusedOne_SignsNobodyOut()
+    {
+        var account = Joined();
+        var other = SignedIn(account);
+
+        Assert.Throws<PasswordRefusedException>(() => _service.ChangePassword(account.Id, Bad, "a brand new password"));
+
+        Assert.NotNull(_devices.ByToken(other.Token));
+    }
+
+    [Fact]
+    public void ChangePassword_LeavesOtherPeoplesDevicesAlone()
+    {
+        var anna = Joined();
+        var ben = Joined("Ben");
+        var bens = SignedIn(ben);
+
+        _service.ChangePassword(anna.Id, Good, "a brand new password");
+
+        Assert.NotNull(_devices.ByToken(bens.Token));
+    }
+
+    [Fact]
+    public void SetOwnerPassword_SignsOutTheOwnersDevices()
+    {
+        _service.SetOwnerPassword(Good);
+        var device = _devices.Issue(LibraryDatabase.OwnerId, "Laptop", Address);
+        var signedOut = new List<int>();
+        _service.DeviceSignedOut += signedOut.Add;
+
+        _service.SetOwnerPassword("a brand new password");
+
+        Assert.Null(_devices.ByToken(device.Token));
+        Assert.Equal([device.Device.Id], signedOut);
     }
 
     [Fact]

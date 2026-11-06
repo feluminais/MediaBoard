@@ -1732,7 +1732,7 @@ public sealed class RemoteUiTests : IDisposable
         await account.SavePasswordCommand.ExecuteAsync(null);
 
         Assert.False(account.IsChangingPassword);
-        Assert.Equal("Password changed.", account.PasswordMessage);
+        Assert.Equal("Password changed. Your other devices are signed out.", account.PasswordMessage);
         Assert.Equal("", account.NewPassword);
         Assert.NotNull(world.Accounts.SignIn("Sam", "another good password", "Desk", "198.51.100.3").Issued);
     }

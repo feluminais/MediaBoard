@@ -86,6 +86,14 @@ public sealed class DeviceStore(LibraryDatabase db, TimeProvider? time = null)
     internal static void RevokeAll(SqliteConnection connection, SqliteTransaction? transaction, int userId) =>
         connection.Execute("DELETE FROM devices WHERE user_id = @userId", new { userId }, transaction);
 
+    /// <param name="keepDeviceId">The device that stays signed in, or null for none.</param>
+    /// <returns>The devices that went, with their names.</returns>
+    internal static IReadOnlyList<(long Id, string Name)> RevokeOthers(SqliteConnection connection, SqliteTransaction transaction, int userId, int? keepDeviceId) =>
+        connection.Query<(long Id, string Name)>(
+            "DELETE FROM devices WHERE user_id = @userId AND (@keepDeviceId IS NULL OR id <> @keepDeviceId) RETURNING id, name",
+            new { userId, keepDeviceId },
+            transaction).ToList();
+
     public void Touch(int deviceId, string address)
     {
         using var connection = db.Open();

@@ -26,11 +26,11 @@ internal static class Session
             var body = await ApiResults.ReadJson<ChangePasswordRequest>(context);
             if (body is not { Current: { } current, Next: { } next }) return ApiResults.Error(ApiErrorCode.BadRequest);
 
-            var userId = DeviceAuth.Viewer(context).Account.Id;
+            var who = DeviceAuth.Viewer(context);
             try
             {
                 // A check waits in a gate and then hashes for a while, which mustn't hold a request thread.
-                await Task.Run(() => service.ChangePassword(userId, current, next));
+                await Task.Run(() => service.ChangePassword(who.Account.Id, current, next, who.Device.Id));
                 return Results.NoContent();
             }
             catch (PasswordRefusedException e)

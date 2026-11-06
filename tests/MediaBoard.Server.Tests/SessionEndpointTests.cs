@@ -117,14 +117,14 @@ public sealed class SessionEndpointTests
     }
 
     [Fact]
-    public async Task ChangePassword_KeepsOtherDevices()
+    public async Task ChangePassword_SignsOutOtherDevices_AndKeepsThisOne()
     {
         await using var world = await World.StartAsync();
 
         await world.ChangePasswordAsync(ServerFixture.Password, NewPassword);
 
         Assert.Equal(HttpStatusCode.OK, (await world.GetMeAsync(world.Phone.Token)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await world.GetMeAsync(world.Laptop.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await world.GetMeAsync(world.Laptop.Token)).StatusCode);
     }
 
     [Fact]

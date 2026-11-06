@@ -115,11 +115,20 @@ public sealed class AccountService(
         log.Add(SharingEvent.PasswordReset, userId, "");
     }
 
+    /// <summary>Signs out every device of the owner's, as any password change does for the devices it didn't come from.</summary>
     /// <exception cref="PasswordRefusedException">The password is too short.</exception>
     public void SetOwnerPassword(string password)
     {
         RefuseShort(password);
-        accounts.SetPasswordHash(LibraryDatabase.OwnerId, Work.Hash(password));
+        var hash = Work.Hash(password);
+
+        IReadOnlyList<(long Id, string Name)> gone = [];
+        InTransaction((connection, transaction) =>
+        {
+            AccountStore.SetPasswordHash(connection, transaction, LibraryDatabase.OwnerId, hash);
+            gone = DeviceStore.RevokeOthers(connection, transaction, LibraryDatabase.OwnerId, null);
+        });
+        AnnounceSignedOut(LibraryDatabase.OwnerId, gone);
     }
 
     /// <summary>Deletes the account with its progress, devices and invites. The log keeps its entries without a user.</summary>
@@ -134,9 +143,16 @@ public sealed class AccountService(
         log.Add(SharingEvent.Removed, null, account.Name);
     }
 
-    /// <summary>The person's own change. Their devices stay signed in. Wrong guesses count toward the name's lock.</summary>
+    /// <summary>
+    /// The person's own change. Every other device of theirs is signed out, since changing a password is what someone does
+    /// when they think it got out, and a token doesn't need the password. Wrong guesses count toward the name's lock.
+    /// </summary>
+    /// <param name="userId">The account.</param>
+    /// <param name="current">The password now.</param>
+    /// <param name="next">The new password.</param>
+    /// <param name="keepDeviceId">The device making the change, which stays signed in.</param>
     /// <exception cref="PasswordRefusedException">The new password is too short, or the current one is wrong or locked out.</exception>
-    public void ChangePassword(int userId, string current, string next)
+    public void ChangePassword(int userId, string current, string next, int? keepDeviceId = null)
     {
         RefuseShort(next);
         var check = CheckPassword(accounts.Get(userId)?.Name, current, null);
@@ -148,7 +164,9 @@ public sealed class AccountService(
         if (!AccountStore.IsCurrent(connection, transaction, userId, check.Hash)) throw new PasswordRefusedException(RedeemFailure.WrongPassword);
 
         AccountStore.SetPasswordHash(connection, transaction, userId, hash);
+        var gone = DeviceStore.RevokeOthers(connection, transaction, userId, keepDeviceId);
         transaction.Commit();
+        AnnounceSignedOut(userId, gone);
     }
 
     /// <summary>
@@ -297,6 +315,13 @@ public sealed class AccountService(
         var issued = devices.Issue(connection, transaction, userId, deviceName, address);
         transaction.Commit();
         return new RedeemResult(issued, null);
+    }
+
+    // After the commit, so what ends a session finds the token dead, and ahead of the log, so sessions end even if it fails.
+    private void AnnounceSignedOut(int userId, IReadOnlyList<(long Id, string Name)> gone)
+    {
+        foreach (var (id, _) in gone) DeviceSignedOut?.Invoke((int)id);
+        foreach (var (_, name) in gone) log.Add(SharingEvent.SignedOut, userId, name);
     }
 
     private void InTransaction(Action<SqliteConnection, SqliteTransaction> work)

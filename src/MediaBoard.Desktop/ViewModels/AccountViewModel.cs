@@ -117,7 +117,7 @@ public sealed partial class AccountViewModel : ObservableObject
         {
             await _account.ChangePasswordAsync(CurrentPassword, NewPassword, CancellationToken.None);
             IsChangingPassword = false;
-            PasswordMessage = "Password changed.";
+            PasswordMessage = "Password changed. Your other devices are signed out.";
         }
         catch (ApiException e)
         {
