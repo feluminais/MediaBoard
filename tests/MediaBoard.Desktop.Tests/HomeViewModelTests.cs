@@ -178,6 +178,29 @@ public class HomeViewModelTests : IDisposable
         Assert.True(text.IsVisible);
     }
 
+    [AvaloniaTheory]
+    [InlineData("Continue watching")]
+    [InlineData("Recently added")]
+    public async Task Home_SectionHeading_IsOneButtonWithTheChevronCentredOnTheText(string heading)
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        var (_, home) = await LoadedHome();
+
+        var view = new HomeView { DataContext = home };
+        var window = new Window { Width = 1000, Height = 700, Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var title = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text == heading);
+        var button = Assert.IsType<Button>(title.GetVisualAncestors().OfType<Button>().First());
+        Assert.NotNull(button.Command);
+
+        var chevron = button.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single();
+        var titleBox = title.TranslatePoint(new Point(0, title.Bounds.Height / 2), window)!.Value;
+        var chevronBox = chevron.TranslatePoint(new Point(0, chevron.Bounds.Height / 2), window)!.Value;
+        Assert.InRange(chevronBox.Y - titleBox.Y, -1.5, 1.5);
+    }
+
     [AvaloniaFact]
     public async Task Home_NothingAdded_WhileAScanRuns_SaysScanning()
     {
