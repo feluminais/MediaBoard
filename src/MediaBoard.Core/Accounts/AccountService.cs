@@ -42,6 +42,10 @@ public sealed class AccountService(
     private const int HashingAtOnce = 2;
     private const int MaxAtHashing = HashingAtOnce + 8;
 
+    // Far more than one person has, and each sign-in makes a device, so a script with a password could otherwise grow the
+    // table for good.
+    private const int DevicesPerAccount = 20;
+
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _hashing = new(HashingAtOnce, HashingAtOnce);
     private int _atGate;
@@ -201,7 +205,7 @@ public sealed class AccountService(
         var issued = IssueIfCurrent(check.Account.Id, check.Hash, deviceName, address);
         if (issued is null) return new SignInResult(null, RedeemFailure.WrongPassword);
 
-        log.Add(SharingEvent.SignedIn, check.Account.Id, deviceName);
+        log.AddOncePerDay(SharingEvent.SignedIn, check.Account.Id, deviceName);
         return new SignInResult(issued, null);
     }
 
@@ -247,7 +251,7 @@ public sealed class AccountService(
         if (check.Failure is { } failure) return new RedeemResult(null, failure);
 
         var result = Join(account.Id, code, check.Hash, null, deviceName, address);
-        if (result.Issued is not null) log.Add(SharingEvent.SignedIn, account.Id, deviceName);
+        if (result.Issued is not null) log.AddOncePerDay(SharingEvent.SignedIn, account.Id, deviceName);
         return result;
     }
 
@@ -299,7 +303,9 @@ public sealed class AccountService(
         if (!AccountStore.IsCurrent(connection, transaction, userId, hash)) return null;
 
         var issued = devices.Issue(connection, transaction, userId, deviceName, address);
+        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, DevicesPerAccount);
         transaction.Commit();
+        AnnounceSignedOut(userId, gone);
         return issued;
     }
 
@@ -313,7 +319,9 @@ public sealed class AccountService(
 
         if (newHash is not null) AccountStore.SetPasswordHash(connection, transaction, userId, newHash);
         var issued = devices.Issue(connection, transaction, userId, deviceName, address);
+        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, DevicesPerAccount);
         transaction.Commit();
+        AnnounceSignedOut(userId, gone);
         return new RedeemResult(issued, null);
     }
 

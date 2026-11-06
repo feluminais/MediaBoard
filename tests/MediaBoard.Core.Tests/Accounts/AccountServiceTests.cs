@@ -959,6 +959,38 @@ public sealed class AccountServiceTests : IDisposable
     }
 
     [Fact]
+    public void SigningIn_KeepsTheNewest20Devices_AndSignsOutTheOldest()
+    {
+        var account = Joined();
+        var oldest = _devices.ForUser(account.Id).Single();
+        var signedOut = new List<int>();
+        _service.DeviceSignedOut += signedOut.Add;
+
+        for (var i = 0; i < 20; i++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(1));
+            SignedIn(account);
+        }
+
+        Assert.Equal(20, _devices.ForUser(account.Id).Count);
+        Assert.Equal([oldest.Id], signedOut);
+    }
+
+    [Fact]
+    public void SigningIn_FromOneDevice_LogsOnceADay()
+    {
+        var account = Joined();
+
+        SignedIn(account);
+        SignedIn(account);
+        Assert.Single(Logged(SharingEvent.SignedIn));
+
+        _clock.Advance(TimeSpan.FromHours(24));
+        SignedIn(account);
+        Assert.Equal(2, Logged(SharingEvent.SignedIn).Count);
+    }
+
+    [Fact]
     public void ChangePassword_ARefusedOne_SignsNobodyOut()
     {
         var account = Joined();
