@@ -16,6 +16,12 @@ public class MpcApiTests
         Assert.Equal(["", "", @"C:\x\y.mkv", "5"], MpcApi.SplitPayload(@"||C:\x\y.mkv|5"));
     }
 
+    [Theory]
+    [InlineData("1e12")]
+    [InlineData("1e300")]
+    public void TryParseSeconds_APositionPastAnyVideo_IsNotOne(string text) =>
+        Assert.False(MpcApi.TryParseSeconds(text, out _));
+
     [Fact]
     public void ParseNowPlaying_ReadsDuration()
     {

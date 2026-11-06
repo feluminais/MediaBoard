@@ -272,8 +272,10 @@ public sealed class StreamProxyTests
         Assert.EndsWith($"/{FileId}/{safe}", world.Url(fileName), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task AServersContentType_CantHandThePlayerAPlaylist()
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("HEAD")]
+    public async Task AServersContentType_CantHandThePlayerAPlaylist(string method)
     {
         await using var world = await Fake.StartAsync((context, _) =>
         {
@@ -281,8 +283,9 @@ public sealed class StreamProxyTests
             context.Response.ContentLength = 2;
             return context.Response.WriteAsync("ab", Ct);
         });
+        using var request = new HttpRequestMessage(new HttpMethod(method), world.Url());
 
-        using var response = await world.PlayAsync(world.Url());
+        using var response = await world.Player.SendAsync(request, Ct);
 
         Assert.Equal("application/octet-stream", response.Content.Headers.ContentType?.MediaType);
         Assert.Contains("nosniff", response.Headers.GetValues("X-Content-Type-Options"));

@@ -76,11 +76,14 @@ public static class MpcApi
     public static string FormatSeconds(TimeSpan at) =>
         at.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
 
+    // As the other players' readers cap it: a TimeSpan can't hold whatever a broken file reports.
+    private const double MaxSeconds = 10_000_000;
+
     /// <summary>Reads seconds as MPC-HC writes them (<c>%.3f</c>).</summary>
     public static bool TryParseSeconds(string text, out TimeSpan at)
     {
         if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
-            && double.IsFinite(seconds) && seconds >= 0)
+            && double.IsFinite(seconds) && seconds is >= 0 and <= MaxSeconds)
         {
             at = TimeSpan.FromSeconds(seconds);
             return true;

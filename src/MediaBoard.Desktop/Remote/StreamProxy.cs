@@ -112,13 +112,17 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
     {
         to.StatusCode = (int)from.StatusCode;
         to.ContentLength = from.Content.Headers.ContentLength;
+        SetTypeHeaders(from, to);
+        to.Headers.AcceptRanges = "bytes";
+        if (from.Content.Headers.ContentRange is { } range) to.Headers.ContentRange = range.ToString();
+    }
 
-        // A player reads the type to decide how to treat the bytes, so a server can't call them a playlist.
+    // A player reads the type to decide how to treat the bytes, so a server can't call them a playlist.
+    private static void SetTypeHeaders(HttpResponseMessage from, HttpResponse to)
+    {
         var type = from.Content.Headers.ContentType?.MediaType;
         to.ContentType = type?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true ? type : "application/octet-stream";
         to.Headers.XContentTypeOptions = "nosniff";
-        to.Headers.AcceptRanges = "bytes";
-        if (from.Content.Headers.ContentRange is { } range) to.Headers.ContentRange = range.ToString();
     }
 
     /// <summary>
@@ -276,7 +280,7 @@ public sealed class StreamProxy(ApiClient api, int port = 0) : IStreamUrls, IAsy
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentLength = upstream.Content.Headers.ContentRange?.Length ?? upstream.Content.Headers.ContentLength;
-        context.Response.ContentType = upstream.Content.Headers.ContentType?.ToString();
+        SetTypeHeaders(upstream, context.Response);
         context.Response.Headers.AcceptRanges = "bytes";
     }
 
