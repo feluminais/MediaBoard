@@ -222,6 +222,13 @@ public sealed partial class SharingViewModel : PageViewModel
 
     public bool HasNoActivity => IsLoaded && Activity.Count == 0;
 
+    /// <summary>How many files links keep from people, or null when none are.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLinksNote))]
+    public partial string? LinksNote { get; private set; }
+
+    public bool HasLinksNote => LinksNote is not null;
+
     /// <summary>Who has been getting passwords wrong in the last hour, or null when nobody has.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasFailedSignIns))]
@@ -269,7 +276,8 @@ public sealed partial class SharingViewModel : PageViewModel
             _s.Invites.PendingCounts(),
             ReadActivity(accounts, ActivityLimit),
             openRows.ToDictionary(id => id, _s.Devices.ForUser),
-            _s.Settings.Load().Sharing);
+            _s.Settings.Load().Sharing,
+            _s.Library.FilesBehindLinks());
     }
 
     private List<(SharingLogEntry Entry, string? Name)> ReadActivity(IReadOnlyList<Account> accounts, int limit)
@@ -288,6 +296,7 @@ public sealed partial class SharingViewModel : PageViewModel
         var removedNear = ApplyPeople(data);
         ApplyActivity(data);
         FailedSignInsText = FailuresLine(data.Failures);
+        LinksNote = LinksLine(data.FilesBehindLinks);
         ApplyStatus();
         IsLoaded = true;
         LoadProblem = null;
@@ -967,6 +976,15 @@ public sealed partial class SharingViewModel : PageViewModel
 
     private SharingActivityRow ActivityRow(SharingLogEntry entry, string? name) => new(entry.Id, WhenText(entry.At), Words(entry, name));
 
+    private static string? LinksLine(int files) => files switch
+    {
+        0 => null,
+        1 => "1 file sits behind a link, so people you share with can't see it. Share the folder it lives in instead.",
+        _ => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{files} files sit behind links, so people you share with can't see them. Share the folders they live in instead."),
+    };
+
     private static string? FailuresLine(IReadOnlyList<FailedSignIns> failures) => failures.Count == 0
         ? null
         : "Wrong passwords in the last hour: "
@@ -1096,5 +1114,6 @@ public sealed partial class SharingViewModel : PageViewModel
         IReadOnlyDictionary<int, int> PendingInvites,
         List<(SharingLogEntry Entry, string? Name)> Activity,
         Dictionary<int, IReadOnlyList<Device>> Devices,
-        SharingSettings Sharing);
+        SharingSettings Sharing,
+        int FilesBehindLinks);
 }

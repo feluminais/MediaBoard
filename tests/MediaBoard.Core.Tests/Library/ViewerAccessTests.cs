@@ -14,6 +14,7 @@ public sealed class ViewerAccessTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-access-" + Guid.NewGuid().ToString("N"));
     private readonly TempLibrary _rootA = new();
     private readonly TempLibrary _rootB = new();
+    private readonly TempLibrary _outside = new();
     private readonly FakeClock _clock = new();
     private readonly LibraryDatabase _db;
     private readonly TitleStore _titles;
@@ -54,6 +55,7 @@ public sealed class ViewerAccessTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
         _rootA.Dispose();
         _rootB.Dispose();
+        _outside.Dispose();
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -106,6 +108,60 @@ public sealed class ViewerAccessTests : IDisposable
         Assert.Equal("S01E02", reachable.EpisodeLabel);
         Assert.Equal(2700, reachable.DurationS);
         Assert.False(reachable.Missing);
+    }
+
+    [Fact]
+    public async Task FileBehindALink_IsGoneOverTheNetwork_AndStaysAtThisPC()
+    {
+        var movie = Movie("Heat");
+        var kept = Movie("Ronin");
+        var plain = await FileIn(_folderA, _rootA, "Ronin (1998).mkv", kept);
+        _outside.File(@"Private\Heat (1995).mkv", 4096);
+        _rootA.Junction("Linked", _outside.PathOf("Private"));
+        await _scanner.ScanAsync(_folderA, Ct);
+        var linked = new FileStore(_db).ByFolder(_folderA.Id).Single(r => r.RelPath.EndsWith("Heat (1995).mkv", StringComparison.Ordinal));
+        Assert.True(_matches.SetMatch(linked.Id, movie, [], 1.0, "auto"));
+        var ownDevice = new Viewer(Viewer.Owner.UserId, null, OverNetwork: true);
+
+        Assert.Null(_access.File(_sam, linked.Id));
+        Assert.Null(_access.File(ownDevice, linked.Id));
+        Assert.False(_access.CanReachTitle(_sam, movie));
+        Assert.DoesNotContain(As(_sam).Titles(TitleKind.Movie, TitleSort.Name, includeHidden: false), t => t.TitleId == movie);
+        Assert.NotNull(_access.File(_sam, plain));
+        Assert.NotNull(_access.File(Viewer.Owner, linked.Id));
+        Assert.Contains(_owner.Titles(TitleKind.Movie, TitleSort.Name, includeHidden: false), t => t.TitleId == movie);
+    }
+
+    [Fact]
+    public async Task AFolderSwappedForALink_IsRefusedWhileTheListIsStillKept()
+    {
+        var movie = Movie("Heat");
+        var file = await FileIn(_folderA, _rootA, @"Films\Heat (1995).mkv", movie);
+        _outside.File(@"Films\Heat (1995).mkv", 4096);
+        var owner = new LocalLibrary(_db, new FakeMetadataProvider(), _ => RecycleResult.Recycled, _clock, _ => DriveType.Fixed, shareSnapshots: true);
+        var library = owner.ForViewer(_sam);
+        var access = new ViewerAccess(_db, owner);
+        Assert.Contains(library.Titles(TitleKind.Movie, TitleSort.Name, includeHidden: false), t => t.TitleId == movie);
+        Assert.NotNull(access.File(_sam, file));
+
+        Directory.Delete(_rootA.PathOf("Films"), recursive: true);
+        _rootA.Junction("Films", _outside.PathOf("Films"));
+
+        Assert.Null(access.File(_sam, file));
+    }
+
+    [Fact]
+    public async Task FilesBehindLinks_CountsThemForTheOwner()
+    {
+        await FileIn(_folderA, _rootA, "Ronin (1998).mkv", Movie("Ronin"));
+        _outside.File(@"Private\One.mkv", 4096);
+        _outside.File(@"Private\Two.mkv", 4096);
+        Assert.Equal(0, _owner.FilesBehindLinks());
+
+        _rootA.Junction("Linked", _outside.PathOf("Private"));
+        await _scanner.ScanAsync(_folderA, Ct);
+
+        Assert.Equal(2, _owner.FilesBehindLinks());
     }
 
     [Fact]

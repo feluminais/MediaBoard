@@ -380,6 +380,14 @@ public sealed partial class LocalLibrary : ILibrary
     /// </summary>
     internal LibrarySnapshot Snapshot() => LibrarySnapshot.Load(_db, _viewer, _usesSharedBase ? _shared.Base : null);
 
+    /// <inheritdoc />
+    public int FilesBehindLinks()
+    {
+        var snapshot = Snapshot();
+        var behindLinks = snapshot.Library.BehindLinks(new FolderLinks());
+        return snapshot.Files.Count(f => !f.Hidden && behindLinks.Contains(f.Id));
+    }
+
     /// <summary>Lets go of what the sharing server kept, for when it stops listening.</summary>
     public void ForgetSnapshot() => _shared.Base?.Invalidate();
 

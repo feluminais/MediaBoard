@@ -10,6 +10,8 @@ namespace MediaBoard.Core.Library;
 /// </summary>
 internal sealed class LibraryBase
 {
+    private HashSet<int>? _behindLinks;
+
     private LibraryBase(
         IReadOnlyList<LibraryFolder> folders, List<FileEntry> files, Dictionary<int, TitleRow> titles,
         Dictionary<(TargetKind, int), OverrideRow> overrides)
@@ -27,6 +29,17 @@ internal sealed class LibraryBase
     public Dictionary<int, TitleRow> Titles { get; }
 
     public Dictionary<(TargetKind, int), OverrideRow> Overrides { get; }
+
+    /// <summary>
+    /// The files a link brings into their folder. Worked out once per base and only when asked, because it reads the disk,
+    /// and the owner at this PC never needs it.
+    /// </summary>
+    public HashSet<int> BehindLinks(FolderLinks links) => LazyInitializer.EnsureInitialized(ref _behindLinks, () =>
+    {
+        var folders = Folders.ToDictionary(f => f.Id, f => f.Path);
+        return Files.Where(f => folders.TryGetValue(f.FolderId, out var folder) && links.IsThroughLink(folder, f.RelPath))
+            .Select(f => f.Id).ToHashSet();
+    });
 
     /// <summary>Which read of <see cref="SharedLibraryBase"/> made this, or 0 for one made outside it. A cache keeps the number, not the base.</summary>
     public long Generation { get; set; }
@@ -141,16 +154,40 @@ internal sealed class SharedLibraryBase(LibraryDatabase db, TimeProvider time, F
 {
     internal static readonly TimeSpan MaxAge = TimeSpan.FromSeconds(5);
 
+    // Longer than the base's own life: reading every directory each time would cost more than the base saves. Lists can
+    // lag by this much, and ViewerAccess checks the disk again before it hands out a file.
+    private static readonly TimeSpan LinksMaxAge = TimeSpan.FromMinutes(1);
+
     private readonly Lock _gate = new();
     private readonly Lock _build = new();
     private readonly Func<LibraryDatabase, LibraryBase> _read = read ?? LibraryBase.Read;
     private LibraryBase? _kept;
     private long _builtAt;
+    private FolderLinks? _links;
+    private long _linksAt;
     private int _version;
     private long _generation;
 
     /// <summary>Whether a base is kept and still young enough to hand out.</summary>
     public bool Holds => Kept() is not null;
+
+    /// <summary>What was read about links on disk, shared by the bases of the next minute.</summary>
+    public FolderLinks Links
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_links is null || time.GetElapsedTime(_linksAt) >= LinksMaxAge)
+                {
+                    _links = new FolderLinks();
+                    _linksAt = time.GetTimestamp();
+                }
+
+                return _links;
+            }
+        }
+    }
 
     /// <summary>Drops the base, and makes a read that is running now unfit to keep.</summary>
     public void Invalidate()

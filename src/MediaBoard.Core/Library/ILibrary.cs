@@ -38,6 +38,9 @@ public interface ILibrary
     /// <summary>Library folders with the non-media folders the last scan skipped and whether each can be read.</summary>
     IReadOnlyList<FolderRow> Folders();
 
+    /// <summary>Files in the owner's folders that a link brings in from elsewhere, which sharing leaves out.</summary>
+    int FilesBehindLinks() => 0;
+
     /// <summary>Instant, offline search over the titles in the library.</summary>
     IReadOnlyList<TitleCard> SearchLocal(string query, int limit);
 

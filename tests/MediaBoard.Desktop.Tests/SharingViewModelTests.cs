@@ -253,6 +253,21 @@ public sealed class SharingViewModelTests
         Assert.False(page.ShowFirewallNote);
     }
 
+    [AvaloniaTheory]
+    [InlineData(0, null)]
+    [InlineData(1, "1 file sits behind a link")]
+    [InlineData(3, "3 files sit behind links")]
+    public async Task FilesBehindLinks_AreCountedOnThePage(int files, string? expected)
+    {
+        await using var world = new SharingWorld();
+        var page = Build(world, library: new FakeLibrary { LinkedFiles = files });
+        page.Opened();
+        await Ui.WaitUntil(() => page.IsLoaded);
+
+        Assert.Equal(expected is not null, page.HasLinksNote);
+        if (expected is not null) Assert.StartsWith(expected, page.LinksNote, StringComparison.Ordinal);
+    }
+
     [AvaloniaFact]
     public async Task TurningOff_WithSomeoneWatching_Asks()
     {

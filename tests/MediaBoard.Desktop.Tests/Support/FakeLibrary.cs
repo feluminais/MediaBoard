@@ -7,6 +7,10 @@ namespace MediaBoard.Desktop.Tests.Support;
 /// <summary>An in-memory <see cref="ILibrary"/>: tests set the lists and raise <see cref="Changed"/> themselves.</summary>
 internal sealed class FakeLibrary : ILibrary
 {
+    public int LinkedFiles { get; set; }
+
+    public int FilesBehindLinks() => LinkedFiles;
+
     public List<FolderRow> FolderRows { get; } = [];
 
     public List<ReviewItem> Review { get; } = [];

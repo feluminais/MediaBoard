@@ -14,8 +14,8 @@ public sealed record ReachableFile(
 /// <summary>
 /// Decides what a viewer may reach by id. It reads the same <see cref="LibrarySnapshot"/> the library queries do,
 /// so a file the lists leave out is unreachable here too: a folder the viewer has no access to or that is switched
-/// off, a hide at any level (title, season, episode, file, folder), a file marked "not a movie or show". Callers
-/// answer an unreachable id exactly as they answer one that doesn't exist.
+/// off, a hide at any level (title, season, episode, file, folder), a file marked "not a movie or show", a file a link
+/// brings in from outside its folder. Callers answer an unreachable id exactly as they answer one that doesn't exist.
 /// </summary>
 public sealed class ViewerAccess(LibraryDatabase db, LocalLibrary? owner = null)
 {
@@ -29,6 +29,9 @@ public sealed class ViewerAccess(LibraryDatabase db, LocalLibrary? owner = null)
 
         var folders = snapshot.Folders.ToDictionary(f => f.Id, f => f.Path);
         if (LocalLibrary.InsideLibrary(folders, file.FolderId, file.RelPath) is not { } fullPath) return null;
+
+        // The lists may be a minute behind the disk, and this is the check that stands between a viewer and the bytes.
+        if (!viewer.SeesHidden && new FolderLinks().IsThroughLink(folders[file.FolderId], file.RelPath)) return null;
 
         var episodes = file.Episodes.OrderBy(e => e.Key).ToList();
         double? duration = file.Progress is { DurationS: > 0 } progress ? progress.DurationS : null;

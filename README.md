@@ -110,8 +110,9 @@ the app must stay running, in the tray at least, for people to connect. It works
    paste the invite and pick a password.
 
 They browse, search and play from your library, and their progress is their own. A device unused for 90 days is signed
-out, and signing back in takes the password. The files stay on your PC and are never copied. Windows SmartScreen warns
-once on the unsigned app. Replacing your certificate means everyone needs a new invite.
+out, and signing back in takes the password. The files stay on your PC and are never copied. Files that a symbolic link or
+junction brings into a folder aren't shared, and the Sharing page counts them. Windows SmartScreen warns once on the
+unsigned app. Replacing your certificate means everyone needs a new invite.
 If this PC connects to someone else's server for a while, sharing comes back on when you switch back to your own library.
 
 ## How it identifies titles

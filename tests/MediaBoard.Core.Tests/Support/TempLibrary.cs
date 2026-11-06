@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -11,6 +12,8 @@ public sealed class TempLibrary : IDisposable
 {
     // Above the 300 MB sample limit so ordinary names are never mistaken for sample clips.
     public const long DefaultSize = 400L * 1024 * 1024;
+
+    private readonly List<string> _junctions = [];
 
     public TempLibrary()
     {
@@ -37,6 +40,22 @@ public sealed class TempLibrary : IDisposable
         MarkSparse(stream.SafeFileHandle);
         stream.SetLength(size);
         return path;
+    }
+
+    /// <summary>A directory junction, which unlike a symbolic link needs no special rights to make.</summary>
+    public void Junction(string relativePath, string target)
+    {
+        var path = PathOf(relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var mklink = Process.Start(new ProcessStartInfo("cmd.exe", ["/c", "mklink", "/J", path, target])
+        {
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        })!;
+        mklink.WaitForExit();
+        Assert.Equal(0, mklink.ExitCode);
+        _junctions.Add(path);
     }
 
     private const uint FsctlSetSparse = 0x000900C4;
@@ -74,6 +93,8 @@ public sealed class TempLibrary : IDisposable
 
     public void Dispose()
     {
+        // A recursive delete refuses a junction without admin rights. Removing it alone leaves its target alone.
+        foreach (var junction in _junctions.Where(Directory.Exists)) Directory.Delete(junction);
         var parent = Path.GetDirectoryName(Root)!;
         if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
     }

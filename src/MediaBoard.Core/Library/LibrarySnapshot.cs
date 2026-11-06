@@ -177,8 +177,9 @@ internal sealed class LibrarySnapshot
         {
             var folderHidden = folders.Where(f => overrides.TryGetValue((TargetKind.Folder, f.Id), out var o) && o.Hidden)
                 .Select(f => f.Id).ToHashSet();
+            var behindLinks = library.BehindLinks(shared?.Links ?? new FolderLinks());
             // A hide at any level blocks the viewer, so the queries never see the file and agree with ViewerAccess.
-            files = files.Where(f => !f.Hidden && !IsHiddenByTitleSeasonOrEpisode(f, overrides)).ToList();
+            files = files.Where(f => !f.Hidden && !behindLinks.Contains(f.Id) && !IsHiddenByTitleSeasonOrEpisode(f, overrides)).ToList();
             folders = folders.Where(f => !folderHidden.Contains(f.Id)).ToList();
             (fileCountByFolder, titleCountByFolder) = CountByFolder(files, titles);
         }
