@@ -303,7 +303,7 @@ public sealed class AccountService(
         if (!AccountStore.IsCurrent(connection, transaction, userId, hash)) return null;
 
         var issued = devices.Issue(connection, transaction, userId, deviceName, address);
-        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, DevicesPerAccount);
+        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, issued.Device.Id, DevicesPerAccount);
         transaction.Commit();
         AnnounceSignedOut(userId, gone);
         return issued;
@@ -319,7 +319,7 @@ public sealed class AccountService(
 
         if (newHash is not null) AccountStore.SetPasswordHash(connection, transaction, userId, newHash);
         var issued = devices.Issue(connection, transaction, userId, deviceName, address);
-        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, DevicesPerAccount);
+        var gone = DeviceStore.RevokeBeyond(connection, transaction, userId, issued.Device.Id, DevicesPerAccount);
         transaction.Commit();
         AnnounceSignedOut(userId, gone);
         return new RedeemResult(issued, null);
@@ -329,7 +329,7 @@ public sealed class AccountService(
     private void AnnounceSignedOut(int userId, IReadOnlyList<(long Id, string Name)> gone)
     {
         foreach (var (id, _) in gone) DeviceSignedOut?.Invoke((int)id);
-        foreach (var (_, name) in gone) log.Add(SharingEvent.SignedOut, userId, name);
+        foreach (var (_, name) in gone) log.AddOncePerDay(SharingEvent.SignedOut, userId, name);
     }
 
     private void InTransaction(Action<SqliteConnection, SqliteTransaction> work)

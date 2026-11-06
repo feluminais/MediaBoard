@@ -977,6 +977,36 @@ public sealed class AccountServiceTests : IDisposable
     }
 
     [Fact]
+    public void SigningIn_TheNewDeviceStays_EvenWhenTheClockWentBack()
+    {
+        var account = Joined();
+        for (var i = 0; i < 19; i++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(1));
+            SignedIn(account);
+        }
+
+        _clock.Advance(TimeSpan.FromHours(-2));
+        var late = SignedIn(account);
+
+        Assert.Equal(20, _devices.ForUser(account.Id).Count);
+        Assert.NotNull(_devices.ByToken(late.Token));
+    }
+
+    [Fact]
+    public void Redeeming_AlsoKeepsTheNewest20Devices()
+    {
+        var account = Joined();
+        for (var i = 0; i < 25; i++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.NotNull(_service.Redeem(_invites.Create(account.Id), Good, "Phone", Address).Issued);
+        }
+
+        Assert.Equal(20, _devices.ForUser(account.Id).Count);
+    }
+
+    [Fact]
     public void SigningIn_FromOneDevice_LogsOnceADay()
     {
         var account = Joined();

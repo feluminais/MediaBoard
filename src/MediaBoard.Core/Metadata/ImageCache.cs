@@ -41,7 +41,15 @@ public sealed class ImageCache(HttpClient http, Connectivity connectivity, strin
         {
             if (_sizeMeasured && _time.GetElapsedTime(_sizeMeasuredAt, now) < SizeMeasureEvery) return _size < maxBytes;
 
-            _size = Directory.Exists(imagesDir) ? new DirectoryInfo(imagesDir).EnumerateFiles().Sum(file => file.Length) : 0;
+            try
+            {
+                _size = Directory.Exists(imagesDir) ? new DirectoryInfo(imagesDir).EnumerateFiles().Sum(file => file.Length) : 0;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The folder went as it was read. The last size stands until the next measure.
+            }
+
             _sizeMeasured = true;
             _sizeMeasuredAt = now;
             return _size < maxBytes;

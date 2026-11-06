@@ -19,6 +19,9 @@ public sealed class SharingLog(LibraryDatabase db, TimeProvider? time = null)
     public const int Cap = 5_000;
     private const int TrimEvery = 100;
 
+    // A detail can be whatever a viewer sends, so repeats alone don't bound it. A long day of episodes stays under this.
+    private const int MostOfAKindPerDay = 50;
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private int _inserts;
 
@@ -37,16 +40,19 @@ public sealed class SharingLog(LibraryDatabase db, TimeProvider? time = null)
 
     /// <summary>
     /// For what a viewer can repeat at will, such as marking a title watched and back: the log has a cap, and one viewer
-    /// mustn't be able to push everything else out of it.
+    /// mustn't be able to push everything else out of it. An account also gets at most 50 entries of a kind a day.
     /// </summary>
     public void AddOncePerDay(SharingEvent kind, int userId, string detail)
     {
         using (var connection = db.Open())
         {
-            var repeated = connection.ExecuteScalar<bool>(
-                "SELECT EXISTS(SELECT 1 FROM sharing_log WHERE kind = @kind AND user_id = @userId AND detail = @detail AND at > @since)",
+            var today = connection.QuerySingle<(long Same, long All)>(
+                """
+                SELECT COUNT(CASE WHEN detail = @detail THEN 1 END), COUNT(*) FROM sharing_log
+                WHERE kind = @kind AND user_id = @userId AND at > @since
+                """,
                 new { kind = kind.ToString(), userId, detail, since = FileStore.FormatTime(_time.GetUtcNow().AddDays(-1)) });
-            if (repeated) return;
+            if (today.Same > 0 || today.All >= MostOfAKindPerDay) return;
         }
 
         Add(kind, userId, detail);

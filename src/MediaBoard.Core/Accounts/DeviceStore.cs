@@ -87,15 +87,20 @@ public sealed class DeviceStore(LibraryDatabase db, TimeProvider? time = null)
         connection.Execute("DELETE FROM devices WHERE user_id = @userId", new { userId }, transaction);
 
     /// <summary>Signs out whichever of the account's devices were used longest ago, past <paramref name="keep"/> of them.</summary>
+    /// <param name="connection">The open connection.</param>
+    /// <param name="transaction">The transaction.</param>
+    /// <param name="userId">The account.</param>
+    /// <param name="newDeviceId">The device just issued, which stays whatever the clock did.</param>
+    /// <param name="keep">How many devices the account keeps, that one included.</param>
     /// <returns>The devices that went, with their names.</returns>
-    internal static IReadOnlyList<(long Id, string Name)> RevokeBeyond(SqliteConnection connection, SqliteTransaction transaction, int userId, int keep) =>
+    internal static IReadOnlyList<(long Id, string Name)> RevokeBeyond(SqliteConnection connection, SqliteTransaction transaction, int userId, int newDeviceId, int keep) =>
         connection.Query<(long Id, string Name)>(
             """
             DELETE FROM devices WHERE id IN
-                (SELECT id FROM devices WHERE user_id = @userId ORDER BY last_seen DESC, id DESC LIMIT -1 OFFSET @keep)
+                (SELECT id FROM devices WHERE user_id = @userId AND id <> @newDeviceId ORDER BY last_seen DESC, id DESC LIMIT -1 OFFSET @others)
             RETURNING id, name
             """,
-            new { userId, keep },
+            new { userId, newDeviceId, others = keep - 1 },
             transaction).ToList();
 
     /// <param name="keepDeviceId">The device that stays signed in, or null for none.</param>

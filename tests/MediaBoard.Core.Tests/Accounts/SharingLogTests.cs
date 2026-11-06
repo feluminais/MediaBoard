@@ -63,6 +63,18 @@ public sealed class SharingLogTests : IDisposable
     }
 
     [Fact]
+    public void AddOncePerDay_NewDetailsToo_StopAt50ADay()
+    {
+        for (var name = 0; name < 60; name++) _log.AddOncePerDay(SharingEvent.SignedIn, LibraryDatabase.OwnerId, "Device " + name);
+        Assert.Equal(50, Rows());
+
+        _clock.Advance(TimeSpan.FromHours(24));
+        _log.AddOncePerDay(SharingEvent.SignedIn, LibraryDatabase.OwnerId, "Device 60");
+
+        Assert.Equal(51, Rows());
+    }
+
+    [Fact]
     public void Recent_SkipsAnUnknownKind()
     {
         _log.Add(SharingEvent.Joined, null, "known");

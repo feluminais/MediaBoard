@@ -24,6 +24,8 @@ namespace MediaBoard.Server.Tests;
 public sealed class ServerFixture : IAsyncDisposable
 {
     public const string ServerName = "Test library";
+
+    private readonly NotFoundHandler _imageRequests = new();
     public const string Password = "correct horse battery";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "mediaboard-test-" + Guid.NewGuid().ToString("N"));
@@ -53,7 +55,7 @@ public sealed class ServerFixture : IAsyncDisposable
         // Never probes: a test flips it with ReportOffline.
         Connectivity = new Connectivity(_ => Task.FromResult(false), TimeProvider.System, new ActivityHub());
         _disposables.Add(Connectivity);
-        var http = new HttpClient(new NotFoundHandler());
+        var http = new HttpClient(_imageRequests);
         _disposables.Add(http);
         ImagesDir = Path.Combine(_dir, "images");
         Owner = new LocalLibrary(Db, Provider, shareSnapshots: shareSnapshots);
@@ -106,6 +108,9 @@ public sealed class ServerFixture : IAsyncDisposable
     public ViewerAccess Access { get; }
 
     public string ImagesDir { get; }
+
+    /// <summary>How many image downloads reached TMDB.</summary>
+    public int ImageRequests => _imageRequests.Requests;
 
     /// <summary>TestHost has no socket, so each request takes its remote address from here.</summary>
     public IPAddress RemoteAddress { get; set; } = IPAddress.Parse("203.0.113.5");
@@ -232,8 +237,15 @@ public sealed class ServerFixture : IAsyncDisposable
 
     private sealed class NotFoundHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        private int _requests;
+
+        public int Requests => Volatile.Read(ref _requests);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requests);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
     }
 
     public async ValueTask DisposeAsync()

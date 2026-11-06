@@ -360,6 +360,23 @@ public sealed class LibraryEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, status);
     }
 
+    [Fact]
+    public async Task Images_PastTheHoursDownloads_OnlyWhatsOnDiskIsServed()
+    {
+        await using var world = await World.CreateAsync();
+        Directory.CreateDirectory(world.Fixture.ImagesDir);
+        await File.WriteAllBytesAsync(Path.Combine(world.Fixture.ImagesDir, "w342kept.jpg"), [1, 2, 3], Ct);
+
+        for (var name = 0; name < 1_000; name++) await world.SendAsync("GET", $"/api/v1/images/342/n{name}.jpg");
+        Assert.Equal(1_000, world.Fixture.ImageRequests);
+
+        var (status, _) = await world.SendAsync("GET", "/api/v1/images/342/onemore.jpg");
+
+        Assert.Equal(HttpStatusCode.NotFound, status);
+        Assert.Equal(1_000, world.Fixture.ImageRequests);
+        Assert.Equal(HttpStatusCode.OK, (await world.SendAsync("GET", "/api/v1/images/342/kept.jpg")).Status);
+    }
+
     [Theory]
     [InlineData(342, "abc.jpg", "image/jpeg")]
     [InlineData(780, "Abc123.png", "image/png")]
