@@ -35,6 +35,15 @@ public sealed class HeadlessSetupGuard : IDisposable
     private static int _started;
     private static int _finished;
 
+    // Dispatcher.UIThread belongs to the first thread that touches it. Started here, ahead of every test, that's the
+    // session's thread. Otherwise a plain [Fact] that happens to run first takes it, the render loop then refuses the
+    // session's thread, and every headless test in the assembly is lost.
+    public HeadlessSetupGuard() =>
+        HeadlessUnitTestSession.GetOrStartForAssembly(typeof(HeadlessSetupGuard).Assembly)
+            .Dispatch(() => { }, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
     internal static void Started() => Interlocked.Increment(ref _started);
     internal static void Finished() => Interlocked.Increment(ref _finished);
 

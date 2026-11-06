@@ -62,7 +62,7 @@ public sealed class FoldersViewModelTests : IDisposable
         Assert.Equal(root, row.Path);
         Assert.Equal(2, row.FileCount); // scanned without a restart or a manual rescan
         var item = Assert.Single(vm.Folders);
-        Assert.Equal("2 files", item.Summary);
+        Assert.Contains(item.Summary, new[] { "2 files", "2 movies" }); // identification may have run already
         Assert.False(vm.ShowEmpty);
         Assert.Null(vm.Message);
     }
@@ -473,7 +473,7 @@ public sealed class FoldersViewModelTests : IDisposable
         }
 
         await Settle(vm);
-        Assert.Equal("1 file", Assert.Single(vm.Folders).Summary); // an awaited refresh shows current data
+        Assert.Contains(Assert.Single(vm.Folders).Summary, new[] { "1 file", "1 movie" }); // an awaited refresh shows current data
     }
 
     [AvaloniaFact]

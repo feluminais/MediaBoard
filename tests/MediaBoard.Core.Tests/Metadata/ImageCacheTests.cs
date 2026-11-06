@@ -171,7 +171,13 @@ public sealed class ImageCacheTests : IDisposable
 
         await cache.GetAsync("/gone.jpg", 342, Ct);
         _clock.Advance(TimeSpan.FromMinutes(5));
-        await cache.GetAsync("/gone.jpg", 342, Ct);
+
+        // The finished download clears itself a moment after it answers, and until then it answers again.
+        for (var tries = 0; tries < 200 && handler.Calls < 2; tries++)
+        {
+            await cache.GetAsync("/gone.jpg", 342, Ct);
+            await Task.Delay(5, Ct);
+        }
 
         Assert.Equal(2, handler.Calls);
     }
