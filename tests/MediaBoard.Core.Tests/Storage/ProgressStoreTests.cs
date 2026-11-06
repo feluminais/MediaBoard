@@ -34,6 +34,15 @@ public sealed class ProgressStoreTests : IDisposable
     }
 
     [Fact]
+    public void SetWatched_ManyFiles_AllOrNone()
+    {
+        var thrown = Assert.ThrowsAny<Exception>(() => _store.SetWatched(Owner, [_fileId, _fileId + 999], true));
+
+        Assert.True(ProgressStore.IsUnknownFile(thrown));
+        Assert.Null(_store.Get(Owner, _fileId));
+    }
+
+    [Fact]
     public void Save_StoresPositionDurationAndTime()
     {
         _store.Save(Owner, _fileId, 120.5, 3000);

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 using MediaBoard.Core.Remote;
@@ -117,13 +118,14 @@ public sealed class HostTests
     {
         await using var fixture = new ServerFixture();
         var port = ServerFixture.FreePort();
-        await fixture.Server.StartAsync(Options(fixture, port) with { ConnectionsPerAddress = 2 }, Ct);
+        var options = Options(fixture, port) with { ConnectionsPerAddress = 2 };
+        await fixture.Server.StartAsync(options, Ct);
 
+        // Through TLS, so the server has certainly counted each.
         using var first = new TcpClient();
         using var second = new TcpClient();
-        await first.ConnectAsync(IPAddress.Loopback, port, Ct);
-        await second.ConnectAsync(IPAddress.Loopback, port, Ct);
-        await Task.Delay(100, Ct); // Kestrel counts a connection once it has accepted it.
+        await using var firstTls = await SecuredAsync(first, options);
+        await using var secondTls = await SecuredAsync(second, options);
 
         using var refused = new TcpClient();
         await refused.ConnectAsync(IPAddress.Loopback, port, Ct);
@@ -135,11 +137,31 @@ public sealed class HostTests
             if (read == 0) throw new IOException("Closed.");
         });
 
-        // A place that opens up is free again.
+        // A place that opens up is free again, once the server has noticed.
         first.Close();
-        await Task.Delay(100, Ct);
-        var response = await fixture.TlsClient().GetAsync(Url(port, "/api/v1/ping"), Ct);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        HttpResponseMessage? answer = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (answer is null && DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                answer = await fixture.TlsClient().GetAsync(Url(port, "/api/v1/ping"), Ct);
+            }
+            catch (HttpRequestException)
+            {
+                await Task.Delay(50, Ct);
+            }
+        }
+
+        Assert.Equal(HttpStatusCode.OK, answer?.StatusCode);
+    }
+
+    private static async Task<SslStream> SecuredAsync(TcpClient client, SharingOptions options)
+    {
+        await client.ConnectAsync(IPAddress.Loopback, options.Port, Ct);
+        var tls = new SslStream(client.GetStream(), leaveInnerStreamOpen: true, (_, served, _, _) => served?.GetCertHashString() == options.Certificate.GetCertHashString());
+        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = "localhost" }, Ct);
+        return tls;
     }
 
     [Fact]

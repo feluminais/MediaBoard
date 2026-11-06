@@ -219,6 +219,35 @@ public sealed class ProgressOutboxTests
     }
 
     [Fact]
+    public async Task AWriteThatFailed_IsTriedAgain_AtThePause()
+    {
+        await using var world = await World.StartAsync();
+        world.Outbox.Save(FileId, 10, 100);
+
+        using (new FileStream(world.PathOnDisk, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            world.Outbox.SetWatched(FileId, true);
+        }
+
+        world.Outbox.Paused(FileId);
+
+        Assert.Contains("\"watched\":true", File.ReadAllText(world.PathOnDisk), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnExit_WritesWhatTheThrottleHeldBack()
+    {
+        await using var world = await World.StartAsync();
+        var outbox = world.NewOutbox(() => false);
+        outbox.Save(FileId, 10, 100);
+        outbox.Save(FileId, 20, 100);
+
+        await outbox.DisposeAsync();
+
+        Assert.Equal(20, world.NewOutbox().Waiting(FileId)?.PositionS);
+    }
+
+    [Fact]
     public async Task WhenItCantSend_NothingGoesOut_AndTheEntriesWait()
     {
         await using var world = await World.StartAsync();

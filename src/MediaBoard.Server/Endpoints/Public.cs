@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using MediaBoard.Core.Accounts;
 using MediaBoard.Core.Remote;
 using Microsoft.AspNetCore.Builder;
@@ -54,9 +55,12 @@ internal static class Public
     // something else.
     private static string? CleanDeviceName(string name)
     {
-        var kept = string.Concat(name.Where(c => !char.IsControl(c) && char.GetUnicodeCategory(c) != UnicodeCategory.Format)).Trim();
+        var kept = string.Concat(name.EnumerateRunes().Where(IsPlainText)).Trim();
         return kept.Length is > 0 and <= MaxDeviceName ? kept : null;
     }
+
+    private static bool IsPlainText(Rune rune) => Rune.GetUnicodeCategory(rune)
+        is not (UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator);
 
     internal static IResult Answer(IssuedDevice? issued, RedeemFailure? failure, AccountStore store)
     {

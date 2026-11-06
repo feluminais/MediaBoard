@@ -222,7 +222,7 @@ public sealed class RemoteLibraryTests
     }
 
     [Fact]
-    public async Task SetTitleWatched_IsOneRequest_ThatReachesTheServer()
+    public async Task SetTitleWatched_ReachesTheServer()
     {
         await using var world = await World.StartAsync();
         var title = world.Heat;

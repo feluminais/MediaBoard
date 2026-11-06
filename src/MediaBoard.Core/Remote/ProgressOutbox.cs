@@ -296,9 +296,10 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
     // refuses costs only the protection against a restart: the entry is still in memory, on its way to the server.
     private void Write()
     {
+        // Still owed, either way it can't happen now: the next pause, end, send or exit tries again.
+        _unwritten = true;
         if (!_read) return;
 
-        _unwritten = false;
         _everWritten = true;
         _lastWrite = time.GetTimestamp();
         try
@@ -309,6 +310,7 @@ public sealed class ProgressOutbox(ApiClient api, string path, TimeProvider time
             var temp = path + ".tmp";
             File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(_waiting.Values, ApiJson.Options));
             File.Move(temp, path, overwrite: true);
+            _unwritten = false;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

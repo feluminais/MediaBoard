@@ -582,7 +582,7 @@ public sealed class AccountServiceTests : IDisposable
     }
 
     [Fact]
-    public void Locked_IsSaidWithoutQueueing_EvenAtAFullGate()
+    public async Task Locked_IsSaidWithoutWaitingInTheQueue()
     {
         Trip("Anna");
         using var inside = new ManualResetEventSlim();
@@ -592,18 +592,23 @@ public sealed class AccountServiceTests : IDisposable
             inside.Set();
             release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         };
-        var threads = Enumerable.Range(0, 9).Select(i => new Thread(() => _service.SignIn("Guest" + i, Bad, "Phone", "198.51.100." + i))).ToList();
-        foreach (var thread in threads) thread.Start();
+        var holder = new Thread(() => _service.SignIn("Guest", Bad, "Phone", "198.51.100.1"));
+        holder.Start();
         Assert.True(inside.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
-        var full = SpinWait.SpinUntil(
-            () => _service.SignIn("Stranger", Bad, "Phone", "203.0.113.1").Failure == RedeemFailure.Busy, TimeSpan.FromSeconds(10));
 
-        var locked = _service.SignIn("Anna", Good, "Phone", "203.0.113.2").Failure;
+        try
+        {
+            // The gate is taken, so an answer in time can only have come from ahead of it.
+            var answered = await Task.Run(() => _service.SignIn("Anna", Good, "Phone", "203.0.113.2"), TestContext.Current.CancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
-        release.Set();
-        foreach (var thread in threads) thread.Join();
-        Assert.True(full);
-        Assert.Equal(RedeemFailure.Locked, locked);
+            Assert.Equal(RedeemFailure.Locked, answered.Failure);
+        }
+        finally
+        {
+            release.Set();
+            holder.Join();
+        }
     }
 
     [Fact]

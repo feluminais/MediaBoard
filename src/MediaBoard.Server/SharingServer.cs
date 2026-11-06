@@ -24,9 +24,10 @@ public sealed record SharingOptions(int Port, X509Certificate2 Certificate)
 
     /// <summary>
     /// One address's share of the connections, so a stranger can't hold them all. A family behind one router counts as
-    /// one address, and a player's seek takes several connections at once, so it's well above what one viewer needs.
+    /// one address, and one busy device can peak near 15, and a refused connection reads to a viewer as a dead server, so
+    /// this leaves room for several devices. A stranger would need 4 addresses to fill the server.
     /// </summary>
-    public int ConnectionsPerAddress { get; init; } = 32;
+    public int ConnectionsPerAddress { get; init; } = 64;
 }
 
 public sealed class PortInUseException(int port, Exception innerException) : Exception($"Port {port} is in use.", innerException)

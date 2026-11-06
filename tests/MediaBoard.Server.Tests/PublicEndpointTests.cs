@@ -36,11 +36,17 @@ public sealed class PublicEndpointTests
         await using var fixture = await ServerFixture.StartTestHostAsync();
         var person = fixture.NewPerson("Anna");
 
-        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "Pho‮ne\n" });
+        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "Pho\u202Ene\u2028\U000E0001\n" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Phone", Assert.Single(fixture.Devices.ForUser(person.Id)).Name);
     }
+
+    [Theory]
+    [InlineData(RedeemFailure.Busy, ApiErrorCode.Busy)]
+    [InlineData(RedeemFailure.Locked, ApiErrorCode.Locked)]
+    public void CodeOf_KeepsBusyApartFromAWrongPassword(RedeemFailure failure, ApiErrorCode code) =>
+        Assert.Equal(code, Endpoints.Public.CodeOf(failure));
 
     [Fact]
     public async Task Redeem_ADeviceNameOfOnlySuchCharacters_IsRefused()
@@ -48,7 +54,7 @@ public sealed class PublicEndpointTests
         await using var fixture = await ServerFixture.StartTestHostAsync();
         var person = fixture.NewPerson("Anna");
 
-        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "‮\n" });
+        var response = await Post(fixture, Redeem, new { code = fixture.Invites.Create(person.Id), password = ServerFixture.Password, deviceName = "\u202E\n" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

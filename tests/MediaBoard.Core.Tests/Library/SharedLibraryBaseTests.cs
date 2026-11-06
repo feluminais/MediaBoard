@@ -278,6 +278,24 @@ public sealed class SharedLibraryBaseTests : IDisposable
         AssertSameAsUnshared([_sam, _ann], [heat, ronin]);
     }
 
+    [Fact]
+    public async Task AnOwnersDevice_ReachesNoHiddenTitle_AndNoSwitchedOffFolder()
+    {
+        var (title, heat) = await MovieAsync("Heat");
+        var device = new Viewer(LibraryDatabase.OwnerId, null, OverNetwork: true);
+        var access = new ViewerAccess(_db, _owner);
+        Assert.NotNull(access.File(device, heat));
+
+        _owner.SetHidden(TargetKind.Title, title, true);
+        Assert.Null(access.File(device, heat));
+        Assert.NotNull(access.File(Viewer.Owner, heat));
+        _owner.SetHidden(TargetKind.Title, title, false);
+
+        _folders.SetEnabled(_folder.Id, false);
+        _owner.NotifyChanged();
+        Assert.Null(access.File(device, heat));
+    }
+
     [Theory]
     [InlineData(Hide.Title)]
     [InlineData(Hide.Season)]
