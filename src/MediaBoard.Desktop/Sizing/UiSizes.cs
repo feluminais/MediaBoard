@@ -33,7 +33,6 @@ public sealed record UiSizes(double TextScale, double PosterWidth, double Poster
         ("RowTitleFontSize", 17),
         ("DialogTitleFontSize", 18),
         ("EmptyTitleFontSize", 20),
-        ("OpenAllFontSize", 22),
         ("PageTitleFontSize", 28),
     ];
 
