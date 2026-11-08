@@ -158,7 +158,7 @@ while the working tree has uncommitted changes, and writes to `artifacts\` by de
 > English only, for metadata and for the interface. Windows 11 only. There is no Android client, though the code leaves room
 > for one.
 
-## Where data lives
+## Your data
 
 Everything is under `%LOCALAPPDATA%\MediaBoard`: the SQLite library, cached posters and the settings file. Nothing is written
 into your media folders. Your TMDB key is stored in the settings file on your PC.
