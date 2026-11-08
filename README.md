@@ -9,7 +9,9 @@
   &nbsp; · &nbsp;
   <a href="#sharing">Sharing</a>
   &nbsp; · &nbsp;
-  <a href="#how-it-identifies-titles">Identification</a>
+  <a href="#identification">Identification</a>
+  &nbsp; · &nbsp;
+  <a href="#development">Development</a>
   &nbsp; · &nbsp;
   <a href="https://github.com/feluminais/MediaBoard/issues">Issues</a>
 </p>
@@ -22,28 +24,9 @@ Everything runs in one desktop app, with no background service. If you share you
 app has to stay running. Renames, hidden titles and fixed matches live in MediaBoard's own database, so the files on disk
 keep their names and your torrent client keeps seeding them.
 
-## Features
-
-- **Tracks players you open yourself.** Start mpv, VLC or MPC-HC the way you always do, and MediaBoard notices, attaches and
-  records progress for any library file you play. [Setup](#following-a-player-you-opened-yourself)
-- **Player support.** Detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from
-  where you stopped. [Details](#players)
-- **Honest status.** A status bar always shows what the app is doing: scanning, identifying, online or offline, key missing,
-  folder unavailable, player running. An activity panel lists recent events and errors, and each error says what to do.
-- **Search.** `Ctrl+F` opens one box over your library (instant, works offline) and over TMDB, so you can read the description
-  and rating of a show you don't have. Type `>` for commands such as *Rescan library*.
-- **Automatic identification.** Reads the whole path, not only the file name, and handles release noise, fansub names and
-  episode ranges. Unsure matches go to **Needs review** with candidates and a search box. [Details](#how-it-identifies-titles)
-- **Continue watching.** Home shows what you started and the next episode of what you finished, plus what was added recently.
-- **Episode graph.** A show's seasons as a grid of episodes, coloured by TMDB rating or by how far you got.
-- **Display-only edits.** Rename, hide, fix a wrong match, mark watched or unwatched. None of it renames or moves a file.
-- **Works offline.** Browsing, playback and progress need no internet. New files get a title from their name and are
-  identified when the connection returns.
-- **Stays fast.** Virtualised lists and grids, images decoded at display size, and a UI size and poster size you can set.
-
 ## Quick start
 
-MediaBoard targets Windows 11 and .NET 10. There is no release yet, so run it from a clone:
+MediaBoard targets Windows 11 and .NET 10. There is no release yet, so run it from a clone with the .NET 10 SDK:
 
 ```bash
 git clone https://github.com/feluminais/MediaBoard
@@ -63,6 +46,8 @@ Building also keeps a MediaBoard shortcut on your desktop pointed at the latest 
 
 ## Players
 
+Detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from where you stopped.
+
 | Player | How progress is tracked |
 | --- | --- |
 | MPC-HC | MediaBoard starts it in slave mode and talks to it through its remote-control messages. No web interface, no port, no change to the player's settings. |
@@ -79,8 +64,9 @@ watched at 90% of its duration. If a player stops early, that doesn't count as f
 
 ### Following a player you opened yourself
 
-With **Follow players I open myself** on (the default), MediaBoard looks every few seconds for a player it didn't start. It
-can only find a player that was set up to listen:
+Start mpv, VLC or MPC-HC the way you always do, and MediaBoard notices, attaches and records progress for any library file
+you play. With **Follow players I open myself** on (the default), it looks every few seconds for a player it didn't start.
+It can only find a player that was set up to listen:
 
 - **mpv:** add this line to `mpv.conf` and restart mpv.
 
@@ -93,6 +79,50 @@ can only find a player that was set up to listen:
   (default 8080) and password in Settings.
 
 Only files that belong to your library are recorded.
+
+## Identification
+
+Reads the whole path, not only the file name, and handles release noise, fansub names and episode ranges.
+
+1. A `[tmdbid-123]` or `[imdbid-tt123]` tag in a file or folder name, or an `.nfo` file with an ID, is a certain match.
+2. Otherwise the path is parsed: release noise (resolution, codec, source, group, language tags) is stripped, then the year,
+   `S01E01`, `S01E01-E02`, `1x02` and season folders are read. A bare episode number counts when the folder is one season.
+3. TMDB is searched, retrying with shorter titles and without the year when nothing fits.
+4. Candidates are scored on title similarity, year, type and popularity, and checked against the episode list, episode titles
+   and the file's duration (read with `ffprobe` when it's available).
+5. A confident match is accepted. Anything else goes to **Needs review** with candidates and a search box, and your choice is
+   remembered for the other episodes of the same show folder.
+
+One file can hold several episodes, and a movie inside a show folder is identified as a movie. Folders with no video, partial
+downloads and sample files are ignored, and the Folders view says why.
+
+## Browse and search
+
+- **Continue watching.** Home shows what you started and the next episode of what you finished, plus what was added recently.
+- **Search.** `Ctrl+F` opens one box over your library (instant, works offline) and over TMDB, so you can read the description
+  and rating of a show you don't have. Type `>` for commands such as *Rescan library*.
+- **Episode graph.** A show's seasons as a grid of episodes, coloured by TMDB rating or by how far you got.
+- **Display-only edits.** Rename, hide, fix a wrong match, mark watched or unwatched. None of it renames or moves a file.
+
+## Status
+
+A status bar always shows what the app is doing: scanning, identifying, online or offline, key missing, folder unavailable,
+player running. An activity panel lists recent events and errors, and each error says what to do.
+
+## Works offline
+
+Browsing, playback and progress need no internet. New files get a title from their name and are identified when the
+connection returns.
+
+## Library behaviour
+
+- **Incremental scans.** The library rescans on startup and skips files whose size and modified time are unchanged. A file
+  watcher picks up new, changed and removed files while the app is open.
+- **Missing files.** If a drive is unplugged or a file moves, the title stays with its progress and edits, and recovers when
+  the file returns. A file with the same name and size that turns up elsewhere in a library folder is relinked automatically.
+- **Delete from disk** is separate and explicit. It names the files, sends them to the Recycle Bin and warns that a torrent
+  client seeding them will lose them.
+- **Stays fast.** Virtualised lists and grids, images decoded at display size, and a UI size and poster size you can set.
 
 ## Sharing
 
@@ -111,32 +141,22 @@ the app must stay running, in the tray at least, for people to connect. It works
 
 They browse, search and play from your library, and their progress is their own. A device unused for 90 days is signed
 out, and signing back in takes the password. The files stay on your PC and are never copied. Files that a symbolic link or
-junction brings into a folder aren't shared, and the Sharing page counts them. Windows SmartScreen warns once on the
-unsigned app. Replacing your certificate means everyone needs a new invite.
-If this PC connects to someone else's server for a while, sharing comes back on when you switch back to your own library.
+junction brings into a folder aren't shared, and the Sharing page counts them. Replacing your certificate means everyone
+needs a new invite. If this PC connects to someone else's server for a while, sharing comes back on when you switch back to
+your own library.
 
-## How it identifies titles
+> [!NOTE]
+> The app is not signed, so Windows SmartScreen warns once on first start.
 
-1. A `[tmdbid-123]` or `[imdbid-tt123]` tag in a file or folder name, or an `.nfo` file with an ID, is a certain match.
-2. Otherwise the path is parsed: release noise (resolution, codec, source, group, language tags) is stripped, then the year,
-   `S01E01`, `S01E01-E02`, `1x02` and season folders are read. A bare episode number counts when the folder is one season.
-3. TMDB is searched, retrying with shorter titles and without the year when nothing fits.
-4. Candidates are scored on title similarity, year, type and popularity, and checked against the episode list, episode titles
-   and the file's duration (read with `ffprobe` when it's available).
-5. A confident match is accepted. Anything else goes to **Needs review**, and your choice is remembered for the other
-   episodes of the same show folder.
+## Install
 
-One file can hold several episodes, and a movie inside a show folder is identified as a movie. Folders with no video, partial
-downloads and sample files are ignored, and the Folders view says why.
+There is no installer or release yet, so every version runs from a clone (see [Quick start](#quick-start)).
+`scripts/Publish.ps1` builds a self-contained win-x64 folder and zips it, so a PC with no .NET can run it. It refuses to run
+while the working tree has uncommitted changes, and writes to `artifacts\` by default.
 
-## Library behaviour
-
-- **Incremental scans.** The library rescans on startup and skips files whose size and modified time are unchanged. A file
-  watcher picks up new, changed and removed files while the app is open.
-- **Missing files.** If a drive is unplugged or a file moves, the title stays with its progress and edits, and recovers when
-  the file returns. A file with the same name and size that turns up elsewhere in a library folder is relinked automatically.
-- **Delete from disk** is separate and explicit. It names the files, sends them to the Recycle Bin and warns that a torrent
-  client seeding them will lose them.
+> [!NOTE]
+> English only, for metadata and for the interface. Windows 11 only. There is no Android client, though the code leaves room
+> for one.
 
 ## Where data lives
 
@@ -145,9 +165,16 @@ into your media folders. Your TMDB key is stored in the settings file on your PC
 
 ## Development
 
-The solution has the app (`src/MediaBoard.Desktop`, Avalonia) and a UI-free core (`src/MediaBoard.Core`: scanning, parsing,
-identification, TMDB, storage, player adapters). The app reaches the library through an interface, so a shared library on another PC can
-stand in for the local one.
+The solution has three projects under `src/`:
+
+| Project | Covers |
+| --- | --- |
+| `MediaBoard.Desktop` | The Avalonia app. |
+| `MediaBoard.Core` | The UI-free core: scanning, parsing, identification, TMDB, storage, player adapters. |
+| `MediaBoard.Server` | The ASP.NET Core server behind [Sharing](#sharing), which the desktop app hosts. |
+
+The app reaches the library through an interface, so a shared library on another PC can stand in for the local one. Each
+project has a test project of its own in `tests/`.
 
 ```bash
 dotnet build
@@ -159,14 +186,8 @@ dotnet test --solution MediaBoard.sln -- --parallel none
 the Meziantou analyzers run on every build.
 
 After a fresh clone, run `dotnet tool restore && dotnet husky install` once. The pre-commit hook scans staged changes for
-secrets with [gitleaks](https://github.com/gitleaks/gitleaks) when it's installed.
-
-## Not yet
-
-- No installer or release yet. `scripts/Publish.ps1` builds a zip.
-- English only, for metadata and for the interface.
-- Windows 11 only.
-- No Android client. The code leaves room for one.
+secrets with [gitleaks](https://github.com/gitleaks/gitleaks) when it's installed. Bug reports and feature requests go to
+[Issues](https://github.com/feluminais/MediaBoard/issues).
 
 ## Credits
 
