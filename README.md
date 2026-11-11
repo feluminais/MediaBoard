@@ -5,28 +5,47 @@
 <p align="center">
   <a href="#quick-start"><strong>Quick start</strong></a>
   &nbsp; · &nbsp;
+  <a href="#why-mediaboard">Why</a>
+  &nbsp; · &nbsp;
   <a href="#players">Players</a>
   &nbsp; · &nbsp;
-  <a href="#sharing">Sharing</a>
-  &nbsp; · &nbsp;
   <a href="#identification">Identification</a>
+  &nbsp; · &nbsp;
+  <a href="#sharing">Sharing</a>
   &nbsp; · &nbsp;
   <a href="#development">Development</a>
   &nbsp; · &nbsp;
   <a href="https://github.com/feluminais/MediaBoard/issues">Issues</a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="MediaBoard Home page: Continue watching with progress bars under each poster, and Recently added below" width="860">
+</p>
+
 MediaBoard finds the movies and series in your folders, fetches descriptions, posters and ratings from TMDB, and remembers
 where you stopped. You play in the player you already use (MPC-HC, MPC-BE, mpv, VLC or any program), and it keeps your
 progress from that player, even when you opened the player yourself.
 
-Everything runs in one desktop app, with no background service. If you share your library (see [Sharing](#sharing)), the
-app has to stay running. Renames, hidden titles and fixed matches live in MediaBoard's own database, so the files on disk
-keep their names and your torrent client keeps seeding them.
+> [!NOTE]
+> Pre-release. There is no installer or download yet, so you run it from a clone with the .NET 10 SDK. Windows 11 only,
+> English only.
+
+## Why MediaBoard
+
+- **One desktop app.** No server to set up, no account to create and no background service. Sharing your library (see
+  [Sharing](#sharing)) is the only case where the app has to stay running.
+- **Your files stay as they are.** Renames, hidden titles and fixed matches live in MediaBoard's own database, so files keep
+  their names and your torrent client keeps seeding them.
+- **Your player, with progress.** It doesn't have a player of its own and doesn't transcode. It starts the one you already
+  use and reads position from it.
+- **Works offline.** Browsing, playback and progress need no internet. Titles are identified when the connection returns.
+
+If you want a media server that streams to phones and TVs, this isn't one. MediaBoard is for a Windows PC that plays
+local files, with an option to let family watch from their own PC.
 
 ## Quick start
 
-MediaBoard targets Windows 11 and .NET 10. There is no release yet, so run it from a clone with the .NET 10 SDK:
+Needs Windows 11 and the .NET 10 SDK:
 
 ```bash
 git clone https://github.com/feluminais/MediaBoard
@@ -43,6 +62,12 @@ Then:
 3. Pick a player in **Settings**, or leave the detected one.
 
 Building also keeps a MediaBoard shortcut on your desktop pointed at the latest build. Set `MediaBoardNoShortcut=true` to skip it.
+
+<p align="center">
+  <img src="docs/screenshots/library.png" alt="The Movies page: a grid of posters with year, a filter box and a sort menu" width="860">
+</p>
+
+<p align="center"><sub>Screenshots use public-domain and Creative Commons films. Posters and descriptions come from TMDB.</sub></p>
 
 ## Players
 
@@ -96,6 +121,10 @@ Reads the whole path, not only the file name, and handles release noise, fansub 
 One file can hold several episodes, and a movie inside a show folder is identified as a movie. Folders with no video, partial
 downloads and sample files are ignored, and the Folders view says why.
 
+<p align="center">
+  <img src="docs/screenshots/review.png" alt="Needs review page: a file named Nosferatu (1922) with three candidate matches, and a Fix match search box below listing more" width="860">
+</p>
+
 ## Browse and search
 
 - **Continue watching.** Home shows what you started and the next episode of what you finished, plus what was added recently.
@@ -104,15 +133,13 @@ downloads and sample files are ignored, and the Folders view says why.
 - **Episode graph.** A show's seasons as a grid of episodes, coloured by TMDB rating or by how far you got.
 - **Display-only edits.** Rename, hide, fix a wrong match, mark watched or unwatched. None of it renames or moves a file.
 
-## Status
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="The search box open over Home, with a query returning one result from the library and more from TMDB under Online" width="860">
+</p>
 
-A status bar always shows what the app is doing: scanning, identifying, online or offline, key missing, folder unavailable,
-player running. An activity panel lists recent events and errors, and each error says what to do.
-
-## Works offline
-
-Browsing, playback and progress need no internet. New files get a title from their name and are identified when the
-connection returns.
+<p align="center">
+  <img src="docs/screenshots/show.png" alt="A show's page: poster, description, a Play button for the next episode, and the episode graph with watched, not watched and missing episodes" width="860">
+</p>
 
 ## Library behaviour
 
@@ -122,6 +149,9 @@ connection returns.
   the file returns. A file with the same name and size that turns up elsewhere in a library folder is relinked automatically.
 - **Delete from disk** is separate and explicit. It names the files, sends them to the Recycle Bin and warns that a torrent
   client seeding them will lose them.
+- **Status bar.** It always shows what the app is doing: scanning, identifying, online or offline, key missing, folder
+  unavailable, player running. An activity panel lists recent events and errors, and each error says what to do.
+- **Offline.** New files get a title from their name and are identified when the connection returns.
 - **Stays fast.** Virtualised lists and grids, images decoded at display size, and a UI size and poster size you can set.
 
 ## Sharing
@@ -154,9 +184,7 @@ There is no installer or release yet, so every version runs from a clone (see [Q
 `scripts/Publish.ps1` builds a self-contained win-x64 folder and zips it, so a PC with no .NET can run it. It refuses to run
 while the working tree has uncommitted changes, and writes to `artifacts\` by default.
 
-> [!NOTE]
-> English only, for metadata and for the interface. Windows 11 only. There is no Android client, though the code leaves room
-> for one.
+There is no Android client, though the code leaves room for one.
 
 ## Your data
 
@@ -188,6 +216,13 @@ the Meziantou analyzers run on every build.
 After a fresh clone, run `dotnet tool restore && dotnet husky install` once. The pre-commit hook scans staged changes for
 secrets with [gitleaks](https://github.com/gitleaks/gitleaks) when it's installed. Bug reports and feature requests go to
 [Issues](https://github.com/feluminais/MediaBoard/issues).
+
+To point the app at a throwaway data folder, for tests or screenshots, set the `MEDIABOARD_DATA_DIR` environment variable
+before starting it.
+
+## Licence
+
+No licence has been chosen yet, so all rights are reserved.
 
 ## Credits
 
