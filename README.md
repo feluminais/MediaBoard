@@ -222,7 +222,8 @@ before starting it.
 
 ## Licence
 
-No licence has been chosen yet, so all rights are reserved.
+Copyright (C) 2026 feluminais. MediaBoard is free software under the [GNU General Public License v3.0](LICENSE). You may
+use, change and share it, but a modified version you distribute must come with its source under the same licence.
 
 ## Credits
 
