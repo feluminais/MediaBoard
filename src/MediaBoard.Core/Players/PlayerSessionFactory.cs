@@ -8,9 +8,8 @@ namespace MediaBoard.Core.Players;
 public static class PlayerSessionFactory
 {
     /// <summary>
-    /// A new, unstarted session for <paramref name="player"/>: MPC-HC and MPC-BE (the same slave protocol; MPC-BE's
-    /// support is unconfirmed, and the session fails plainly if it never connects), mpv, VLC, or launch-only for a
-    /// custom program.
+    /// A new, unstarted session for <paramref name="player"/>: MPC-HC and MPC-BE (the same slave protocol; the session
+    /// fails plainly if the player never connects), mpv, VLC, or launch-only for a custom program.
     /// </summary>
     /// <exception cref="ArgumentException">The player id is not one of mpc-hc, mpc-be, mpv, vlc, custom.</exception>
     public static IPlayerSession Create(PlayerInfo player) => player.Id switch

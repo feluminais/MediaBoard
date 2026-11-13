@@ -3,10 +3,21 @@
 MediaBoard detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from where you
 stopped.
 
+| Player | Started from MediaBoard | Opened by you |
+| --- | --- | --- |
+| MPC-HC | Live | Live, with its web interface on |
+| MPC-BE | Live | Live, with its web interface on |
+| mpv | Live | Live, with `input-ipc-server` set |
+| VLC | Live | Live, with its web interface and Lua password set |
+| Any other program | Asks whether you finished | Not followed |
+
+Live means position is saved while you watch. [Following a player you opened yourself](#following-a-player-you-opened-yourself)
+has the setup.
+
 | Player | How progress is tracked |
 | --- | --- |
 | MPC-HC | MediaBoard starts it in slave mode and talks to it through its remote-control messages. It works with the player's default settings. |
-| MPC-BE | The same adapter. Support is unconfirmed, and the app says so if the player never connects. |
+| MPC-BE | The same adapter, since MPC-BE is a fork of MPC-HC. |
 | mpv | JSON IPC over a named pipe: live position, duration, pause and end. |
 | VLC | Its web interface on localhost, polled for position and length. |
 | Any other program | Launched with the file. When it closes, MediaBoard asks whether you finished. |

@@ -53,7 +53,7 @@ Building also keeps a MediaBoard shortcut on your desktop pointed at the latest 
 ## Players
 
 MediaBoard detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from where you
-stopped. It tracks position live in MPC-HC, mpv and VLC (MPC-BE support is unconfirmed), and launches any other program with
+stopped. It tracks position live in MPC-HC, MPC-BE, mpv and VLC, and launches any other program with
 the file and asks whether you finished when it closes. A file counts as watched at 90% of its duration.
 
 To record a player you started yourself, mpv needs one line in `mpv.conf` and the others need their web interface turned on.
