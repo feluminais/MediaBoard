@@ -5,23 +5,23 @@ stopped.
 
 | Player | How progress is tracked |
 | --- | --- |
-| MPC-HC | MediaBoard starts it in slave mode and talks to it through its remote-control messages. No web interface, no port, no change to the player's settings. |
+| MPC-HC | MediaBoard starts it in slave mode and talks to it through its remote-control messages. It works with the player's default settings. |
 | MPC-BE | The same adapter. Support is unconfirmed, and the app says so if the player never connects. |
 | mpv | JSON IPC over a named pipe: live position, duration, pause and end. |
 | VLC | Its web interface on localhost, polled for position and length. |
 | Any other program | Launched with the file. When it closes, MediaBoard asks whether you finished. |
 
-Players are found in the standard install folders, the registry's uninstall entries and `PATH`. MediaBoard doesn't download
-or bundle a player. If none is found, the status bar says so.
+Players are found in the standard install folders, the registry's uninstall entries and `PATH`. You install the player
+yourself, and the status bar tells you if none is found.
 
 Position is saved every few seconds, on pause, at the end of the stream and when the player closes. A file counts as
-watched at 90% of its duration. If a player stops early, that doesn't count as finished.
+watched at 90% of its duration. A file stopped before that point stays in progress.
 
 ## Following a player you opened yourself
 
 Start mpv, VLC or MPC-HC the way you always do, and MediaBoard notices, attaches and records progress for any library file
-you play. With **Follow players I open myself** on (the default), it looks every few seconds for a player it didn't start.
-It can only find a player that was set up to listen:
+you play. With **Follow players I open myself** on (the default), it looks every few seconds for a player started outside MediaBoard.
+The player has to be set up to listen:
 
 - **mpv:** add this line to `mpv.conf` and restart mpv.
 
@@ -33,4 +33,4 @@ It can only find a player that was set up to listen:
 - **VLC:** turn on *Web* under *Interface › Main interfaces* (show all settings), set its Lua password, and enter the port
   (default 8080) and password in Settings.
 
-Only files that belong to your library are recorded.
+MediaBoard records the files that belong to your library.

@@ -1,6 +1,6 @@
 <h1 align="center">MediaBoard</h1>
 
-<p align="center">Browse your own films and series on Windows and pick up where you stopped, in the player you already use. Your files are never renamed or moved.</p>
+<p align="center">Browse your own films and series on Windows and pick up where you stopped, in the player you already use. Your files stay exactly as they are.</p>
 
 <p align="center">
   <img src="docs/screenshots/home.png" alt="MediaBoard Home page: Continue watching with progress bars under each poster, and Recently added below" width="860">
@@ -11,20 +11,18 @@ where you stopped. You play in MPC-HC, MPC-BE, mpv, VLC or any other program, an
 even when you opened the player yourself.
 
 > [!NOTE]
-> Pre-release. There is no installer or download yet, so you run it from a clone with the .NET 10 SDK. Windows 11 only,
-> English only.
+> Pre-release. Run it from a clone with the .NET 10 SDK. Works on Windows 11, in English.
 
 ## Why MediaBoard
 
-- One desktop app. No server to set up, no account and no background service. Only [Sharing](#sharing) needs the app to
-  stay running.
+- One desktop app that runs while you have it open. [Sharing](#sharing) is the one feature that needs it to keep running.
 - Renames, hidden titles and fixed matches live in MediaBoard's own database, so your files keep their names and your torrent
   client keeps seeding them.
-- It has no player of its own and doesn't transcode. It starts the one you use and reads the position from it.
+- It starts the player you already use and reads the position from it.
 - Browsing, playback and progress work offline. Titles are identified when the connection returns.
 
-It isn't a media server like Plex or Jellyfin, so it doesn't stream to phones and TVs. It is for a Windows PC that plays
-local files, with an option to let family watch from their own PC.
+MediaBoard is for a Windows PC that plays local files, with an option to let family watch from their own PC. To stream to
+phones and TVs, use a media server such as Plex or Jellyfin.
 
 ## Quick start
 
@@ -38,10 +36,10 @@ dotnet run --project src/MediaBoard.Desktop
 
 Then:
 
-1. Open **Settings** and paste a free [TMDB API key](https://www.themoviedb.org/settings/api). Without one everything works
-   except identification and online search, and the status bar says so.
-2. Open **Folders** and add the folders that hold your media. Removing a folder removes its titles from the library, not
-   from disk.
+1. Open **Settings** and paste a free [TMDB API key](https://www.themoviedb.org/settings/api). The key switches on
+   identification and online search, and the status bar tells you when it is missing.
+2. Open **Folders** and add the folders that hold your media. Removing a folder removes its titles from the library and
+   leaves the files on disk.
 3. Pick a player in **Settings**, or leave the detected one.
 
 Building also keeps a MediaBoard shortcut on your desktop pointed at the latest build. Set `MediaBoardNoShortcut=true` to skip it.
@@ -63,8 +61,8 @@ Per-player details are in [docs/players.md](docs/players.md).
 
 ## Identification
 
-MediaBoard reads the whole path, not only the file name, and handles release noise, fansub names and episode ranges. A
-`[tmdbid-123]` tag in a file or folder name is a certain match. Anything it isn't confident about goes to **Needs review** with
+MediaBoard reads the whole path, folder names included, and handles release noise, fansub names and episode ranges. A
+`[tmdbid-123]` tag in a file or folder name is a certain match. Uncertain matches go to **Needs review** with
 candidates and a search box, and your choice carries over to the other episodes in the same show folder. The full matching
 rules are in [docs/identification.md](docs/identification.md).
 
@@ -76,9 +74,9 @@ rules are in [docs/identification.md](docs/identification.md).
 
 - Home shows what you started, the next episode of what you finished, and what was added recently.
 - `Ctrl+F` opens one search box over your library (instant, works offline) and over TMDB, so you can read the description and
-  rating of a show you don't have. Type `>` for commands such as *Rescan library*.
+  rating of a show outside your library. Type `>` for commands such as *Rescan library*.
 - A show's page has an episode graph: its seasons as a grid, coloured by TMDB rating or by how far you got.
-- Rename, hide, fix a wrong match, mark watched or unwatched. None of it renames or moves a file.
+- Rename, hide, fix a wrong match, mark watched or unwatched. These edits change what MediaBoard shows, and the files stay as they are.
 
 <p align="center">
   <img src="docs/screenshots/show.png" alt="A show's page: poster, description, a Play button for the next episode, and the episode graph with watched, not watched and missing episodes" width="860">
@@ -102,8 +100,8 @@ their own, and the files stay on your PC. The setup, ports and security details 
 
 ## Your data
 
-Everything is under `%LOCALAPPDATA%\MediaBoard`: the SQLite library, cached posters and the settings file. Nothing is written
-into your media folders. Your TMDB key is stored in the settings file on your PC.
+Everything is under `%LOCALAPPDATA%\MediaBoard`: the SQLite library, cached posters and the settings file, including your TMDB key.
+Your media folders stay untouched.
 
 ## Development
 
