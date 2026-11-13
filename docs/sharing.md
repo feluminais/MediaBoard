@@ -19,8 +19,7 @@ the app must stay running, in the tray at least, for people to connect. It works
 ## What they get
 
 They browse, search and play from your library, and their progress is their own. A device unused for 90 days is signed
-out, and signing back in takes the password. The files stay on your PC.
-
+out, and signing back in takes the password.
 Files that a symbolic link or junction brings into a folder are skipped, and the Sharing page counts them. Replacing your
 certificate means everyone needs a new invite. If this PC connects to someone else's server for a while, sharing comes back
 on when you switch back to your own library.

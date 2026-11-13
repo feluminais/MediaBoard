@@ -1,6 +1,6 @@
 <h1 align="center">MediaBoard</h1>
 
-<p align="center">Browse your own films and series on Windows and pick up where you stopped, in the player you already use. Your files stay exactly as they are.</p>
+<p align="center">Browse your own films and series on Windows and pick up where you stopped, in the player you already use.</p>
 
 <p align="center">
   <img src="docs/screenshots/home.png" alt="MediaBoard Home page: Continue watching with progress bars under each poster, and Recently added below" width="860">
@@ -16,8 +16,7 @@ even when you opened the player yourself.
 ## Why MediaBoard
 
 - One desktop app that runs while you have it open. [Sharing](#sharing) is the one feature that needs it to keep running.
-- Renames, hidden titles and fixed matches live in MediaBoard's own database, so your files keep their names and your torrent
-  client keeps seeding them.
+- Rename titles, hide them and fix matches in the app. The edits live in MediaBoard's database, so torrents keep seeding.
 - It starts the player you already use and reads the position from it.
 - Browsing, playback and progress work offline. Titles are identified when the connection returns.
 
@@ -38,8 +37,7 @@ Then:
 
 1. Open **Settings** and paste a free [TMDB API key](https://www.themoviedb.org/settings/api). The key switches on
    identification and online search, and the status bar tells you when it is missing.
-2. Open **Folders** and add the folders that hold your media. Removing a folder removes its titles from the library and
-   leaves the files on disk.
+2. Open **Folders** and add the folders that hold your media. Removing a folder removes its titles from the library.
 3. Pick a player in **Settings**, or leave the detected one.
 
 Building also keeps a MediaBoard shortcut on your desktop pointed at the latest build. Set `MediaBoardNoShortcut=true` to skip it.
@@ -76,7 +74,7 @@ rules are in [docs/identification.md](docs/identification.md).
 - `Ctrl+F` opens one search box over your library (instant, works offline) and over TMDB, so you can read the description and
   rating of a show outside your library. Type `>` for commands such as *Rescan library*.
 - A show's page has an episode graph: its seasons as a grid, coloured by TMDB rating or by how far you got.
-- Rename, hide, fix a wrong match, mark watched or unwatched. These edits change what MediaBoard shows, and the files stay as they are.
+- Rename, hide, fix a wrong match, mark watched or unwatched.
 
 <p align="center">
   <img src="docs/screenshots/show.png" alt="A show's page: poster, description, a Play button for the next episode, and the episode graph with watched, not watched and missing episodes" width="860">
@@ -95,13 +93,12 @@ rules are in [docs/identification.md](docs/identification.md).
 ## Sharing
 
 Family can watch your library from their own PC. Sharing is off until you turn it on, the app must stay running (in the tray
-is enough), and both sides run MediaBoard. Each person gets a one-time invite for the folders you choose, their progress is
-their own, and the files stay on your PC. The setup, ports and security details are in [docs/sharing.md](docs/sharing.md).
+is enough), and both sides run MediaBoard. Each person gets a one-time invite for the folders you choose, and their progress is
+their own. The setup, ports and security details are in [docs/sharing.md](docs/sharing.md).
 
 ## Your data
 
 Everything is under `%LOCALAPPDATA%\MediaBoard`: the SQLite library, cached posters and the settings file, including your TMDB key.
-Your media folders stay untouched.
 
 ## Development
 
