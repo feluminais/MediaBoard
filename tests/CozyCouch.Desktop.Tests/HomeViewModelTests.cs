@@ -1,0 +1,543 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.Headless.XUnit;
+using Avalonia.Input;
+using Avalonia.VisualTree;
+using CozyCouch.Core.Activity;
+using CozyCouch.Core.Library;
+using CozyCouch.Core.Metadata;
+using CozyCouch.Core.Players;
+using CozyCouch.Core.Settings;
+using CozyCouch.Desktop.Tests.Support;
+using CozyCouch.Desktop.ViewModels;
+using CozyCouch.Desktop.Views;
+
+namespace CozyCouch.Desktop.Tests;
+
+public class HomeViewModelTests : IDisposable
+{
+    private readonly ActivityHub _hub = new();
+    private readonly FakeLibrary _library = new();
+    private readonly FakePlayback _playback = new();
+    private readonly List<string> _asked = [];
+    private readonly string _settingsPath = Path.Combine(Path.GetTempPath(), $"cozycouch-home-{Guid.NewGuid():N}.json");
+
+    public HomeViewModelTests() => _library.FolderRows.Add(FakeLibrary.Folder(1, @"D:\Movies"));
+
+    public void Dispose() => File.Delete(_settingsPath);
+
+    private MainWindowViewModel Create() =>
+        new(_library, new StatusBarViewModel(_hub), new ActivityPanelViewModel(_hub), _hub,
+            new FoldersViewModel(_library, new IdleFolderActions(), _hub, () => Task.FromResult<string?>(null), _ => Task.FromResult(true)),
+            new SettingsViewModel(
+                new SettingsStore(_settingsPath),
+                new PlayerDetector(_ => false, () => [], _hub),
+                _hub, () => Task.FromResult<string?>(null), _ => { }),
+            Posters.Local(_asked), new Titles(_library, _hub, _playback) { Posters = Posters.Local(_asked) }.Services());
+
+    private async Task<(MainWindowViewModel Shell, HomeViewModel Home)> LoadedHome()
+    {
+        var shell = Create();
+        var home = Assert.IsType<HomeViewModel>(shell.CurrentPage);
+        _library.RaiseChanged();
+        Ui.Flush();
+        await Ui.WaitUntil(() => home.IsLoaded);
+        return (shell, home);
+    }
+
+    [AvaloniaFact]
+    public async Task Home_ReloadsWhenOpened()
+    {
+        var (shell, home) = await LoadedHome();
+        Assert.Empty(home.ContinueWatching);
+        shell.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus")); // progress saved while Home was away, without a library change
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.HomePage);
+
+        await Ui.WaitUntil(() => home.ContinueWatching.Count == 1);
+        Assert.Equal("Klaus", home.ContinueWatching[0].Name);
+    }
+
+    [AvaloniaFact]
+    public async Task Home_TwoRows_ContinueAndRecent()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus", poster: "/k.jpg"));
+        _library.Continue.Add(FakeLibrary.Resume(2, "Arcane", episode: "S01E04"));
+        _library.Recent.Add(FakeLibrary.Card(3, "Coco", poster: "/c.jpg"));
+        _library.Recent.Add(FakeLibrary.Card(4, "Heat"));
+        _library.Recent.Add(FakeLibrary.Card(5, "Up", offline: true));
+
+        var (_, home) = await LoadedHome();
+
+        // Most recently played first, newest first.
+        Assert.Equal(["Arcane", "Klaus"], home.ContinueWatching.Select(c => c.Name));
+        Assert.Equal(["Up", "Heat", "Coco"], home.RecentlyAdded.Select(c => c.Name));
+        Assert.Equal("S01E04", home.ContinueWatching[0].Subtitle);
+        Assert.Equal("Not identified (offline)", home.RecentlyAdded[0].Subtitle);
+        Assert.Equal(HomeViewModel.RowLimit, _library.Limits.First(l => l.Query == "ContinueWatching").Limit);
+        Assert.False(home.NothingInProgress);
+    }
+
+    [AvaloniaFact]
+    public async Task ContinueCard_Remove_DropsItFromTheRowOnly()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
+        _library.Continue.Add(FakeLibrary.Resume(2, "Arcane"));
+        _library.Recent.Add(FakeLibrary.Card(3, "Coco"));
+        var (_, home) = await LoadedHome();
+        Assert.All(home.ContinueWatching, c => Assert.True(c.CanRemove));
+        Assert.False(home.RecentlyAdded[0].CanRemove);
+
+        home.ContinueWatching.Single(c => c.Name == "Klaus").RemoveCommand.Execute(null);
+
+        await Ui.WaitUntil(() => home.ContinueWatching.Count == 1);
+        Assert.Equal("Arcane", home.ContinueWatching[0].Name);
+        Assert.Contains("dismiss:1", _library.Edits);
+        Assert.Single(home.RecentlyAdded);
+    }
+
+    [AvaloniaFact]
+    public async Task ContinueCard_Remove_Failure_IsLogged()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus"));
+        _library.DismissFailure = new InvalidOperationException("The server can't be reached.");
+        var (_, home) = await LoadedHome();
+
+        home.ContinueWatching.Single().RemoveCommand.Execute(null);
+
+        await Ui.WaitUntil(() => _hub.Recent.Any(e => e.Level == ActivityLevel.Error && e.Message.Contains("The server can't be reached.", StringComparison.Ordinal)));
+        Assert.Single(home.ContinueWatching);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PosterCard_RightClick_OpensTheMenuOnlyOnAContinueCard(bool continueCard)
+    {
+        var card = continueCard
+            ? PosterCardViewModel.For(FakeLibrary.Resume(1, "Klaus"), Posters.None(), _ => { }, _ => { })
+            : PosterCardViewModel.For(FakeLibrary.Card(1, "Klaus"), Posters.None(), _ => { });
+        var view = new PosterCard { DataContext = card };
+        var window = new Window { Content = view };
+        window.Show();
+        var buttons = view.GetVisualDescendants().OfType<Button>().ToList();
+        var menuOwner = view.GetVisualDescendants().OfType<Control>().First(c => c.ContextMenu is not null);
+        Assert.Equal(2, buttons.Count); // the poster and the text
+
+        foreach (var button in buttons)
+        {
+            button.RaiseEvent(new ContextRequestedEventArgs());
+
+            Assert.Equal(continueCard, menuOwner.ContextMenu!.IsOpen);
+            menuOwner.ContextMenu.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Row_OpenAll_NavigatesToFullList()
+    {
+        for (var i = 1; i <= 30; i++)
+        {
+            _library.Continue.Add(FakeLibrary.Resume(i, $"Film {i}"));
+            _library.Recent.Add(FakeLibrary.Card(i, $"Film {i}"));
+        }
+
+        var (shell, home) = await LoadedHome();
+        Assert.Equal(HomeViewModel.RowLimit, home.ContinueWatching.Count); // the row is short
+
+        home.OpenContinueAllCommand.Execute(null);
+        var continueList = Assert.IsType<ListViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => continueList.IsLoaded);
+        Assert.Equal("Continue watching", continueList.Title);
+        Assert.Equal(30, continueList.Items.Count); // all in-progress items
+        Assert.Contains(("ContinueWatching", int.MaxValue), _library.Limits);
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.HomePage);
+        home.OpenRecentAllCommand.Execute(null);
+        var recentList = Assert.IsType<ListViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => recentList.IsLoaded);
+        Assert.Equal("Recently added", recentList.Title);
+        Assert.Equal(30, recentList.Items.Count); // the whole library
+        Assert.Equal("Film 30", recentList.Items[0].Name); // newest first
+        Assert.Contains(("RecentlyAdded", int.MaxValue), _library.Limits);
+    }
+
+    [AvaloniaFact]
+    public async Task Home_Empty_ExplainsWhy()
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        var (_, home) = await LoadedHome();
+
+        Assert.True(home.NothingInProgress);
+
+        var view = new HomeView { DataContext = home };
+        new Window { Width = 1000, Height = 700, Content = view }.Show();
+        var text = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text == "Nothing in progress");
+        Assert.True(text.IsVisible);
+    }
+
+    [AvaloniaTheory]
+    [InlineData("Continue watching")]
+    [InlineData("Recently added")]
+    public async Task Home_SectionHeading_IsOneButtonWithTheChevronCentredOnTheText(string heading)
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        var (_, home) = await LoadedHome();
+
+        var view = new HomeView { DataContext = home };
+        var window = new Window { Width = 1000, Height = 700, Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var title = view.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text == heading);
+        var button = Assert.IsType<Button>(title.GetVisualAncestors().OfType<Button>().First());
+        Assert.NotNull(button.Command);
+
+        var chevron = button.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single();
+        var titleBox = title.TranslatePoint(new Point(0, title.Bounds.Height / 2), window)!.Value;
+        var chevronBox = chevron.TranslatePoint(new Point(0, chevron.Bounds.Height / 2), window)!.Value;
+        Assert.InRange(chevronBox.Y - titleBox.Y, -1.5, 1.5);
+    }
+
+    [AvaloniaFact]
+    public async Task Home_NothingAdded_WhileAScanRuns_SaysScanning()
+    {
+        var (_, home) = await LoadedHome();
+        Assert.True(home.ShowNothingAdded);
+        Assert.False(home.ShowBusy);
+
+        _hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+
+        Assert.False(home.ShowNothingAdded);
+        Assert.True(home.ShowBusy);
+        Assert.Equal("Scanning folders…", home.BusyTitle);
+        var view = new HomeView { DataContext = home };
+        new Window { Width = 1000, Height = 700, Content = view }.Show();
+        var texts = view.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
+        Assert.Contains("Scanning folders…", texts);
+        Assert.Contains("Titles appear as they're found.", texts);
+        Assert.DoesNotContain("Nothing added yet", texts);
+
+        _hub.EndScan(1);
+        _hub.SetPendingIdentification(2);
+        Ui.Flush();
+        Assert.Equal("Identifying 2 files…", home.BusyTitle);
+
+        _hub.SetPendingIdentification(0);
+        Ui.Flush();
+        Assert.True(home.ShowNothingAdded);
+        Assert.False(home.ShowBusy);
+
+        // Once there are titles, a scan has nothing to say on the empty row.
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco"));
+        await home.RefreshAsync();
+        _hub.BeginScan(1, "Torrent Downloads");
+        Ui.Flush();
+        Assert.False(home.ShowBusy);
+        Assert.False(home.ShowNothingAdded);
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 500, 0, 300, false)]   // down, page not at the bottom: the page scrolls
+    [InlineData(-1, 0, 500, 300, 300, true)]  // down, page at the bottom: the row scrolls
+    [InlineData(-1, 500, 500, 300, 300, false)] // down, row at its end: nothing left to scroll
+    [InlineData(1, 0, 500, 300, 300, false)]  // up, row at its start: the page scrolls up
+    [InlineData(1, 200, 500, 300, 300, true)] // up, row scrolled sideways: back to its start first
+    [InlineData(-1, 0, 0, 300, 300, false)]   // a row that fits never takes the wheel
+    [InlineData(-1, 0, 500, 0, 0, true)]      // a page that fits is always at its bottom
+    public void RowTakesWheel_OnlyAtTheBottomOfThePage(double deltaY, double rowX, double rowMax, double pageY, double pageMax, bool expected) =>
+        Assert.Equal(expected, HomeView.RowTakesWheel(deltaY, rowX, rowMax, pageY, pageMax));
+
+    [AvaloniaFact]
+    public async Task Wheel_ScrollsThePageFirst_ThenTheRowSideways_AndBack()
+    {
+        for (var i = 1; i <= 14; i++)
+        {
+            _library.Recent.Add(FakeLibrary.Card(i, $"Film {i}"));
+            _library.Continue.Add(FakeLibrary.Resume(i, $"Show {i}"));
+        }
+        var (_, home) = await LoadedHome();
+        var view = new HomeView { DataContext = home };
+        var window = new Window { Width = 700, Height = 420, Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var page = view.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "Page");
+        var rows = view.GetVisualDescendants().OfType<ScrollViewer>().Where(s => s.Classes.Contains("row")).ToList();
+        var row = rows[^1];
+        Assert.True(page.Extent.Height > page.Viewport.Height, "the page must overflow for this test");
+        Assert.True(row.Extent.Width > row.Viewport.Width, "the row must overflow for this test");
+
+        void Wheel(double y, ScrollViewer over)
+        {
+            var at = over.TranslatePoint(new Point(40, 40), window) ?? default;
+            window.MouseWheel(at, new Vector(0, y));
+            Ui.Flush();
+        }
+
+        Wheel(-1, rows[0]);
+        Assert.True(page.Offset.Y > 0);
+        Assert.Equal(0, rows[0].Offset.X);
+        Assert.Equal(0, row.Offset.X);
+
+        page.ScrollToEnd();
+        Ui.Flush();
+        var bottom = page.Offset.Y;
+        Wheel(-1, row);
+        Assert.Equal(bottom, page.Offset.Y);
+        Assert.True(row.Offset.X > 0);
+
+        Wheel(1, row);
+        Assert.Equal(0, row.Offset.X);
+        Assert.Equal(bottom, page.Offset.Y);
+
+        Wheel(1, row);
+        Assert.True(page.Offset.Y < bottom);
+    }
+
+    [AvaloniaFact]
+    public async Task TitlePage_BackReturnsToTheWholePageItCameFrom()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+        Assert.Equal("Coco", page.Header.Name);
+
+        page.BackCommand.Execute(null);
+
+        Assert.Same(home, shell.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task TitlePage_RefreshesWhenTheLibraryChanges()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco, renamed");
+        await Task.Run(_library.RaiseChanged);
+        Ui.Flush();
+
+        await Ui.WaitUntil(() => page.Header.Name == "Coco, renamed");
+    }
+
+    [AvaloniaFact]
+    public async Task Sidebar_DropsTheTitlePage_AndBackFromNothingGoesHome()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        var (shell, home) = await LoadedHome();
+        home.RecentlyAdded[0].OpenCommand.Execute(null);
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+        Assert.IsType<TitleGridViewModel>(shell.CurrentPage);
+
+        shell.OpenOnlineTitle(1, CozyCouch.Core.Metadata.TitleKind.Show);
+        Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        ((TitleViewModel)shell.CurrentPage).BackCommand.Execute(null);
+        Assert.IsType<TitleGridViewModel>(shell.CurrentPage); // not the Home page opened before the sidebar click
+    }
+
+    [AvaloniaFact]
+    public async Task ClickingAContinueCard_ResumesThePlayback_OffTheUiThread()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(7, "Klaus"));
+        var (_, home) = await LoadedHome();
+
+        home.ContinueWatching[0].OpenCommand.Execute(null);
+        await Ui.WaitUntil(() => _playback.Played.Count == 1);
+
+        var (fileId, fromStart, threadId) = _playback.Played.Single();
+        Assert.Equal(70, fileId);
+        Assert.False(fromStart);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, threadId);
+    }
+
+    [AvaloniaFact]
+    public async Task ContinueCard_Text_OpensTheTitlePage_WithoutPlaying()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(7, "Klaus"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Klaus");
+        var (shell, home) = await LoadedHome();
+
+        home.ContinueWatching[0].OpenTitleCommand.Execute(null);
+
+        var page = Assert.IsType<TitleViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => page.IsLoaded);
+        Assert.Equal("Klaus", page.Header.Name);
+        Assert.Empty(_playback.Played);
+    }
+
+    [AvaloniaFact]
+    public async Task TitleCard_Text_OpensTheTitlePage_LikeThePoster()
+    {
+        _library.Recent.Add(FakeLibrary.Card(7, "Coco"));
+        _library.Details[7] = FakeLibrary.Movie(7, "Coco");
+        var (shell, home) = await LoadedHome();
+
+        home.RecentlyAdded[0].OpenTitleCommand.Execute(null);
+
+        Assert.IsType<TitleViewModel>(shell.CurrentPage);
+    }
+
+    [AvaloniaFact]
+    public async Task Posters_ResolveOnlyForCardsThatAskForThem()
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"));
+        _library.Recent.Add(FakeLibrary.Card(2, "Heat", poster: "/h.jpg"));
+        _library.Recent.Add(FakeLibrary.Card(3, "Up")); // TMDB has no poster for it
+        var (_, home) = await LoadedHome();
+        Assert.Empty(_asked); // nothing scrolled into view yet
+
+        var heat = home.RecentlyAdded.Single(c => c.Name == "Heat");
+        heat.RequestPoster();
+        home.RecentlyAdded.Single(c => c.Name == "Up").RequestPoster();
+        await Ui.WaitUntil(() => heat.PosterLocalPath is not null);
+
+        Assert.Equal("local:/h.jpg", heat.PosterLocalPath);
+        Assert.Equal(["/h.jpg"], _asked);
+        Assert.Null(home.RecentlyAdded.Single(c => c.Name == "Coco").PosterLocalPath);
+    }
+
+    [AvaloniaFact]
+    public async Task Posters_AreNotAskedForAgain_WhenAlreadyResolved()
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"));
+        var (_, home) = await LoadedHome();
+        var coco = home.RecentlyAdded[0];
+        coco.RequestPoster();
+        await Ui.WaitUntil(() => coco.PosterLocalPath is not null);
+
+        coco.RequestPoster();
+        coco.RequestPoster();
+        await Task.Delay(50);
+
+        Assert.Single(_asked);
+    }
+
+    [AvaloniaFact]
+    public async Task Refresh_KeepsTheCardsAndTheirPosters_WhenNothingChanged()
+    {
+        _library.Recent.Add(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"));
+        var (_, home) = await LoadedHome();
+        var coco = home.RecentlyAdded[0];
+        coco.RequestPoster();
+        await Ui.WaitUntil(() => coco.PosterLocalPath is not null);
+
+        await home.RefreshAsync();
+
+        Assert.Same(coco, home.RecentlyAdded[0]); // same card, so no redraw and no flicker
+        Assert.Equal("local:/c.jpg", home.RecentlyAdded[0].PosterLocalPath);
+    }
+
+    [AvaloniaFact]
+    public async Task Refresh_ChangedProgress_KeepsTheResolvedPoster()
+    {
+        _library.Continue.Add(FakeLibrary.Resume(1, "Klaus", poster: "/k.jpg", position: 100));
+        var (_, home) = await LoadedHome();
+        var card = home.ContinueWatching[0];
+        card.RequestPoster();
+        await Ui.WaitUntil(() => card.PosterLocalPath is not null);
+
+        _library.Continue[0] = FakeLibrary.Resume(1, "Klaus", poster: "/k.jpg", position: 3000);
+        await home.RefreshAsync();
+
+        Assert.NotSame(card, home.ContinueWatching[0]);
+        Assert.Equal("local:/k.jpg", home.ContinueWatching[0].PosterLocalPath); // no placeholder frame
+        Assert.Equal(0.5, home.ContinueWatching[0].Progress);
+    }
+
+    [Theory]
+    [InlineData(1.5, 6000, 0.03)] // opened for a moment: still shows a sliver
+    [InlineData(100, 0, 0.03)]    // length unknown: still shows a sliver
+    [InlineData(3000, 6000, 0.5)] // far enough along: the real fraction
+    public void ContinueCard_ShowsAtLeastTheMinimumBar(double position, double duration, double expected)
+    {
+        var card = PosterCardViewModel.For(
+            FakeLibrary.Resume(1, "Klaus", position: position, duration: duration), new PosterLoader((_, _, _) => Task.FromResult<string?>(null)), _ => { });
+
+        Assert.Equal(expected, card.Progress);
+        Assert.True(card.HasProgress);
+    }
+
+    [AvaloniaFact]
+    public void ContinueCard_ProgressBarStaysInsideThePoster()
+    {
+        var card = PosterCardViewModel.For(FakeLibrary.Resume(1, "Klaus", position: 60, duration: 6000), Posters.None(), _ => { });
+        var view = new PosterCard { DataContext = card };
+        var window = new Window { Content = view };
+        window.Show();
+        Ui.Flush();
+
+        var bar = view.GetVisualDescendants().OfType<ProgressBar>().Single();
+
+        // A bar wider than the poster is centred and spills over both edges, so a small fill lands outside it and is clipped.
+        Assert.Equal(0, bar.Bounds.X);
+        Assert.Equal(view.Width, bar.Bounds.Width);
+    }
+
+    [AvaloniaFact]
+    public async Task LeavingThePage_CancelsPosterWork()
+    {
+        var gate = new TaskCompletionSource<string?>();
+        var cancelled = false;
+        var loader = new PosterLoader(async (_, _, ct) =>
+        {
+            ct.Register(() => cancelled = true);
+            return await gate.Task;
+        });
+        var card = PosterCardViewModel.For(FakeLibrary.Card(1, "Coco", poster: "/c.jpg"), loader, _ => { });
+
+        card.RequestPoster();
+        await Task.Delay(50);
+        card.CancelPoster();
+        await Ui.WaitUntil(() => cancelled);
+        gate.SetResult("late");
+        await Task.Delay(50);
+        Ui.Flush();
+
+        Assert.Null(card.PosterLocalPath); // a late answer for a card nobody shows is dropped
+    }
+
+    [AvaloniaFact]
+    public async Task LibraryChange_ReloadsTheGridOnlyWhileItIsOpen()
+    {
+        _library.TitleCards.Add(FakeLibrary.Card(1, "Coco"));
+        var (shell, _) = await LoadedHome();
+        Assert.Empty(_library.TitleQueries); // Home is open: the big grids stay untouched
+
+        shell.NavigateCommand.Execute(MainWindowViewModel.MoviesPage);
+        var grid = Assert.IsType<TitleGridViewModel>(shell.CurrentPage);
+        await Ui.WaitUntil(() => grid.IsLoaded);
+        var queries = _library.TitleQueries.Count;
+
+        _library.TitleCards.Add(FakeLibrary.Card(2, "Heat"));
+        _library.RaiseChanged();
+        Ui.Flush();
+        await Ui.WaitUntil(() => grid.Items.Count == 2);
+
+        Assert.True(_library.TitleQueries.Count > queries);
+    }
+
+    private sealed class IdleFolderActions : IFolderActions
+    {
+        public Task<FolderOutcome> AddAsync(string path) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> RemoveAsync(int folderId) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> SetEnabledAsync(int folderId, bool enabled) => Task.FromResult(FolderOutcome.Done);
+
+        public Task<FolderOutcome> RepointAsync(int folderId, string newPath) => Task.FromResult(FolderOutcome.Done);
+
+        public Task WhenIdleAsync() => Task.CompletedTask;
+    }
+}

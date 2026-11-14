@@ -1,0 +1,11 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:CozyCouch.Desktop.Views"
+        x:Class="CozyCouch.Desktop.Views.ConnectDialog"
+        Title="CozyCouch" Width="520" SizeToContent="Height" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <!-- Takes the focus from a text box when the viewer presses empty space (it is no tab stop). -->
+    <Panel x:Name="Root" Background="Transparent" Focusable="True" IsTabStop="False" PointerPressed="OnRootPressed">
+        <views:ConnectView x:Name="Connect" Margin="32,12,32,32" />
+    </Panel>
+</Window>

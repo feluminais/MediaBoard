@@ -1,0 +1,48 @@
+<views:PosterHost xmlns="https://github.com/avaloniaui"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+                  xmlns:views="using:CozyCouch.Desktop.Views"
+                  xmlns:controls="using:CozyCouch.Desktop.Controls"
+                  x:Class="CozyCouch.Desktop.Views.PosterCard"
+                  x:DataType="vm:PosterCardViewModel"
+                  Width="{DynamicResource PosterWidth}">
+    <!-- Top-aligned: cards in a row stretch to the tallest one, and a card without a subtitle would otherwise sit centred in that height.
+         Two hit areas: the poster runs OpenCommand (plays the file on a Continue watching card) and the text opens the title page. -->
+    <StackPanel Spacing="6" VerticalAlignment="Top" Classes.dimmed="{Binding IsDimmed}">
+        <StackPanel.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Remove from list" Command="{Binding RemoveCommand}" />
+            </ContextMenu>
+        </StackPanel.ContextMenu>
+        <Button Classes="card" Command="{Binding OpenCommand}">
+            <Panel Width="{DynamicResource PosterWidth}" Height="{DynamicResource PosterHeight}">
+                <!-- The poster and progress bar are clipped to the rounded corners; the hover ring is a separate border on top,
+                     so the image's square corners never poke over its inside edge. -->
+                <Border CornerRadius="8" ClipToBounds="True">
+                    <Panel>
+                        <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="{DynamicResource PosterDecodeWidth}" />
+                        <ProgressBar VerticalAlignment="Bottom" Height="4" MinWidth="0" MinHeight="0" Minimum="0" Maximum="1"
+                                     Value="{Binding Progress}" IsVisible="{Binding HasProgress}" />
+                    </Panel>
+                </Border>
+                <!-- Shown on hover or keyboard focus of a Continue watching card, to say a click starts the file. -->
+                <Border Classes="playOverlay" Width="52" Height="52" CornerRadius="26" Background="#99404040"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                        IsVisible="{Binding CanPlay}">
+                    <Path Data="M0,0 L16,9 L0,18 Z" Fill="White" Stretch="Uniform" Width="18" Height="18" Margin="4,0,0,0" />
+                </Border>
+                <Border Classes="frame" CornerRadius="8" IsHitTestVisible="False" />
+            </Panel>
+        </Button>
+        <!-- Only a Continue watching card has two targets worth a Tab stop; on any other card both open the title. -->
+        <Button Classes="card cardText" HorizontalAlignment="Stretch" Command="{Binding OpenTitleCommand}"
+                IsTabStop="{Binding CanPlay}">
+            <StackPanel Spacing="6">
+                <TextBlock Classes="cardTitle" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding Name}" />
+                <TextBlock Classes="muted" Text="{Binding Subtitle}" FontSize="{DynamicResource SmallFontSize}" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding HasSubtitle}" />
+            </StackPanel>
+        </Button>
+    </StackPanel>
+</views:PosterHost>

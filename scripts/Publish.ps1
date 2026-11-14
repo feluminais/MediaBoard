@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Builds the self-contained win-x64 folder of MediaBoard and zips it, so a PC with no .NET can run it.
+    Builds the self-contained win-x64 folder of CozyCouch and zips it, so a PC with no .NET can run it.
 
 .DESCRIPTION
     Refuses to run when the working tree has uncommitted changes, so a zip always matches a commit. The folder carries
     .NET and ASP.NET Core (the desktop app hosts the sharing server). It holds no debug symbols and none of your data:
-    a published app keeps its library, settings and certificate under %LOCALAPPDATA%\MediaBoard, never beside the exe.
+    a published app keeps its library, settings and certificate under %LOCALAPPDATA%\CozyCouch, never beside the exe.
     Nothing is signed, so Windows SmartScreen warns once on the first start.
 
 .PARAMETER Version
@@ -38,20 +38,20 @@ if (-not $Output) { $Output = 'artifacts' }
 if (-not [System.IO.Path]::IsPathRooted($Output)) { $Output = Join-Path $root $Output }
 $Output = [System.IO.Path]::GetFullPath($Output)
 
-$name = "MediaBoard-$Version-win-x64"
+$name = "CozyCouch-$Version-win-x64"
 $folder = Join-Path $Output $name
 $zip = Join-Path $Output "$name.zip"
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 
-# MediaBoardNoShortcut: a publish builds first, and a build would move the desktop shortcut to this folder.
-dotnet publish src/MediaBoard.Desktop -c Release -r win-x64 --self-contained true -o $folder `
-    -p:MediaBoardNoShortcut=true -p:DebugType=None -p:DebugSymbols=false -p:Version=$Version
+# CozyCouchNoShortcut: a publish builds first, and a build would move the desktop shortcut to this folder.
+dotnet publish src/CozyCouch.Desktop -c Release -r win-x64 --self-contained true -o $folder `
+    -p:CozyCouchNoShortcut=true -p:DebugType=None -p:DebugSymbols=false -p:Version=$Version
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 
 # The folder must hold the runtimes, and nothing a user or this repository's tooling left behind.
-foreach ($needed in 'MediaBoard.Desktop.exe', 'hostfxr.dll', 'coreclr.dll', 'Microsoft.AspNetCore.dll', 'Microsoft.AspNetCore.Server.Kestrel.Core.dll') {
+foreach ($needed in 'CozyCouch.Desktop.exe', 'hostfxr.dll', 'coreclr.dll', 'Microsoft.AspNetCore.dll', 'Microsoft.AspNetCore.Server.Kestrel.Core.dll') {
     if (-not (Test-Path -LiteralPath (Join-Path $folder $needed))) { throw "The published folder has no $needed." }
 }
 # A package can bring its own symbols (libHarfBuzzSharp.pdb); the app ships none.

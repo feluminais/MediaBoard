@@ -1,0 +1,120 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+        x:Class="CozyCouch.Desktop.Views.SharingDialog"
+        x:DataType="vm:SharingPanel"
+        Title="Sharing"
+        Width="480" MaxHeight="640" SizeToContent="Height" CanResize="False"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+    <Window.DataTemplates>
+        <DataTemplate DataType="vm:AddPersonStep">
+            <StackPanel Spacing="12">
+                <TextBlock Text="Add person" FontSize="{DynamicResource DialogTitleFontSize}" FontWeight="SemiBold" />
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Name" />
+                    <TextBox Text="{Binding Name}" MaxLength="64" AutomationProperties.Name="Name" />
+                    <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource ErrorTextBrush}" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="What they can see" />
+                    <CheckBox Content="All folders" IsChecked="{Binding AllFolders}" />
+                    <TextBlock Classes="muted" Text="No folders yet" IsVisible="{Binding HasNoFolders}" />
+                    <ItemsControl ItemsSource="{Binding Folders}" IsVisible="{Binding !AllFolders}" MaxHeight="200">
+                        <ItemsControl.Template>
+                            <ControlTemplate>
+                                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FolderChoice">
+                                <CheckBox IsChecked="{Binding IsChecked}" ToolTip.Tip="{Binding Path}">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                </CheckBox>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Content="Cancel" MinWidth="88" IsCancel="True"
+                            Command="{Binding $parent[Window].((vm:SharingPanel)DataContext).CloseCommand}" />
+                    <Button Content="{Binding AddLabel}" MinWidth="88" Classes="accent" IsDefault="True" Command="{Binding CreateCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:SetPasswordStep">
+            <StackPanel Spacing="12">
+                <TextBlock Text="Set password" FontSize="{DynamicResource DialogTitleFontSize}" FontWeight="SemiBold" />
+                <TextBlock Classes="muted" Text="{Binding Hint}" TextWrapping="Wrap" />
+                <TextBox Text="{Binding Password}" PasswordChar="&#x2022;" PlaceholderText="Password"
+                         AutomationProperties.Name="Password" />
+                <TextBox Text="{Binding Repeat}" PasswordChar="&#x2022;" PlaceholderText="Password again"
+                         AutomationProperties.Name="Password again" />
+                <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource ErrorTextBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Content="Cancel" MinWidth="88" IsCancel="True"
+                            Command="{Binding $parent[Window].((vm:SharingPanel)DataContext).CloseCommand}" />
+                    <Button Content="{Binding SaveLabel}" MinWidth="88" Classes="accent" IsDefault="True" Command="{Binding SaveCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:InviteStep">
+            <StackPanel Spacing="12">
+                <TextBlock Text="{Binding Heading}" FontSize="{DynamicResource DialogTitleFontSize}" FontWeight="SemiBold"
+                           TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Note}" TextWrapping="Wrap" />
+                <Border Classes="panel" Padding="12">
+                    <SelectableTextBlock Text="{Binding Invite}" FontFamily="Consolas" TextWrapping="Wrap" IsTabStop="False" />
+                </Border>
+                <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource ErrorTextBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Content="{Binding CopyLabel}" MinWidth="88" Classes="accent" Command="{Binding CopyCommand}" />
+                    <Button Content="{Binding DoneLabel}" MinWidth="88" IsCancel="True"
+                            Command="{Binding $parent[Window].((vm:SharingPanel)DataContext).CloseCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:ActivityStep">
+            <StackPanel Spacing="12">
+                <TextBlock Text="Activity" FontSize="{DynamicResource DialogTitleFontSize}" FontWeight="SemiBold" />
+                <ScrollViewer Height="400" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SharingActivityRow">
+                                <DockPanel Margin="0,2">
+                                    <TextBlock DockPanel.Dock="Left" Classes="muted" Text="{Binding When}" Width="84"
+                                               FontSize="{DynamicResource SmallFontSize}" VerticalAlignment="Center" />
+                                    <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" IsTabStop="False" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <Button Content="Close" MinWidth="88" HorizontalAlignment="Right" IsCancel="True"
+                        Command="{Binding $parent[Window].((vm:SharingPanel)DataContext).CloseCommand}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.DataTemplates>
+
+    <!-- Takes the focus from a text box when the owner presses empty space (it is no tab stop). -->
+    <Panel x:Name="Root" Background="Transparent" Focusable="True" IsTabStop="False" PointerPressed="OnRootPressed">
+        <ContentControl Content="{Binding Step}" Margin="24,4,24,24" />
+    </Panel>
+</Window>

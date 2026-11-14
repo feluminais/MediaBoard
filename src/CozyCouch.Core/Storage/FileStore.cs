@@ -1,0 +1,153 @@
+using System.Globalization;
+using Dapper;
+using CozyCouch.Core.Parsing;
+
+namespace CozyCouch.Core.Storage;
+
+/// <param name="RelPath">Path below the library folder, with backslashes.</param>
+/// <param name="FirstSeen">When the scanner first saw the file, in UTC.</param>
+public sealed record MediaFileRow(
+    int Id,
+    int FolderId,
+    string RelPath,
+    long Size,
+    DateTime FirstSeen,
+    bool Missing,
+    ParsedMedia Parsed,
+    string Status,
+    double? DurationS);
+
+/// <summary>Read access to the files table. The scanner owns the writes; only a delete from disk removes rows besides it.</summary>
+public sealed class FileStore(LibraryDatabase db)
+{
+    private const string Select =
+        "SELECT id, folder_id AS FolderId, rel_path AS RelPath, size, first_seen AS FirstSeen, missing, " +
+        "parsed_json AS ParsedJson, status, duration_s AS DurationS FROM files";
+
+    public MediaFileRow? Get(int id)
+    {
+        using var connection = db.Open();
+        return connection.QuerySingleOrDefault<Row>($"{Select} WHERE id = @id", new { id })?.ToRow();
+    }
+
+    /// <summary>
+    /// The file at this absolute path, when it sits in a library folder that is switched on; null otherwise. The
+    /// comparison ignores case, as Windows does.
+    /// </summary>
+    public MediaFileRow? FindByPath(string fullPath)
+    {
+        string path;
+        try
+        {
+            path = Path.GetFullPath(fullPath);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        using var connection = db.Open();
+        var folders = connection.Query<(long Id, string Path)>("SELECT id, path FROM folders WHERE enabled = 1")
+            .OrderByDescending(f => f.Path.Length);
+        foreach (var folder in folders)
+        {
+            var root = Path.TrimEndingDirectorySeparator(folder.Path) + Path.DirectorySeparatorChar;
+            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var row = connection.QuerySingleOrDefault<Row>(
+                $"{Select} WHERE folder_id = @folderId AND rel_path = @relPath COLLATE NOCASE",
+                new { folderId = folder.Id, relPath = path[root.Length..].Replace('/', '\\') });
+            if (row is not null) return row.ToRow();
+        }
+
+        return null;
+    }
+
+    /// <summary>Every file with this status, missing ones included.</summary>
+    public IReadOnlyList<MediaFileRow> ByStatus(string status)
+    {
+        using var connection = db.Open();
+        return connection.Query<Row>($"{Select} WHERE status = @status ORDER BY id", new { status })
+            .Select(r => r.ToRow()).ToList();
+    }
+
+    /// <summary>Every file with this status in a folder that is switched on, missing ones included.</summary>
+    public IReadOnlyList<MediaFileRow> ByStatusInEnabledFolders(string status)
+    {
+        using var connection = db.Open();
+        return connection.Query<Row>(
+                $"{Select} WHERE status = @status AND folder_id IN (SELECT id FROM folders WHERE enabled = 1) ORDER BY id",
+                new { status })
+            .Select(r => r.ToRow()).ToList();
+    }
+
+    /// <summary>The file is still in the library and its folder is switched on (it may have been removed or disabled since it was read).</summary>
+    public bool IsActive(int id)
+    {
+        using var connection = db.Open();
+        return connection.ExecuteScalar<int>(
+            "SELECT EXISTS (SELECT 1 FROM files JOIN folders ON folders.id = files.folder_id WHERE files.id = @id AND folders.enabled = 1)",
+            new { id }) != 0;
+    }
+
+    public IReadOnlyList<MediaFileRow> ByFolder(int folderId)
+    {
+        using var connection = db.Open();
+        return connection.Query<Row>($"{Select} WHERE folder_id = @folderId ORDER BY id", new { folderId })
+            .Select(r => r.ToRow()).ToList();
+    }
+
+    /// <summary>Stores the probed length; the identification service is the only caller.</summary>
+    public void SetDuration(int id, double seconds)
+    {
+        using var connection = db.Open();
+        connection.Execute("UPDATE files SET duration_s = @seconds WHERE id = @id", new { id, seconds });
+    }
+
+    /// <summary>
+    /// Forgets files after they were sent to the Recycle Bin. By cascade their title and episode links, progress
+    /// and review candidates go too. Nothing on disk is touched.
+    /// </summary>
+    public void Remove(IEnumerable<int> ids)
+    {
+        using var connection = db.Open();
+        using var transaction = connection.BeginTransaction();
+        foreach (var id in ids) connection.Execute("DELETE FROM files WHERE id = @id", new { id }, transaction);
+        transaction.Commit();
+    }
+
+    /// <summary>The file's absolute path on disk.</summary>
+    public string FullPath(MediaFileRow file) =>
+        TryFullPath(file) ?? throw new InvalidOperationException($"Folder {file.FolderId} is no longer in the library.");
+
+    /// <summary>The file's absolute path on disk, or null when its folder was removed.</summary>
+    public string? TryFullPath(MediaFileRow file)
+    {
+        using var connection = db.Open();
+        var folder = connection.QuerySingleOrDefault<string>("SELECT path FROM folders WHERE id = @FolderId", new { file.FolderId });
+        return folder is null ? null : Path.Combine(folder, file.RelPath);
+    }
+
+    internal static string FormatTime(DateTimeOffset time) =>
+        time.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+
+    internal static DateTime ParseTime(string text) =>
+        DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private sealed class Row
+    {
+        public long Id { get; set; }
+        public long FolderId { get; set; }
+        public string RelPath { get; set; } = "";
+        public long Size { get; set; }
+        public string FirstSeen { get; set; } = "";
+        public long Missing { get; set; }
+        public string ParsedJson { get; set; } = "";
+        public string Status { get; set; } = "";
+        public double? DurationS { get; set; }
+
+        public MediaFileRow ToRow() => new(
+            (int)Id, (int)FolderId, RelPath, Size, ParseTime(FirstSeen), Missing != 0,
+            Storage.ParsedJson.Deserialize(ParsedJson), Status, DurationS);
+    }
+}

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the MediaBoard Setup.exe: publishes the self-contained app, then wraps it with Inno Setup.
+    Builds the CozyCouch Setup.exe: publishes the self-contained app, then wraps it with Inno Setup.
 
 .DESCRIPTION
     Runs Publish.ps1 (which refuses a working tree with uncommitted changes), then compiles scripts\Installer.iss.
@@ -38,10 +38,10 @@ if (-not $iscc) { throw 'Inno Setup 6 is not installed. Run: winget install JRSo
 & (Join-Path $PSScriptRoot 'Publish.ps1') -Version $Version -Output $Output
 if ($LASTEXITCODE -ne 0) { throw 'Publish.ps1 failed.' }
 
-$folder = Join-Path $Output "MediaBoard-$Version-win-x64"
+$folder = Join-Path $Output "CozyCouch-$Version-win-x64"
 & $iscc "/DAppVersion=$Version" "/DVersionNumber=$versionNumber" "/DSourceDir=$folder" "/DOutputDir=$Output" (Join-Path $PSScriptRoot 'Installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
 
-$setup = Join-Path $Output "MediaBoard-$Version-win-x64-setup.exe"
+$setup = Join-Path $Output "CozyCouch-$Version-win-x64-setup.exe"
 $megabytes = [math]::Round((Get-Item -LiteralPath $setup).Length / 1MB, 1)
 Write-Host "Wrote $setup ($megabytes MB)"

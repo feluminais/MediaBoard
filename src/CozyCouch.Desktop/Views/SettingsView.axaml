@@ -1,0 +1,174 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+             xmlns:players="using:CozyCouch.Core.Players"
+             x:Class="CozyCouch.Desktop.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+    <ScrollViewer>
+        <StackPanel Spacing="16" MaxWidth="{DynamicResource ReadingWidth}" HorizontalAlignment="Left" Margin="0,0,0,16">
+            <TextBlock Classes="pageTitle" Text="{Binding Title}" Margin="0,0,0,4" />
+
+            <Border Classes="panel" IsVisible="{Binding ShowAccount}">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="Account" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="4">
+                    <TextBlock Classes="muted" Text="Server" />
+                    <TextBlock Grid.Column="1" Text="{Binding Account.ServerName}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="1" Classes="muted" Text="Signed in as" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Account.AccountName}" TextTrimming="CharacterEllipsis" />
+                </Grid>
+
+                <StackPanel Spacing="8" IsVisible="{Binding Account.IsChangingPassword}">
+                    <StackPanel.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding Account.SavePasswordCommand}" />
+                        <KeyBinding Gesture="Escape" Command="{Binding Account.CancelChangePasswordCommand}" />
+                    </StackPanel.KeyBindings>
+                    <TextBox x:Name="CurrentPasswordBox" Text="{Binding Account.CurrentPassword}" PasswordChar="&#x2022;" IsUndoEnabled="False"
+                             IsReadOnly="{Binding Account.IsBusy}" PlaceholderText="Current password" AutomationProperties.Name="Current password" />
+                    <TextBox Text="{Binding Account.NewPassword}" PasswordChar="&#x2022;" IsUndoEnabled="False"
+                             IsReadOnly="{Binding Account.IsBusy}" PlaceholderText="New password" AutomationProperties.Name="New password" />
+                    <TextBox Text="{Binding Account.RepeatPassword}" PasswordChar="&#x2022;" IsUndoEnabled="False"
+                             IsReadOnly="{Binding Account.IsBusy}" PlaceholderText="New password again" AutomationProperties.Name="New password again" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="accent" Content="Save password" Command="{Binding Account.SavePasswordCommand}" />
+                        <Button Content="Cancel" Command="{Binding Account.CancelChangePasswordCommand}" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock Text="{Binding Account.PasswordMessage}" TextWrapping="Wrap" IsVisible="{Binding Account.HasPasswordMessage}" />
+
+                <WrapPanel>
+                    <Button x:Name="ChangePasswordButton" Content="Change password" Margin="0,0,8,8" Command="{Binding Account.BeginChangePasswordCommand}"
+                            IsVisible="{Binding !Account.IsChangingPassword}" />
+                    <Button Content="Sign out" Margin="0,0,8,8" Command="{Binding Account.SignOutCommand}" />
+                    <Button Content="Use this PC's library" Margin="0,0,8,8" Command="{Binding Account.UseThisPcCommand}" />
+                </WrapPanel>
+                <TextBlock Text="{Binding Account.LeaveMessage}" TextWrapping="Wrap" Foreground="{DynamicResource WarningTextBrush}"
+                           IsVisible="{Binding Account.HasLeaveMessage}" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel" IsVisible="{Binding ShowTmdbKey}">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="TMDB key" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="Needed to find titles, posters and ratings." />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"
+                            Command="{Binding SaveKeyCommand}" />
+                    <ToggleButton DockPanel.Dock="Right" Content="Show" Margin="8,0,0,0"
+                                  IsChecked="{Binding ShowKey}" />
+                    <TextBox x:Name="KeyBox" Text="{Binding TmdbKey}" PasswordChar="&#x2022;"
+                             RevealPassword="{Binding ShowKey}" PlaceholderText="Paste your key" />
+                </DockPanel>
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <Button Classes="textLink" Command="{Binding OpenHelpLinkCommand}">
+                        <TextBlock Text="{Binding HelpLinkText}" TextDecorations="Underline" />
+                    </Button>
+                    <TextBlock Classes="muted" Text="{Binding KeyStatus}" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="Player" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="{Binding BrowseLabel}" Margin="8,0,0,0"
+                            Command="{Binding BrowsePlayerCommand}" />
+                    <ComboBox ItemsSource="{Binding Players}" SelectedItem="{Binding SelectedPlayer}"
+                              HorizontalAlignment="Stretch" PlaceholderText="Choose a player">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="players:PlayerInfo">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </DockPanel>
+                <TextBlock Text="{Binding InUse}" TextWrapping="Wrap" />
+                <SelectableTextBlock Classes="muted" Text="{Binding InUseDetail}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="{Binding DisplayTitle}" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="8">
+                    <TextBlock Text="UI size" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinWidth="140" ItemsSource="{Binding UiSizeOptions}"
+                              SelectedItem="{Binding SelectedUiSize}" AutomationProperties.Name="UI size">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UiSizeOption">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Grid.Row="1" Text="Poster size" VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="140" ItemsSource="{Binding PosterSizeOptions}"
+                              SelectedItem="{Binding SelectedPosterSize}" AutomationProperties.Name="Poster size">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PosterSizeOption">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+                <CheckBox Content="{Binding GrowLabel}" IsChecked="{Binding GrowWithWindow}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding GrowHint}" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel" IsVisible="{Binding ShowOtherPlayers}">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="{Binding FollowTitle}" />
+                <CheckBox Content="{Binding FollowLabel}" IsChecked="{Binding FollowOtherPlayers}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding MpvHint}" />
+                <SelectableTextBlock Text="{Binding MpvLine}" FontFamily="Consolas" TextWrapping="Wrap" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding MpcHint}" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"
+                            Command="{Binding SaveMpcCommand}" />
+                    <TextBox Width="90" HorizontalAlignment="Left" Text="{Binding MpcPort}"
+                             PlaceholderText="MPC port" AutomationProperties.Name="MPC-HC port" />
+                </DockPanel>
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlcHint}" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="accent" Content="Save" Margin="8,0,0,0"
+                            Command="{Binding SaveVlcCommand}" />
+                    <TextBox DockPanel.Dock="Left" Width="90" Margin="0,0,8,0" Text="{Binding VlcPort}"
+                             PlaceholderText="VLC port" AutomationProperties.Name="VLC port" />
+                    <TextBox Text="{Binding VlcPassword}" PasswordChar="&#x2022;"
+                             PlaceholderText="VLC password" AutomationProperties.Name="VLC password" />
+                </DockPanel>
+                <TextBlock Classes="muted" Text="{Binding FollowStatus}" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel" IsVisible="{Binding CanConnectToServer}">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="Someone else's library" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Watch what someone shared with you. Your own library stays as it is." />
+                <Button Content="Connect to a server" Command="{Binding ConnectToServerCommand}" />
+                <TextBlock Text="{Binding ConnectMessage}" TextWrapping="Wrap" Foreground="{DynamicResource WarningTextBrush}"
+                           IsVisible="{Binding HasConnectMessage}" />
+            </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="rowTitle" Text="About" />
+                <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding AppName}" FontWeight="SemiBold" />
+                    <SelectableTextBlock Classes="muted" Text="{Binding Version}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Border Classes="tag" Padding="10,4" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding TmdbMark}" FontWeight="Bold" />
+                    </Border>
+                    <TextBlock Text="{Binding TmdbAttribution}" TextWrapping="Wrap" MaxWidth="480"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

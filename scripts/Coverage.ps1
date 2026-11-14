@@ -6,7 +6,7 @@
   Needs the local tools: dotnet tool restore
 #>
 param(
-    # Release avoids the file locks a running Debug MediaBoard.exe puts on the Debug output.
+    # Release avoids the file locks a running Debug CozyCouch.exe puts on the Debug output.
     [string]$Configuration = 'Debug'
 )
 $ErrorActionPreference = 'Stop'
@@ -17,12 +17,12 @@ try {
     $report = Join-Path $root 'coverage-report'
     Remove-Item $results, $report -Recurse -Force -ErrorAction SilentlyContinue
 
-    $env:MediaBoardNoShortcut = 'true'
+    $env:CozyCouchNoShortcut = 'true'
     dotnet tool restore | Out-Null
-    dotnet test --solution MediaBoard.sln --configuration $Configuration -- --parallel none --coverage --coverage-output-format cobertura --results-directory $results
+    dotnet test --solution CozyCouch.sln --configuration $Configuration -- --parallel none --coverage --coverage-output-format cobertura --results-directory $results
     if ($LASTEXITCODE -ne 0) { throw "dotnet test failed ($LASTEXITCODE)" }
 
-    dotnet reportgenerator "-reports:$results\**\*.cobertura.xml" "-targetdir:$report" '-assemblyfilters:+MediaBoard.*;-*.Tests' '-reporttypes:TextSummary;Html'
+    dotnet reportgenerator "-reports:$results\**\*.cobertura.xml" "-targetdir:$report" '-assemblyfilters:+CozyCouch.*;-*.Tests' '-reporttypes:TextSummary;Html'
     Get-Content (Join-Path $report 'Summary.txt')
     Write-Host "HTML report: $report\index.html"
 }

@@ -1,7 +1,7 @@
 # Sharing
 
 You can let family watch your library from their own PC. Sharing is off until you turn it on in the **Sharing** page, and
-the app must stay running, in the tray at least, for people to connect. It works through MediaBoard on both sides.
+the app must stay running, in the tray at least, for people to connect. It works through CozyCouch on both sides.
 
 ## Set it up
 
@@ -12,7 +12,7 @@ the app must stay running, in the tray at least, for people to connect. It works
    port on your router.
 3. Choose **Add person**, pick the folders they may see, and create an invite. It already carries your addresses, so just
    send it. An invite lasts 24 hours and works once.
-4. They run MediaBoard, choose **Connect to a server**, paste the invite and pick a password. Any Windows PC can run
+4. They run CozyCouch, choose **Connect to a server**, paste the invite and pick a password. Any Windows PC can run
    the zip that `scripts/Publish.ps1` builds: a self-contained win-x64 folder, written to `artifacts\` by default. The script
    needs all changes committed first.
 

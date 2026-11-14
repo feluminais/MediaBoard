@@ -1,26 +1,26 @@
-<h1 align="center">MediaBoard</h1>
+<h1 align="center">CozyCouch</h1>
 
 <p align="center">Browse your own films and series on Windows and pick up where you stopped, in the player you already use.</p>
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="MediaBoard Home page: Continue watching with progress bars under each poster, and Recently added below" width="860">
+  <img src="docs/screenshots/home.png" alt="CozyCouch Home page: Continue watching with progress bars under each poster, and Recently added below" width="860">
 </p>
 
-MediaBoard finds the movies and series in your folders, fetches descriptions, posters and ratings from TMDB, and remembers
+CozyCouch finds the movies and series in your folders, fetches descriptions, posters and ratings from TMDB, and remembers
 where you stopped. You play in MPC-HC, MPC-BE, mpv, VLC or any other program, and it keeps your progress from that player,
 even when you opened the player yourself.
 
 > [!NOTE]
 > Pre-release. Run it from a clone with the .NET 10 SDK. Works on Windows 11, in English.
 
-## Why MediaBoard
+## Why CozyCouch
 
 - One desktop app that runs while you have it open. [Sharing](#sharing) is the one feature that needs it to keep running.
-- Rename titles, hide them and fix matches in the app. The edits live in MediaBoard's database, so torrents keep seeding.
+- Rename titles, hide them and fix matches in the app. The edits live in CozyCouch's database, so torrents keep seeding.
 - It starts the player you already use and reads the position from it.
 - Browsing, playback and progress work offline. Titles are identified when the connection returns.
 
-MediaBoard is for a Windows PC that plays local files, with an option to let family watch from their own PC. To stream to
+CozyCouch is for a Windows PC that plays local files, with an option to let family watch from their own PC. To stream to
 phones and TVs, use a media server such as Plex or Jellyfin.
 
 ## Quick start
@@ -28,9 +28,9 @@ phones and TVs, use a media server such as Plex or Jellyfin.
 Needs Windows 11 and the .NET 10 SDK:
 
 ```bash
-git clone https://github.com/feluminais/MediaBoard
-cd MediaBoard
-dotnet run --project src/MediaBoard.Desktop
+git clone https://github.com/feluminais/CozyCouch
+cd CozyCouch
+dotnet run --project src/CozyCouch.Desktop
 ```
 
 Then:
@@ -40,7 +40,7 @@ Then:
 2. Open **Folders** and add the folders that hold your media. Removing a folder removes its titles from the library.
 3. Pick a player in **Settings**, or leave the detected one.
 
-Building also keeps a MediaBoard shortcut on your desktop pointed at the latest build. Set `MediaBoardNoShortcut=true` to skip it.
+Building also keeps a CozyCouch shortcut on your desktop pointed at the latest build. Set `CozyCouchNoShortcut=true` to skip it.
 
 <p align="center">
   <img src="docs/screenshots/library.png" alt="The Movies page: a grid of posters with year, a filter box and a sort menu" width="860">
@@ -50,7 +50,7 @@ Building also keeps a MediaBoard shortcut on your desktop pointed at the latest 
 
 ## Players
 
-MediaBoard detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from where you
+CozyCouch detects MPC-HC, MPC-BE, mpv and VLC, lets you pick a default or browse to any `.exe`, and resumes from where you
 stopped. It tracks position live in MPC-HC, MPC-BE, mpv and VLC, and launches any other program with
 the file and asks whether you finished when it closes. A file counts as watched at 90% of its duration.
 
@@ -59,7 +59,7 @@ Per-player details are in [docs/players.md](docs/players.md).
 
 ## Identification
 
-MediaBoard reads the whole path, folder names included, and handles release noise, fansub names and episode ranges. A
+CozyCouch reads the whole path, folder names included, and handles release noise, fansub names and episode ranges. A
 `[tmdbid-123]` tag in a file or folder name is a certain match. Uncertain matches go to **Needs review** with
 candidates and a search box, and your choice carries over to the other episodes in the same show folder. The full matching
 rules are in [docs/identification.md](docs/identification.md).
@@ -93,18 +93,18 @@ rules are in [docs/identification.md](docs/identification.md).
 ## Sharing
 
 Family can watch your library from their own PC. Sharing is off until you turn it on, the app must stay running (in the tray
-is enough), and both sides run MediaBoard. Each person gets a one-time invite for the folders you choose, and their progress is
+is enough), and both sides run CozyCouch. Each person gets a one-time invite for the folders you choose, and their progress is
 their own. The setup, ports and security details are in [docs/sharing.md](docs/sharing.md).
 
 ## Your data
 
-Everything is under `%LOCALAPPDATA%\MediaBoard`: the SQLite library, cached posters and the settings file, including your TMDB key.
+Everything is under `%LOCALAPPDATA%\CozyCouch`: the SQLite library, cached posters and the settings file, including your TMDB key.
 
 ## Development
 
 ```bash
 dotnet build
-dotnet test --solution MediaBoard.sln -- --parallel none
+dotnet test --solution CozyCouch.sln -- --parallel none
 ```
 
 `--parallel none` is needed because the headless Avalonia tests aren't reliable under default parallelism.
@@ -115,21 +115,21 @@ The solution has three projects under `src/`, each with a test project in `tests
 
 | Project | Covers |
 | --- | --- |
-| `MediaBoard.Desktop` | The Avalonia app. |
-| `MediaBoard.Core` | The UI-free core: scanning, parsing, identification, TMDB, storage, player adapters. |
-| `MediaBoard.Server` | The ASP.NET Core server behind [Sharing](#sharing), which the desktop app hosts. |
+| `CozyCouch.Desktop` | The Avalonia app. |
+| `CozyCouch.Core` | The UI-free core: scanning, parsing, identification, TMDB, storage, player adapters. |
+| `CozyCouch.Server` | The ASP.NET Core server behind [Sharing](#sharing), which the desktop app hosts. |
 
 The app reaches the library through an interface, so a shared library on another PC can stand in for the local one.
 
 After a fresh clone, run `dotnet tool restore && dotnet husky install` once. The pre-commit hook scans staged changes for
 secrets with [gitleaks](https://github.com/gitleaks/gitleaks) when it's installed. To point the app at a throwaway data folder,
-for tests or screenshots, set the `MEDIABOARD_DATA_DIR` environment variable before starting it.
+for tests or screenshots, set the `COZYCOUCH_DATA_DIR` environment variable before starting it.
 
-Bug reports and feature requests go to [Issues](https://github.com/feluminais/MediaBoard/issues).
+Bug reports and feature requests go to [Issues](https://github.com/feluminais/CozyCouch/issues).
 
 ## Licence
 
-Copyright (C) 2026 feluminais. MediaBoard is free software under the [GNU General Public License v3.0](LICENSE). You may
+Copyright (C) 2026 feluminais. CozyCouch is free software under the [GNU General Public License v3.0](LICENSE). You may
 use, change and share it, but a modified version you distribute must come with its source under the same licence.
 
 ## Credits

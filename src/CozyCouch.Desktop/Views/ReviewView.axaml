@@ -1,0 +1,78 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+             xmlns:controls="using:CozyCouch.Desktop.Controls"
+             xmlns:views="using:CozyCouch.Desktop.Views"
+             x:Class="CozyCouch.Desktop.Views.ReviewView"
+             x:DataType="vm:ReviewViewModel">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
+            <TextBlock Classes="pageTitle" Text="{Binding Title}" />
+            <TextBlock Classes="muted" Text="{Binding Hint}" IsVisible="{Binding HasHint}" />
+        </StackPanel>
+
+        <Panel>
+            <TextBlock Classes="muted" Text="{Binding EmptyText}" IsVisible="{Binding ShowEmpty}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+            <!-- One flat list (a header, then its rows) so only the rows on screen are built. An ItemsControl does not
+                 scroll by itself: without the ScrollViewer only the first screenful of rows is reachable. -->
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="List" ItemsSource="{Binding Items}" MaxWidth="980" Margin="0,0,16,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="vm:ReviewGroup">
+                        <DockPanel Margin="0,16,0,8">
+                            <TextBlock DockPanel.Dock="Right" Classes="muted" Text="{Binding CountText}" VerticalAlignment="Center" />
+                            <TextBlock Classes="rowTitle" Text="{Binding Header}" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:ReviewRowViewModel">
+                        <Border Classes="panel" Margin="0,0,0,10">
+                            <StackPanel Spacing="10">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                                        <Button Content="Search" Classes="small" Command="{Binding SearchCommand}" />
+                                        <Button Content="Not a movie or show" Classes="small" Command="{Binding NotMediaCommand}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <SelectableTextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Path}" TextTrimming="CharacterEllipsis" IsTabStop="False" />
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <ItemsControl ItemsSource="{Binding Candidates}" IsVisible="{Binding HasCandidates}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:ReviewCandidateViewModel">
+                                            <DockPanel Margin="0,0,0,6">
+                                                <Button DockPanel.Dock="Right" Content="Pick" Classes="small" VerticalAlignment="Center"
+                                                        Command="{Binding PickCommand}" />
+                                                <Border DockPanel.Dock="Left" Width="40" Height="60" CornerRadius="6" ClipToBounds="True" Margin="0,0,12,0">
+                                                    <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Name}" DecodeWidth="80" />
+                                                </Border>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Detail}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock Classes="muted" Text="{Binding Notice}" IsVisible="{Binding HasNotice}" />
+                                <Panel IsVisible="{Binding HasPicker}">
+                                    <views:FixMatchPickerView DataContext="{Binding Picker}" />
+                                </Panel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
+            </ItemsControl>
+            </ScrollViewer>
+        </Panel>
+    </DockPanel>
+</UserControl>

@@ -1,6 +1,6 @@
 # Identification
 
-MediaBoard reads the whole path, folder names included, and handles release noise, fansub names and episode ranges.
+CozyCouch reads the whole path, folder names included, and handles release noise, fansub names and episode ranges.
 
 1. A `[tmdbid-123]` or `[imdbid-tt123]` tag in a file or folder name, or an `.nfo` file with an ID, is a certain match.
 2. Otherwise the path is parsed: release noise (resolution, codec, source, group, language tags) is stripped, then the year,

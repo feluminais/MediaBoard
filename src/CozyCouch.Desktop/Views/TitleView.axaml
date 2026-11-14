@@ -1,0 +1,264 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+             xmlns:controls="using:CozyCouch.Desktop.Controls"
+             xmlns:views="using:CozyCouch.Desktop.Views"
+             x:Class="CozyCouch.Desktop.Views.TitleView"
+             x:DataType="vm:TitleViewModel">
+    <UserControl.Styles>
+        <!-- An episode row: a fixed height, so the list scrolls without its scroll bar moving. -->
+        <Style Selector="Border.episodeRow">
+            <Setter Property="Height" Value="56" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+        <Style Selector="Border.episodeRow:pointerover">
+            <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
+        </Style>
+        <Style Selector="Border.episodeRow.dimmed">
+            <Setter Property="Opacity" Value="0.5" />
+        </Style>
+        <Style Selector="Button.rowAction">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.rowAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+        <Style Selector="Button.rowAction.play">
+            <Setter Property="Foreground" Value="{DynamicResource LinkTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <!-- Rename and Hide show while the pointer is on the row or keyboard focus is in it. -->
+        <Style Selector="Border.episodeRow Button.quiet">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="Border.episodeRow:pointerover Button.quiet, Border.episodeRow:focus-within Button.quiet">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Border.episodeRow ProgressBar">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.textLink:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.textLink:disabled Path.icon">
+            <Setter Property="Opacity" Value="0.35" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- The page: its header, the episode graph and the listed season sit above a virtualized list of that season's episodes and
+         the loose files. Every row of the list is the same height, so a show with a thousand episodes builds only the rows
+         in view and the scroll bar does not move as it scrolls. -->
+    <ScrollViewer>
+        <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+                    <StackPanel Spacing="20" Margin="0,0,0,8">
+                        <Button Classes="textLink" Command="{Binding BackCommand}" HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <Path Classes="icon" Data="M12 4.5 L6.5 10 L12 15.5" Margin="-5,0,0,0" />
+                                <TextBlock Text="Back" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <TextBlock Classes="muted" Text="{Binding NotFoundText}" IsVisible="{Binding NotFound}" />
+                        <StackPanel Spacing="4" IsVisible="{Binding HasOfflineMessage}">
+                            <Border Classes="tag" HorizontalAlignment="Left" IsVisible="{Binding HasTag}">
+                                <TextBlock Text="{Binding Tag}" FontSize="{DynamicResource SmallFontSize}" />
+                            </Border>
+                            <TextBlock Classes="emptyTitle" Text="{Binding OfflineMessage}" />
+                            <TextBlock Classes="muted" Text="Connect to the internet to load details."
+                                       IsVisible="{Binding IsOnline}" />
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowDetails}">
+                            <Border Grid.Column="0" Width="{DynamicResource TitlePosterWidth}" Height="{DynamicResource TitlePosterHeight}" CornerRadius="10" ClipToBounds="True"
+                                    VerticalAlignment="Top" Margin="0,0,28,0">
+                                <controls:PosterImage LocalPath="{Binding PosterLocalPath}" Title="{Binding Header.Name}" DecodeWidth="{DynamicResource TitlePosterDecodeWidth}" />
+                            </Border>
+
+                            <StackPanel Grid.Column="1" Spacing="12">
+                                <!-- Name, renamed in place -->
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="pageTitle" Text="{Binding Header.Name}" TextWrapping="Wrap"
+                                               IsVisible="{Binding !Header.IsEditing}" />
+                                    <DockPanel IsVisible="{Binding Header.IsEditing}">
+                                        <Button DockPanel.Dock="Right" Content="Cancel" Margin="8,0,0,0" Command="{Binding Header.CancelRenameCommand}" />
+                                        <Button DockPanel.Dock="Right" Content="Save" Classes="accent" Margin="8,0,0,0" Command="{Binding Header.CommitRenameCommand}" />
+                                        <controls:RenameBox Text="{Binding Header.EditText}" Editing="{Binding Header.IsEditing}" PlaceholderText="Leave empty to reset">
+                                            <controls:RenameBox.KeyBindings>
+                                                <KeyBinding Gesture="Enter" Command="{Binding Header.CommitRenameCommand}" />
+                                                <KeyBinding Gesture="Escape" Command="{Binding Header.CancelRenameCommand}" />
+                                            </controls:RenameBox.KeyBindings>
+                                        </controls:RenameBox>
+                                    </DockPanel>
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="{Binding YearText}" Classes="muted" VerticalAlignment="Center"
+                                               IsVisible="{Binding YearText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                    <TextBlock Text="{Binding RatingText}" VerticalAlignment="Center"
+                                               IsVisible="{Binding RatingText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                    <Border Classes="tag" IsVisible="{Binding HasTag}">
+                                        <TextBlock Text="{Binding Tag}" FontSize="{DynamicResource SmallFontSize}" />
+                                    </Border>
+                                    <Border Classes="tag" IsVisible="{Binding ShowHiddenTag}">
+                                        <TextBlock Text="Hidden" FontSize="{DynamicResource SmallFontSize}" />
+                                    </Border>
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding Overview}" TextWrapping="Wrap" MaxWidth="640" HorizontalAlignment="Left"
+                                           IsVisible="{Binding Overview, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                                <!-- Play and the edits: library titles only -->
+                                <StackPanel Spacing="12" IsVisible="{Binding ShowActions}">
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <Button Classes="accent" Content="{Binding PlayText}" Command="{Binding PlayCommand}" Padding="18,8" />
+                                        <TextBlock Text="{Binding PlayReason}" Classes="muted" VerticalAlignment="Center"
+                                                   IsVisible="{Binding HasPlayReason}" />
+                                    </StackPanel>
+                                    <WrapPanel>
+                                        <Button Content="Rename" Command="{Binding Header.BeginRenameCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Content="{Binding HideText}" Command="{Binding ToggleHiddenCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Content="{Binding WatchedText}" Command="{Binding ToggleWatchedCommand}" Margin="0,0,8,8"
+                                                IsEnabled="{Binding CanMarkWatched}" />
+                                        <Button Content="Fix match" Command="{Binding FixMatchCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Content="Not a movie or show" Command="{Binding NotMediaCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                        <Button Classes="danger" Content="Delete from disk" Command="{Binding DeleteCommand}" Margin="0,0,8,8" IsVisible="{Binding CanEdit}" />
+                                    </WrapPanel>
+                                    <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" Foreground="{DynamicResource WarningTextBrush}"
+                                               IsVisible="{Binding HasNotice}" />
+
+                                    <Border Classes="panel" Padding="12" IsVisible="{Binding HasDeleteSummary}">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="Dismiss" Classes="small" VerticalAlignment="Top"
+                                                    Command="{Binding DismissSummaryCommand}" />
+                                            <ItemsControl ItemsSource="{Binding DeleteSummary}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:String">
+                                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- Fix match -->
+                                    <Panel IsVisible="{Binding HasPicker}">
+                                        <views:FixMatchPickerView DataContext="{Binding Picker}" />
+                                    </Panel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+            <ContentControl Content="{Binding Graph}">
+                <ContentControl.DataTemplates>
+                    <DataTemplate DataType="vm:EpisodeGraphViewModel">
+                        <views:EpisodeGraphView />
+                    </DataTemplate>
+                </ContentControl.DataTemplates>
+            </ContentControl>
+
+            <!-- A season's name, renamed in place -->
+            <ContentControl Content="{Binding ListedSeason}">
+                <ContentControl.DataTemplates>
+                    <DataTemplate DataType="vm:SeasonItem">
+                    <Grid Height="64" ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0" Classes.dimmed="{Binding IsHidden}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <Button Classes="textLink" Padding="6" Command="{Binding PreviousCommand}" AutomationProperties.Name="Previous season">
+                                <Path Classes="icon" Data="M12 4.5 L6.5 10 L12 15.5" />
+                            </Button>
+                            <Button Classes="textLink" Padding="6" Command="{Binding NextCommand}" AutomationProperties.Name="Next season">
+                                <Path Classes="icon" Data="M8 4.5 L13.5 10 L8 15.5" />
+                            </Button>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Classes="rowTitle" Text="{Binding Name}" TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsEditing}" />
+                            <DockPanel IsVisible="{Binding IsEditing}" Margin="0,0,12,0">
+                                <Button DockPanel.Dock="Right" Content="Cancel" Classes="small" Margin="6,0,0,0" Command="{Binding CancelRenameCommand}" />
+                                <Button DockPanel.Dock="Right" Content="Save" Classes="small accent" Margin="6,0,0,0" Command="{Binding CommitRenameCommand}" />
+                                <controls:RenameBox Text="{Binding EditText}" Editing="{Binding IsEditing}" PlaceholderText="Leave empty to reset">
+                                    <controls:RenameBox.KeyBindings>
+                                        <KeyBinding Gesture="Enter" Command="{Binding CommitRenameCommand}" />
+                                        <KeyBinding Gesture="Escape" Command="{Binding CancelRenameCommand}" />
+                                    </controls:RenameBox.KeyBindings>
+                                </controls:RenameBox>
+                            </DockPanel>
+                            <TextBlock Classes="muted" FontSize="{DynamicResource MetaFontSize}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" IsVisible="{Binding CanEdit}">
+                            <Button Content="Rename" Classes="rowAction" Command="{Binding BeginRenameCommand}" />
+                            <Button Content="{Binding HideText}" Classes="rowAction" Command="{Binding ToggleHiddenCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+                </ContentControl.DataTemplates>
+            </ContentControl>
+
+            <ItemsControl x:Name="List" ItemsSource="{Binding Rows}" MinHeight="{Binding ListHeight}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.DataTemplates>
+                    <!-- One episode, or one loose file: label, name (renamed in place), status, and the row's buttons. -->
+                    <DataTemplate DataType="vm:EpisodeItem">
+                    <Border Classes="episodeRow" Classes.dimmed="{Binding IsHidden}">
+                        <Grid ColumnDefinitions="3,56,*,132,Auto">
+                            <!-- The episode Play starts -->
+                            <Border Width="3" Margin="0,12" CornerRadius="2" Background="{DynamicResource AccentBrush}" IsVisible="{Binding IsNext}" />
+                            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Label}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                       IsVisible="{Binding HasLabel}" />
+
+                            <!-- Name and meta, renamed in place: both lines are always there, so every row is the same height. -->
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0" IsVisible="{Binding !IsEditing}">
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Classes="muted" FontSize="{DynamicResource SmallFontSize}" Text="{Binding Meta}" TextTrimming="CharacterEllipsis" MinHeight="16" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="3" Classes="muted" FontSize="{DynamicResource MetaFontSize}" Text="{Binding StatusText}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsEditing}" />
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="0,0,4,0">
+                                <Panel Width="64">
+                                    <Button Content="Play" Classes="rowAction play" Command="{Binding PlayCommand}" IsVisible="{Binding CanPlay}" />
+                                </Panel>
+                                <Panel Width="112">
+                                    <Button Content="{Binding WatchedText}" Classes="rowAction" Command="{Binding ToggleWatchedCommand}"
+                                            IsVisible="{Binding CanMarkWatched}" />
+                                </Panel>
+                                <Button Content="Rename" Classes="rowAction quiet" Width="64" Command="{Binding BeginRenameCommand}" IsVisible="{Binding CanEdit}" />
+                                <Button Content="{Binding HideText}" Classes="rowAction quiet" Width="56" Command="{Binding ToggleHiddenCommand}" IsVisible="{Binding CanEdit}" />
+                            </StackPanel>
+
+                            <DockPanel Grid.Column="2" Grid.ColumnSpan="2" VerticalAlignment="Center" Margin="0,0,12,0" IsVisible="{Binding IsEditing}">
+                                <Button DockPanel.Dock="Right" Content="Cancel" Classes="small" Margin="6,0,0,0" Command="{Binding CancelRenameCommand}" />
+                                <Button DockPanel.Dock="Right" Content="Save" Classes="small accent" Margin="6,0,0,0" Command="{Binding CommitRenameCommand}" />
+                                <controls:RenameBox Text="{Binding EditText}" Editing="{Binding IsEditing}" PlaceholderText="Leave empty to reset">
+                                    <controls:RenameBox.KeyBindings>
+                                        <KeyBinding Gesture="Enter" Command="{Binding CommitRenameCommand}" />
+                                        <KeyBinding Gesture="Escape" Command="{Binding CancelRenameCommand}" />
+                                    </controls:RenameBox.KeyBindings>
+                                </controls:RenameBox>
+                            </DockPanel>
+
+                            <!-- How far through the file the viewer is, along the row's lower edge -->
+                            <ProgressBar Grid.ColumnSpan="5" Height="2" MinHeight="0" Minimum="0" Maximum="1" Value="{Binding Progress}"
+                                         VerticalAlignment="Bottom" IsVisible="{Binding HasProgress}" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+
+                    <DataTemplate DataType="vm:FilesHeader">
+                    <TextBlock Classes="rowTitle" Text="Other files" Height="48" Padding="0,18,0,0" />
+                </DataTemplate>
+                </ItemsControl.DataTemplates>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

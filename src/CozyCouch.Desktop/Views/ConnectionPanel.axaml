@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CozyCouch.Desktop.ViewModels"
+             x:Class="CozyCouch.Desktop.Views.ConnectionPanel"
+             x:DataType="vm:ConnectionPanelViewModel">
+    <StackPanel Spacing="16" MaxWidth="520" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock x:Name="MessageText" Classes="emptyTitle" Text="{Binding Message}" TextWrapping="Wrap" TextAlignment="Center" />
+        <Button x:Name="ActionButton" Classes="accent" MinWidth="104" HorizontalAlignment="Center" HorizontalContentAlignment="Center"
+                Content="{Binding ActionLabel}" IsVisible="{Binding HasAction}" Command="{Binding ActCommand}" />
+        <TextBlock Classes="muted" Text="{Binding Note}" TextWrapping="Wrap" TextAlignment="Center" IsVisible="{Binding HasNote}" />
+    </StackPanel>
+</UserControl>

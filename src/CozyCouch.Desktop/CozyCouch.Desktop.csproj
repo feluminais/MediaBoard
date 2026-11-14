@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <!-- RecycleBin's SHFILEOPSTRUCTW layout in Core is x64-only. -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\app.ico" />
+    <AvaloniaResource Include="Assets\app-mark.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="12.0.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CozyCouch.Core\CozyCouch.Core.csproj" />
+    <ProjectReference Include="..\CozyCouch.Server\CozyCouch.Server.csproj" />
+  </ItemGroup>
+  <!-- A CozyCouch shortcut on the desktop follows the latest build (Debug or Release). Skipped on CI, or when
+       CozyCouchNoShortcut=true; a failure never fails the build. -->
+  <Target Name="UpdateDesktopShortcut" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' And '$(CI)' == '' And '$(CozyCouchNoShortcut)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Update-DesktopShortcut.ps1&quot; -Target &quot;$(TargetDir)$(TargetName).exe&quot; -Icon &quot;$(MSBuildProjectDirectory)\Assets\app.ico&quot;" IgnoreExitCode="true" StandardOutputImportance="low" />
+  </Target>
+</Project>

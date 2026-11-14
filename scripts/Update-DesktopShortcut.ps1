@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-    Keeps a MediaBoard shortcut on the desktop pointing at the build that was just made.
+    Keeps a CozyCouch shortcut on the desktop pointing at the build that was just made.
 
 .DESCRIPTION
-    Runs after every build of MediaBoard.Desktop (see the UpdateDesktopShortcut target in its project file). A rebuild
+    Runs after every build of CozyCouch.Desktop (see the UpdateDesktopShortcut target in its project file). A rebuild
     overwrites the exe in place, so the shortcut keeps working; this only rewrites it when the exe moved (Debug to
     Release) or the icon file changed, and then refreshes the Windows icon cache so the new icon shows. It never fails
     a build.
 
 .PARAMETER Target
-    The built MediaBoard.Desktop.exe.
+    The built CozyCouch.Desktop.exe.
 
 .PARAMETER Icon
     The .ico the exe is built with. A shortcut older than this file is rewritten.
@@ -17,7 +17,7 @@
 param(
     [Parameter(Mandatory)][string]$Target,
     [Parameter(Mandatory)][string]$Icon,
-    [string]$Name = 'MediaBoard'
+    [string]$Name = 'CozyCouch'
 )
 
 try {
@@ -44,6 +44,6 @@ try {
     & ie4uinit.exe -show 2>$null
 }
 catch {
-    Write-Warning "MediaBoard desktop shortcut not updated: $($_.Exception.Message)"
+    Write-Warning "CozyCouch desktop shortcut not updated: $($_.Exception.Message)"
 }
 exit 0
