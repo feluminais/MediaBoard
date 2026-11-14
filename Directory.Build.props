@@ -8,6 +8,6 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Meziantou.Analyzer" Version="3.0.320" PrivateAssets="all" />
+    <PackageReference Include="Meziantou.Analyzer" Version="3.0.321" PrivateAssets="all" />
   </ItemGroup>
 </Project>
