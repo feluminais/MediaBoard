@@ -11,7 +11,7 @@ where you stopped. You play in MPC-HC, MPC-BE, mpv, VLC or any other program, an
 even when you opened the player yourself.
 
 > [!NOTE]
-> Pre-release. Run it from a clone with the .NET 10 SDK. Works on Windows 11, in English.
+> 0.1 beta. Works on Windows 11, in English.
 
 ## Why CozyCouch
 
@@ -25,7 +25,11 @@ phones and TVs, use a media server such as Plex or Jellyfin.
 
 ## Quick start
 
-Needs Windows 11 and the .NET 10 SDK:
+Download `CozyCouch-0.1.0-beta-win-x64-setup.exe` from the [latest release](https://github.com/feluminais/CozyCouch/releases)
+and run it. It needs no .NET and no administrator rights, and the release also has a zip you can unpack anywhere. The
+installer is unsigned, so Windows SmartScreen warns once: choose **More info**, then **Run anyway**.
+
+To run from source instead, you need the .NET 10 SDK:
 
 ```bash
 git clone https://github.com/feluminais/CozyCouch
